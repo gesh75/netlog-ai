@@ -1,0 +1,73 @@
+[
+  {
+    "id": "junos-fw-01",
+    "file": "junos-fw-01.txt",
+    "platform": "junos",
+    "function": "firewall (Juniper SRX)",
+    "redacted": 29,
+    "by_rule": {
+      "junos-encrypted-password": 6,
+      "junos-quoted-encrypted": 4,
+      "junos-authentication-key": 4,
+      "openssh-host-key": 15
+    },
+    "orig_bytes": 97457,
+    "sanitized_bytes": 93758
+  },
+  {
+    "id": "junos-rt-01",
+    "file": "junos-rt-01.txt",
+    "platform": "junos",
+    "function": "router (Juniper MX)",
+    "redacted": 41,
+    "by_rule": {
+      "junos-encrypted-password": 12,
+      "junos-quoted-encrypted": 4,
+      "junos-authentication-key": 10,
+      "openssh-host-key": 15
+    },
+    "orig_bytes": 226205,
+    "sanitized_bytes": 222323
+  },
+  {
+    "id": "junos-sw-01",
+    "file": "junos-sw-01.txt",
+    "platform": "junos",
+    "function": "switch (Juniper EX)",
+    "redacted": 29,
+    "by_rule": {
+      "junos-encrypted-password": 6,
+      "junos-quoted-encrypted": 4,
+      "junos-authentication-key": 4,
+      "openssh-host-key": 15
+    },
+    "orig_bytes": 54793,
+    "sanitized_bytes": 51094
+  },
+  {
+    "id": "eos-rt-01",
+    "file": "eos-rt-01.txt",
+    "platform": "eos",
+    "function": "router (Arista EOS)",
+    "redacted": 15,
+    "by_rule": {
+      "eos-secret-7": 2,
+      "eos-bgp-password": 2,
+      "openssh-host-key": 11
+    },
+    "orig_bytes": 91354,
+    "sanitized_bytes": 89156
+  },
+  {
+    "id": "eos-sw-01",
+    "file": "eos-sw-01.txt",
+    "platform": "eos",
+    "function": "switch (Arista EOS)",
+    "redacted": 9,
+    "by_rule": {
+      "openssh-host-key": 9
+    },
+    "orig_bytes": 14987,
+    "sanitized_bytes": 13145
+  }
+]

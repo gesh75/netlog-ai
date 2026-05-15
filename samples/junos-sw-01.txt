@@ -1,0 +1,1815 @@
+
+## Last commit: 2026-02-02 14:16:53 GMT by isivkov
+version 23.4R2-S6.10;
+system {
+    host-name peer-a-sw-01a;
+    root-authentication {
+        encrypted-password "<REDACTED>";
+    }
+    login {
+        retry-options {
+            tries-before-disconnect 3;
+            backoff-threshold 3;
+            backoff-factor 10;
+            lockout-period 4;
+        }
+        idle-timeout 15;
+        class config_backup {
+            permissions [ secret view view-configuration ];
+            deny-commands all;
+        }
+        class config_control {
+            permissions [ configure control view ];
+        }
+        class network-operations-team {
+            permissions all;
+        }
+        class read_only {
+            permissions [ network routing view-configuration ];
+            allow-commands show;
+            deny-commands "(clear)|(file)|(file show)|(help)|(load)|(monitor)|(op)|(request)|(save)|(set)|(start)|(test)";
+            deny-configuration all;
+        }
+        user netadmin4 {
+            uid 1117;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user gandalf {
+            uid 2105;
+            class config_control;
+            authentication {
+                ssh-rsa "<REDACTED-SSH-KEY> gandalf";
+            }
+        }
+        user netadmin3 {
+            uid 1121;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user isivkov {
+            uid 1122;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> Ilya.Sivkov@YubiKey-5C-NFC";
+                ssh-ecdsa "<REDACTED-SSH-KEY> Ilya.Sivkov@YubiKey-5-NFC";
+            }
+        }
+        user junos_backup {
+            uid 2101;
+            class config_backup;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY>";
+            }
+        }
+        user netadmin5 {
+            uid 1112;
+            class read_only;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user netadmin2 {
+            uid 1123;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user oelliott {
+            uid 1120;
+            class read_only;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> oliver.elliott@YubiKey1";
+                ssh-ecdsa "<REDACTED-SSH-KEY> oliver.elliott@YubiKey2";
+            }
+        }
+        user sdaniels {
+            uid 1119;
+            class read_only;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> shaun Key Management";
+                ssh-ecdsa "<REDACTED-SSH-KEY> shaun Key Management";
+            }
+        }
+        user ttotev {
+            uid 1115;
+            class read_only;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> ttotev@mirkwoodmac";
+            }
+        }
+        user velvet {
+            uid 2000;
+            class network-operations-team;
+            authentication {
+                encrypted-password "<REDACTED>";
+            }
+        }
+        user netadmin1 {
+            uid 1116;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user netadmin6 {
+            uid 1125;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        message "\n\n=================================================================\n\n WARNING! \n\n\n This is a private computer system. Unauthorized access or use \n is prohibited and subject to prosecution and/or disciplinary \n action. All use of this system constitutes consent to \n monitoring at all times and users are not entitled to any \n expectation of privacy. If monitoring reveals possible evidence \n of violation of criminal statutes, this evidence and any other \n related information, including identification information about \n the user, may be provided to law enforcement officials. \n If monitoring reveals violations of security regulations or \n unauthorized use, employees who violate security regulations or \n make unauthorized use of this system are subject to appropriate \n disciplinary action.\n\n=================================================================\n\n";
+    }
+    services {
+        netconf {
+            ssh;
+        }
+        ssh {
+            root-login deny;
+            max-sessions-per-connection 32;
+        }
+    }
+    domain-name net.example.com;
+    time-zone GMT;
+    no-redirects;
+    no-redirects-ipv6;
+    no-ping-time-stamp;
+    arp {
+        aging-timer 5;
+    }
+    internet-options {
+        no-source-quench;
+    }
+    authentication-order password;
+    name-server {
+        10.1.251.12;
+        10.1.251.18;
+    }
+    syslog {
+        user * {
+            any emergency;
+            pfe none;
+        }
+        host 10.1.148.10 {
+            any notice;
+        }
+        host 10.1.238.240 {
+            any notice;
+            authorization info;
+            match "!(.*usage requires a license.*|.*is Unreachable.*|.*last message repeated.*|.*kernel time sync enabled.*|.*tcp_timer_keep.*|.*RT_IPSEC_BAD_SPI.*|.*JTASK_IO_CONNECT_FAILED.*|.*Scheduler Oinker.*|.*Frame 0.*|.*ms without yielding.*)";
+        }
+        file default-log-messages {
+            any any;
+            match "(requested 'commit' operation)|(requested 'commit synchronize' operation)|(copying configuration to juniper.save)|(commit complete)|ifAdminStatus|(FRU power)|(FRU removal)|(FRU insertion)|(link UP)|transitioned|Transferred|transfer-file|(license add)|(license delete)|(package -X update)|(package -X delete)|(FRU Online)|(FRU Offline)|(plugged in)|(unplugged)|QF_NODE|QF_SERVER_NODE_GROUP|QF_INTERCONNECT|QF_DIRECTOR|QF_NETWORK_NODE_GROUP|(Master Unchanged, Members Changed)|(Master Changed, Members Changed)|(Master Detected, Members Changed)|(vc add)|(vc delete)|(Master detected)|(Master changed)|(Backup detected)|(Backup changed)|(interface vcp-)";
+            archive {
+                size 5m;
+                files 10;
+            }
+            structured-data;
+        }
+        file messages {
+            any notice;
+            authorization info;
+            match "!(.*usage requires a license.*|.*is Unreachable.*|.*last message repeated.*|.*kernel time sync enabled.*|.*tcp_timer_keep.*|.*RT_IPSEC_BAD_SPI.*|.*JTASK_IO_CONNECT_FAILED.*|.*Scheduler Oinker.*|.*Frame 0.*|.*ms without yielding.*)";
+            archive {
+                size 5m;
+                files 10;
+            }
+            structured-data;
+        }
+        source-address 10.1.42.101;
+    }
+    ddos-protection {
+        global {
+            disable-fpc;
+        }
+    }
+    ntp {
+        server 10.1.251.49;
+        server 10.1.238.49;
+        server 10.1.247.49;
+        server 10.1.243.49;
+        source-address 10.1.42.101;
+    }
+}
+chassis {
+    aggregated-devices {
+        ethernet {
+            device-count 48;
+        }
+    }
+}
+interfaces {
+    et-0/0/0 {
+        description peer-a-sw-03a;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/1 {
+        description peer-a-sw-03b;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/2 {
+        description peer-a-sw-05a;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/3 {
+        description peer-a-sw-05b;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/4 {
+        description peer-a-sw-07a;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/5 {
+        description peer-a-sw-07b;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/6 {
+        description peer-a-sw-09a;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/7 {
+        description peer-a-sw-09b;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/8 {
+        description peer-a-sw-11a;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/9 {
+        description peer-a-sw-11b;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/10 {
+        description peer-a-sw-13a;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/11 {
+        description peer-a-sw-13b;
+        mtu 9216;
+        unit 0 {
+            family inet;
+            family inet6;
+        }
+    }
+    et-0/0/30 {
+        description peer-a-rt-01;
+        mtu 9216;
+        unit 0 {
+            family inet {
+                address 10.2.42.51/31;
+            }
+            family inet6 {
+                address 2a07:7940:dc:18:51:101:0:3/127;
+            }
+        }
+    }
+    et-0/0/31 {
+        description peer-a-rt-02;
+        mtu 9216;
+        unit 0 {
+            family inet {
+                address 10.2.42.53/31;
+            }
+            family inet6 {
+                address 2a07:7940:dc:18:52:101:0:3/127;
+            }
+        }
+    }
+    lo0 {
+        unit 0 {
+            family inet {
+                filter {
+                    input filter-all-in-one;
+                }
+                address 10.3.42.101/32;
+            }
+            family inet6 {
+                filter {
+                    input filter-all-in-one-v6;
+                }
+                address 2a07:7940:f:18::101/128;
+            }
+        }
+    }
+    vme {
+        unit 0 {
+            family inet {
+                filter {
+                    input filter-all-in-one;
+                }
+                address 10.1.42.101/24;
+            }
+            family inet6 {
+                filter {
+                    input filter-all-in-one-v6;
+                }
+            }
+        }
+    }
+}
+snmp {
+    location PEER-A;
+    v3 {
+        usm {
+            local-engine {
+                user snmp_librenms_amer {
+                    authentication-sha {
+                        authentication-key "REDACTED";
+                    }
+                    privacy-aes128 {
+                        privacy-key "<REDACTED>";
+                    }
+                }
+                user snmp_librenms_emea {
+                    authentication-sha {
+                        authentication-key "REDACTED";
+                    }
+                    privacy-aes128 {
+                        privacy-key "<REDACTED>";
+                    }
+                }
+                user snmp_librenms_apac {
+                    authentication-sha {
+                        authentication-key "REDACTED";
+                    }
+                    privacy-aes128 {
+                        privacy-key "<REDACTED>";
+                    }
+                }
+                user snmp_telegraf {
+                    authentication-sha {
+                        authentication-key "REDACTED";
+                    }
+                    privacy-aes128 {
+                        privacy-key "<REDACTED>";
+                    }
+                }
+            }
+        }
+        vacm {
+            security-to-group {
+                security-model usm {
+                    security-name snmp_librenms_amer {
+                        group snmp_group_ro;
+                    }
+                    security-name snmp_librenms_emea {
+                        group snmp_group_ro;
+                    }
+                    security-name snmp_librenms_apac {
+                        group snmp_group_ro;
+                    }
+                    security-name snmp_telegraf {
+                        group snmp_group_ro;
+                    }
+                }
+            }
+            access {
+                group snmp_group_ro {
+                    default-context-prefix {
+                        security-model usm {
+                            security-level privacy {
+                                read-view snmp_view;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    engine-id {
+        local 00c52c443d42;
+    }
+    view snmp_view {
+        oid .1 include;
+    }
+}
+policy-options {
+    prefix-list 636-to-peer-c-security {
+        198.51.100.188/27;
+        198.51.100.114/32;
+        192.0.2.122/32;
+        192.0.2.123/32;
+        203.0.113.129/32;
+        198.51.100.115/32;
+        198.51.100.179/24;
+        192.0.2.26/27;
+        203.0.113.106/25;
+        203.0.113.156/32;
+        192.0.2.197/25;
+        192.0.2.13/28;
+    }
+    prefix-list BGP-locals-inst-v4 {
+        apply-path "routing-instances <*> protocols bgp group <*> local-address <*.*>";
+    }
+    prefix-list BGP-locals-inst-v6 {
+        apply-path "routing-instances <*> protocols bgp group <*> neighbor <*:*> local-address <*:*>";
+    }
+    prefix-list BGP-locals-v4 {
+        apply-path "protocols bgp group <*> neighbor <*> local-address <*.*>";
+    }
+    prefix-list BGP-locals-v6 {
+        apply-path "protocols bgp group <*> neighbor <*:*> local-address <*:*>";
+    }
+    prefix-list BGP-neighbors-inst-v4 {
+        apply-path "routing-instances <*> protocols bgp group <*> neighbor <*.*>";
+    }
+    prefix-list BGP-neighbors-inst-v6 {
+        apply-path "routing-instances <*> protocols bgp group <*> neighbor <*:*>";
+    }
+    prefix-list BGP-neighbors-v4 {
+        apply-path "protocols bgp group <*> neighbor <*.*>";
+    }
+    prefix-list BGP-neighbors-v6 {
+        apply-path "protocols bgp group <*> neighbor <*:*>";
+    }
+    prefix-list DNS-servers-v4 {
+        apply-path "system name-server <*.*>";
+    }
+    prefix-list DNS-servers-v6 {
+        apply-path "system name-server <*:*>";
+    }
+    prefix-list GRPC-SERVERS-v4 {
+        10.1.238.240/32;
+        10.1.247.240/32;
+        10.1.251.240/32;
+    }
+    prefix-list LOCALS-v4 {
+        apply-path "interfaces <*> unit <*> family inet address <*>";
+    }
+    prefix-list LOCALS-v6 {
+        apply-path "interfaces <*> unit <*> family inet6 address <*>";
+    }
+    prefix-list MICROSOFT_IPS {
+        203.0.113.139/11;
+        203.0.113.157/12;
+        192.0.2.102/12;
+        192.0.2.169/14;
+    }
+    prefix-list NTP-servers-v4 {
+        apply-path "system ntp server <*.*>";
+    }
+    prefix-list NTP-servers-v6 {
+        apply-path "system ntp server <*:*>";
+    }
+    prefix-list RADIUS-servers {
+        apply-path "system radius-server <*>";
+    }
+    prefix-list SNMP-clients {
+        10.1.237.50/32;
+        10.1.238.199/32;
+        10.1.238.240/32;
+        10.1.243.199/32;
+        10.1.247.240/32;
+        10.1.251.42/32;
+        10.1.251.149/32;
+        10.1.251.199/32;
+        10.1.251.240/32;
+        10.1.253.149/32;
+    }
+    prefix-list example-lighthouse {
+        198.51.100.55/32;
+        203.0.113.65/32;
+    }
+    prefix-list example-office-networks {
+        192.0.2.216/32;
+        192.0.2.186/28;
+        203.0.113.99/32;
+        198.51.100.109/32;
+        192.0.2.170/29;
+        192.0.2.83/29;
+        198.51.100.138/32;
+        198.51.100.147/27;
+        192.0.2.190/32;
+        198.51.100.249/32;
+        198.51.100.91/32;
+        198.51.100.179/24;
+        198.51.100.210/32;
+        198.51.100.183/32;
+    }
+    prefix-list example-office-networks-v6 {
+        2405:a280:ff80::/44;
+        2a07:7940:fffd::/48;
+        2a07:7940:fffe::/48;
+        2a07:7940:ffff::/48;
+        2a07:7947:ff40::/44;
+        2a07:7947:ff80::/44;
+        2a07:7947:ffc0::/44;
+    }
+    prefix-list all-unit0-interfaces {
+        apply-path "interfaces <*> unit 0 family inet address <*>";
+    }
+    prefix-list dco-external-ssh {
+        198.51.100.19/29;
+        198.51.100.251/32;
+        203.0.113.47/32;
+        203.0.113.156/32;
+        192.0.2.240/32;
+    }
+    prefix-list dr2-public-ip-net {
+        198.51.100.117/25;
+        198.51.100.228/27;
+        192.0.2.193/25;
+        203.0.113.31/25;
+        192.0.2.189/24;
+        192.0.2.160/25;
+        198.51.100.229/25;
+        203.0.113.158/25;
+        198.51.100.215/26;
+        192.0.2.6/26;
+        198.51.100.245/26;
+        203.0.113.252/25;
+        192.0.2.180/25;
+        203.0.113.182/25;
+        198.51.100.230/24;
+        198.51.100.83/25;
+        203.0.113.116/26;
+        192.0.2.32/26;
+        198.51.100.140/26;
+        203.0.113.170/27;
+        192.0.2.183/25;
+        192.0.2.197/26;
+        192.0.2.112/26;
+        198.51.100.74/25;
+        192.0.2.219/24;
+        203.0.113.210/24;
+        203.0.113.248/25;
+        192.0.2.158/26;
+        198.51.100.153/25;
+        203.0.113.73/24;
+        198.51.100.29/25;
+        198.51.100.143/25;
+        203.0.113.105/25;
+        203.0.113.21/25;
+    }
+    prefix-list dr2-public-ip-net-v6 {
+        2602:80b:6012:97::/64;
+        2602:80b:6012:99::/64;
+        2602:80b:6036:97::/64;
+        2602:80b:6039:97::/64;
+        2602:80b:603a:97::/64;
+        2a07:7940:12:97::/64;
+        2a07:7940:12:99::/64;
+        2a07:7940:16:99::/64;
+        2a07:7940:18:97::/64;
+        2a07:7940:18:98::/64;
+        2a07:7940:18:99::/64;
+        2a07:7940:18:100::/64;
+    }
+    prefix-list elk-servers-v4 {
+        198.51.100.2/32;
+        203.0.113.32/32;
+        192.0.2.104/32;
+        203.0.113.79/32;
+    }
+    prefix-list global-example-fwag {
+        198.51.100.23/32;
+        192.0.2.211/32;
+        192.0.2.178/32;
+        198.51.100.57/32;
+        203.0.113.164/32;
+        192.0.2.58/32;
+        192.0.2.14/32;
+        192.0.2.171/32;
+        203.0.113.208/32;
+        203.0.113.242/32;
+        198.51.100.201/32;
+        192.0.2.162/32;
+        198.51.100.114/32;
+        192.0.2.76/32;
+        192.0.2.249/32;
+        203.0.113.160/32;
+        198.51.100.161/32;
+        192.0.2.103/32;
+        203.0.113.187/32;
+        203.0.113.140/32;
+        192.0.2.98/32;
+        198.51.100.226/32;
+        192.0.2.124/32;
+        203.0.113.46/32;
+        192.0.2.252/32;
+        203.0.113.86/32;
+        198.51.100.154/32;
+        198.51.100.144/32;
+        203.0.113.87/32;
+        192.0.2.137/32;
+        198.51.100.152/32;
+        192.0.2.234/32;
+        198.51.100.75/32;
+        203.0.113.246/32;
+        198.51.100.73/32;
+        203.0.113.28/32;
+        198.51.100.203/32;
+        198.51.100.193/32;
+        192.0.2.145/32;
+        203.0.113.91/32;
+        192.0.2.69/32;
+        198.51.100.39/32;
+        192.0.2.194/32;
+        192.0.2.36/32;
+        198.51.100.15/32;
+        192.0.2.218/32;
+        203.0.113.39/32;
+        192.0.2.48/32;
+        198.51.100.45/32;
+        192.0.2.174/32;
+        203.0.113.89/32;
+        198.51.100.162/32;
+        203.0.113.212/32;
+        198.51.100.231/32;
+        203.0.113.234/32;
+        203.0.113.23/32;
+        192.0.2.163/32;
+        198.51.100.3/32;
+        192.0.2.195/32;
+        192.0.2.67/32;
+        203.0.113.50/32;
+        198.51.100.195/32;
+        203.0.113.110/32;
+        192.0.2.207/32;
+        192.0.2.223/32;
+        198.51.100.238/32;
+        192.0.2.72/32;
+        203.0.113.159/32;
+        198.51.100.104/32;
+        192.0.2.127/32;
+        203.0.113.52/32;
+        192.0.2.82/32;
+        198.51.100.192/32;
+        192.0.2.224/32;
+        203.0.113.238/32;
+        198.51.100.207/32;
+        198.51.100.176/32;
+        198.51.100.112/32;
+        203.0.113.192/32;
+        203.0.113.223/32;
+        198.51.100.87/32;
+        192.0.2.99/32;
+        192.0.2.134/32;
+        198.51.100.16/32;
+        203.0.113.193/32;
+        192.0.2.198/32;
+        198.51.100.58/32;
+        198.51.100.35/32;
+        192.0.2.11/32;
+        203.0.113.55/32;
+        198.51.100.182/32;
+        203.0.113.161/32;
+        192.0.2.151/32;
+        203.0.113.29/32;
+        198.51.100.27/32;
+        203.0.113.201/32;
+        203.0.113.200/32;
+        192.0.2.70/32;
+        192.0.2.181/32;
+        192.0.2.33/32;
+        203.0.113.30/32;
+        198.51.100.131/32;
+        192.0.2.140/32;
+        203.0.113.218/32;
+        203.0.113.225/32;
+        198.51.100.133/32;
+        192.0.2.91/32;
+        198.51.100.165/32;
+        192.0.2.227/32;
+    }
+    prefix-list global-example-prefixes {
+        192.0.2.184/22;
+        198.51.100.10/22;
+        192.0.2.131/22;
+        198.51.100.101/22;
+        203.0.113.117/23;
+        203.0.113.184/23;
+        203.0.113.37/22;
+        203.0.113.38/22;
+        203.0.113.222/22;
+        192.0.2.136/23;
+        198.51.100.169/23;
+    }
+    prefix-list global-example-prefixes-v6 {
+        2405:a280:22::/48;
+        2405:a280:32::/48;
+        2405:a280:33::/48;
+        2405:a280:34::/48;
+        2405:a280:42::/48;
+        2405:a280:43::/48;
+        2602:80b:6012::/48;
+        2602:80b:6013::/48;
+        2602:80b:6014::/48;
+        2602:80b:6015::/48;
+        2602:80b:6016::/48;
+        2602:80b:6022::/48;
+        2602:80b:6032::/48;
+        2602:80b:6033::/48;
+        2602:80b:6034::/48;
+        2602:80b:6035::/48;
+        2602:80b:6036::/48;
+        2602:80b:6037::/48;
+        2602:80b:6038::/48;
+        2602:80b:6039::/48;
+        2602:80b:603a::/48;
+        2602:80b:6042::/48;
+        2602:80b:6044::/48;
+        2602:80b:6045::/48;
+        2602:80b:6046::/48;
+        2602:80b:6047::/48;
+        2a07:7940:12::/48;
+        2a07:7940:13::/48;
+        2a07:7940:15::/48;
+        2a07:7940:16::/48;
+        2a07:7940:17::/48;
+        2a07:7940:18::/48;
+        2a07:7940:41::/48;
+        2a07:7940:42::/48;
+        2a07:7940:44::/48;
+        2a07:7940:45::/48;
+        2a07:7940:46::/48;
+        2a07:7940:47::/48;
+        2a07:7940:48::/48;
+    }
+    prefix-list internet-DNS-servers-v4 {
+        203.0.113.85/32;
+        192.0.2.141/32;
+        192.0.2.209/32;
+        203.0.113.103/32;
+    }
+    prefix-list not-owned-by-example-prefixes {
+        192.0.2.203/26;
+        198.51.100.205/26;
+        198.51.100.105/24;
+        192.0.2.121/22;
+        203.0.113.107/24;
+        192.0.2.59/27;
+        203.0.113.5/26;
+        198.51.100.246/26;
+        198.51.100.102/26;
+        192.0.2.65/26;
+        203.0.113.168/24;
+        198.51.100.121/24;
+        203.0.113.145/27;
+        198.51.100.234/26;
+        192.0.2.202/26;
+        198.51.100.84/26;
+        198.51.100.237/27;
+        192.0.2.81/28;
+        192.0.2.228/24;
+        192.0.2.168/24;
+        192.0.2.189/24;
+        203.0.113.19/26;
+        192.0.2.177/24;
+        192.0.2.115/24;
+        198.51.100.123/24;
+        198.51.100.180/24;
+        203.0.113.153/24;
+        203.0.113.231/26;
+        203.0.113.243/27;
+        192.0.2.222/25;
+        203.0.113.57/26;
+        198.51.100.124/26;
+        192.0.2.132/27;
+        203.0.113.203/26;
+        192.0.2.61/24;
+        203.0.113.72/24;
+        203.0.113.154/27;
+        198.51.100.230/24;
+        192.0.2.210/25;
+        203.0.113.147/26;
+        203.0.113.54/24;
+        198.51.100.1/26;
+        198.51.100.248/27;
+        198.51.100.216/28;
+        198.51.100.26/26;
+        203.0.113.109/24;
+        192.0.2.185/26;
+        198.51.100.119/27;
+        198.51.100.12/27;
+        198.51.100.224/26;
+        192.0.2.13/28;
+        192.0.2.133/26;
+        192.0.2.3/25;
+        198.51.100.42/26;
+        198.51.100.222/27;
+        198.51.100.94/26;
+        203.0.113.204/27;
+        203.0.113.73/24;
+        203.0.113.125/24;
+        192.0.2.251/25;
+    }
+    prefix-list not-owned-by-example-prefixes-v6 {
+        2001:8c1:5840::/48;
+        2001:1a68:37::/48;
+        2401:a040:10::/48;
+        2402:1c00:101::/48;
+        2402:6c00:d003::/48;
+        2405:ec00:fa03::/48;
+        2806:1080:1500::/48;
+        2806:1080:1700::/48;
+        2a00:1a28:1154::/48;
+        2a00:1a28:2411::/48;
+        2a00:1f68:ff::/48;
+        2a00:da60:b01::/48;
+        2a01:288:400e::/48;
+        2a01:ae20:851:4092::/64;
+        2a02:480:3419::/48;
+        2a02:a40:324::/48;
+        2a02:2160:8001::/48;
+        2a05:a900:100::/48;
+        2a06:e8c0:a::/48;
+        2a07:9300:8000::/48;
+        2a0a:a142::/48;
+        2c0f:1f00::/48;
+    }
+    prefix-list og-att-lte-ranges-GLB {
+        198.51.100.219/32;
+        192.0.2.2/30;
+        192.0.2.173/30;
+    }
+    prefix-list on-prem-customers {
+        203.0.113.53/32;
+        192.0.2.73/32;
+        198.51.100.65/32;
+        198.51.100.212/32;
+        192.0.2.77/32;
+    }
+    prefix-list on-prem-servers {
+        198.51.100.2/32;
+        203.0.113.32/32;
+        192.0.2.104/32;
+        203.0.113.79/32;
+    }
+    prefix-list pondmobile-lte-ranges {
+        203.0.113.172/24;
+        198.51.100.239/24;
+    }
+    prefix-list pondmobile-lte-ranges-AP {
+        203.0.113.196/32;
+        203.0.113.114/32;
+    }
+    prefix-list pondmobile-lte-ranges-EU {
+        203.0.113.135/32;
+        192.0.2.196/31;
+        192.0.2.92/31;
+        198.51.100.113/32;
+        198.51.100.93/31;
+        198.51.100.13/31;
+        203.0.113.155/32;
+        198.51.100.128/31;
+        198.51.100.68/31;
+        203.0.113.236/32;
+        203.0.113.101/31;
+        192.0.2.179/31;
+        192.0.2.172/32;
+        198.51.100.191/31;
+        203.0.113.183/31;
+        203.0.113.166/32;
+        203.0.113.42/31;
+        198.51.100.181/31;
+        203.0.113.118/32;
+        192.0.2.39/31;
+        198.51.100.116/31;
+        198.51.100.103/29;
+        203.0.113.24/32;
+        203.0.113.216/31;
+        203.0.113.75/31;
+        203.0.113.221/32;
+        198.51.100.14/31;
+        198.51.100.159/31;
+        192.0.2.55/32;
+        198.51.100.125/31;
+        203.0.113.177/31;
+        192.0.2.204/29;
+        203.0.113.232/32;
+        203.0.113.127/31;
+        203.0.113.43/31;
+    }
+    prefix-list pondmobile-lte-ranges-US {
+        198.51.100.31/31;
+        192.0.2.43/29;
+        203.0.113.51/29;
+        203.0.113.219/30;
+        203.0.113.219/32;
+        198.51.100.60/31;
+        192.0.2.89/32;
+        203.0.113.56/30;
+        192.0.2.155/32;
+        198.51.100.170/31;
+        198.51.100.78/29;
+    }
+    prefix-list public-NTP-servers-v4 {
+        203.0.113.240/32;
+        192.0.2.100/32;
+        203.0.113.10/32;
+        203.0.113.112/32;
+    }
+    prefix-list public-NTP-servers-v6 {
+        2405:a280:33:66::49/128;
+        2602:80b:6012:66::49/128;
+        2a07:7940:12:66::49/128;
+        2a07:7940:14:66::49/128;
+    }
+    prefix-list source-ip-bfd {
+        10.2.0.0/16;
+        10.3.0.0/16;
+        198.51.100.76/24;
+    }
+    prefix-list source-ip-prefixes {
+        10.1.0.0/16;
+    }
+    prefix-list vme-interface {
+        apply-path "interfaces vme unit 0 family inet address <*>";
+    }
+    policy-statement BB_BGP_ADV_V4 {
+        term bgp-peer-a {
+            from {
+                route-filter 192.0.2.50/22 orlonger;
+                route-filter 198.51.100.215/24 orlonger;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement BB_BGP_ADV_V6 {
+        term bgp-peer-a {
+            from {
+                route-filter 2a07:7940:18::/48 exact;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement PEER-A-RT-01_BGP_RCV_V4 {
+        term accept-default-route {
+            from {
+                protocol bgp;
+                route-filter 0.0.0.0/0 exact;
+            }
+            then {
+                local-preference 150;
+                accept;
+            }
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement PEER-A-RT-01_BGP_RCV_V6 {
+        term accept-default-route {
+            from {
+                protocol bgp;
+                route-filter ::/0 exact;
+            }
+            then {
+                local-preference 150;
+                accept;
+            }
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement PEER-A-RT-02_BGP_RCV_V4 {
+        term 1 {
+            from {
+                protocol bgp;
+                route-filter 0.0.0.0/0 exact;
+            }
+            then accept;
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement PEER-A-RT-02_BGP_RCV_V6 {
+        term 1 {
+            from {
+                protocol bgp;
+                route-filter ::/0 exact;
+            }
+            then accept;
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement LEAF_BGP_ADV {
+        term 1 {
+            from {
+                family inet;
+                route-filter 10.3.42.0/24 orlonger;
+            }
+            then accept;
+        }
+        term 2 {
+            from {
+                family inet;
+                route-filter 0.0.0.0/0 exact;
+            }
+            then accept;
+        }
+        term 3 {
+            from {
+                family inet6;
+                protocol direct;
+                route-filter 2a07:7940:f:18::/64 orlonger;
+            }
+            then accept;
+        }
+        term 4 {
+            from {
+                family inet6;
+                route-filter ::/0 exact;
+            }
+            then accept;
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement LEAF_BGP_RCV {
+        term 1 {
+            from {
+                family inet;
+                route-filter 10.3.42.0/24 orlonger;
+            }
+            then accept;
+        }
+        term 2 {
+            from {
+                family inet;
+                route-filter 192.0.2.50/24 exact;
+                route-filter 192.0.2.71/24 exact;
+                route-filter 198.51.100.215/24 orlonger;
+                route-filter 192.0.2.219/24 exact;
+                route-filter 203.0.113.210/24 exact;
+            }
+            then accept;
+        }
+        term 3 {
+            from {
+                family inet6;
+                route-filter 2a07:7940:f:18::/64 orlonger;
+            }
+            then accept;
+        }
+        term 4 {
+            from {
+                family inet6;
+                route-filter 2a07:7940:18::/48 orlonger;
+            }
+            then accept;
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement loadbalance {
+        then {
+            load-balance per-flow;
+        }
+    }
+    policy-statement next-hop-self {
+        from route-type external;
+        then {
+            next-hop self;
+        }
+    }
+    as-list FABRIC_AS_LIST members 4200042000-4200042999;
+}
+firewall {
+    family inet {
+        filter filter-all-in-one {
+            term accept-bfd {
+                from {
+                    source-prefix-list {
+                        source-ip-bfd;
+                    }
+                    protocol udp;
+                    source-port 49152-65535;
+                    destination-port [ 3784-3785 4784 ];
+                }
+                then accept;
+            }
+            term accept-bgp-dst {
+                from {
+                    source-prefix-list {
+                        BGP-neighbors-v4;
+                        BGP-neighbors-inst-v4;
+                    }
+                    destination-prefix-list {
+                        BGP-locals-v4;
+                        BGP-locals-inst-v4;
+                    }
+                    protocol tcp;
+                    destination-port bgp;
+                }
+                then {
+                    count accept-bgp-dst;
+                    accept;
+                }
+            }
+            term accept-bgp-src {
+                from {
+                    source-prefix-list {
+                        BGP-neighbors-v4;
+                        BGP-neighbors-inst-v4;
+                    }
+                    destination-prefix-list {
+                        BGP-locals-v4;
+                        BGP-locals-inst-v4;
+                    }
+                    protocol tcp;
+                    source-port bgp;
+                }
+                then {
+                    count accept-bgp-src;
+                    accept;
+                }
+            }
+            term accept-dns {
+                from {
+                    source-prefix-list {
+                        DNS-servers-v4;
+                    }
+                    destination-prefix-list {
+                        vme-interface;
+                    }
+                    protocol [ udp tcp ];
+                    source-port 53;
+                }
+                then {
+                    policer management-1m;
+                    count accept-dns;
+                    accept;
+                }
+            }
+            term accept-icmp {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-reply echo-request time-exceeded unreachable source-quench router-advertisement parameter-problem timestamp ];
+                }
+                then {
+                    policer management-1m;
+                    count accept-icmp;
+                    accept;
+                }
+            }
+            term accept-netconf-mgmt {
+                from {
+                    source-prefix-list {
+                        source-ip-prefixes;
+                    }
+                    destination-prefix-list {
+                        vme-interface;
+                    }
+                    protocol tcp;
+                    destination-port 830;
+                }
+                then {
+                    count accept-netconf;
+                    log;
+                    accept;
+                }
+            }
+            term accept-ntp {
+                from {
+                    source-prefix-list {
+                        NTP-servers-v4;
+                        vme-interface;
+                    }
+                    destination-prefix-list {
+                        NTP-servers-v4;
+                        vme-interface;
+                    }
+                    protocol udp;
+                    destination-port ntp;
+                }
+                then {
+                    policer management-512k;
+                    count accept-ntp;
+                    accept;
+                }
+            }
+            term accept-grpc {
+                from {
+                    source-prefix-list {
+                        GRPC-SERVERS-v4;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v4;
+                    }
+                    protocol tcp;
+                    port 32767;
+                }
+                then accept;
+            }
+            term accept-ntp-source {
+                from {
+                    source-prefix-list {
+                        NTP-servers-v4;
+                        vme-interface;
+                    }
+                    destination-prefix-list {
+                        NTP-servers-v4;
+                        vme-interface;
+                    }
+                    protocol udp;
+                    source-port ntp;
+                }
+                then {
+                    policer management-512k;
+                    count accept-ntp-source;
+                    accept;
+                }
+            }
+            term accept-snmp {
+                from {
+                    source-prefix-list {
+                        SNMP-clients;
+                    }
+                    destination-prefix-list {
+                        vme-interface;
+                    }
+                    protocol udp;
+                    destination-port snmp;
+                }
+                then {
+                    count accept-snmp;
+                    accept;
+                }
+            }
+            term accept-ssh-mgmt {
+                from {
+                    source-prefix-list {
+                        source-ip-prefixes;
+                    }
+                    destination-prefix-list {
+                        vme-interface;
+                    }
+                    protocol tcp;
+                    destination-port ssh;
+                }
+                then {
+                    count accept-ssh;
+                    log;
+                    accept;
+                }
+            }
+            term accept-ssh {
+                from {
+                    source-prefix-list {
+                        dco-external-ssh;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v4;
+                    }
+                    protocol tcp;
+                    destination-port ssh;
+                }
+                then {
+                    policer management-5m;
+                    count accept-ssh;
+                    log;
+                    accept;
+                }
+            }
+            term accept-traceroute-icmp {
+                from {
+                    destination-prefix-list {
+                        all-unit0-interfaces;
+                    }
+                    protocol icmp;
+                    icmp-type [ echo-request echo-reply timestamp time-exceeded ];
+                }
+                then accept;
+            }
+            term accept-traceroute-udp {
+                from {
+                    destination-prefix-list {
+                        all-unit0-interfaces;
+                    }
+                    protocol udp;
+                    destination-port 33434-33534;
+                }
+                then accept;
+            }
+            term allow-tcp-est {
+                from {
+                    protocol tcp;
+                    tcp-established;
+                }
+                then {
+                    count accept-tcp-established;
+                    accept;
+                }
+            }
+            term discard-icmp-fragments {
+                from {
+                    is-fragment;
+                    protocol icmp;
+                }
+                then {
+                    count discard-icmp-fragments;
+                    discard;
+                }
+            }
+            term discard-icmp {
+                from {
+                    protocol icmp;
+                }
+                then {
+                    count discard-icmp;
+                    discard;
+                }
+            }
+            term discard-ip-options {
+                from {
+                    ip-options any;
+                }
+                then {
+                    count discard-ip-options;
+                    discard;
+                }
+            }
+            term discard-tcp {
+                from {
+                    protocol tcp;
+                }
+                then {
+                    count discard-tcp;
+                    discard;
+                }
+            }
+            term discard-TTL_1-unknown {
+                from {
+                    ttl 1;
+                }
+                then {
+                    count discard-TTL_1-unknown;
+                    discard;
+                }
+            }
+            term discard-udp {
+                from {
+                    protocol udp;
+                }
+                then {
+                    count discard-udp;
+                    discard;
+                }
+            }
+            term discard-unknown {
+                then {
+                    count discard-unknown;
+                    discard;
+                }
+            }
+        }
+    }
+    family inet6 {
+        filter filter-all-in-one-v6 {
+            term accept-bfd-v6 {
+                from {
+                    source-address {
+                        fe80::/10;
+                    }
+                    next-header udp;
+                    source-port 49152-65535;
+                    destination-port [ 3784-3785 4784 ];
+                }
+                then accept;
+            }
+            term accept-v6-icmp {
+                from {
+                    next-header icmp6;
+                    icmp-type [ echo-reply echo-request time-exceeded router-advertisement parameter-problem destination-unreachable packet-too-big router-solicit neighbor-solicit neighbor-advertisement redirect ];
+                }
+                then {
+                    policer management-1m;
+                    count accept-v6-icmp;
+                    accept;
+                }
+            }
+            term accept-tcp-est-v6 {
+                from {
+                    next-header tcp;
+                    tcp-established;
+                }
+                then {
+                    count accept-tcp-established-v6;
+                    accept;
+                }
+            }
+            term accept-v6bgp-dst {
+                from {
+                    source-address {
+                        fe80::/10;
+                    }
+                    destination-address {
+                        fe80::/10;
+                    }
+                    source-prefix-list {
+                        BGP-neighbors-v6;
+                        BGP-neighbors-inst-v6;
+                    }
+                    destination-prefix-list {
+                        BGP-locals-v6;
+                        BGP-locals-inst-v6;
+                    }
+                    next-header tcp;
+                    destination-port bgp;
+                }
+                then {
+                    count accept-v6bgp-dst;
+                    accept;
+                }
+            }
+            term accept-v6bgp-src {
+                from {
+                    source-address {
+                        fe80::/10;
+                    }
+                    destination-address {
+                        fe80::/10;
+                    }
+                    source-prefix-list {
+                        BGP-neighbors-v6;
+                        BGP-neighbors-inst-v6;
+                    }
+                    destination-prefix-list {
+                        BGP-locals-v6;
+                        BGP-locals-inst-v6;
+                    }
+                    next-header tcp;
+                    source-port bgp;
+                }
+                then {
+                    count accept-v6bgp-src;
+                    accept;
+                }
+            }
+            term accept-v6-traceroute-udp {
+                from {
+                    destination-prefix-list {
+                        LOCALS-v6;
+                    }
+                    next-header udp;
+                    destination-port 33434-33450;
+                    hop-limit 1;
+                }
+                then accept;
+            }
+            term accept-v6-traceroute-icmp {
+                from {
+                    destination-prefix-list {
+                        LOCALS-v6;
+                    }
+                    next-header icmp6;
+                    icmp-type [ echo-reply echo-request router-advertisement parameter-problem destination-unreachable packet-too-big router-solicit neighbor-solicit neighbor-advertisement redirect ];
+                    hop-limit 1;
+                }
+                then accept;
+            }
+            term accept-v6-dns {
+                from {
+                    source-prefix-list {
+                        DNS-servers-v6;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v6;
+                    }
+                    next-header udp;
+                    source-port 53;
+                }
+            }
+            term accept-v6-ntp {
+                from {
+                    source-prefix-list {
+                        NTP-servers-v6;
+                        LOCALS-v6;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v6;
+                    }
+                    next-header udp;
+                    destination-port ntp;
+                }
+                then accept;
+            }
+            term discard-v6-tcp {
+                from {
+                    next-header tcp;
+                }
+                then {
+                    count discard-v6-tcp;
+                    log;
+                    discard;
+                }
+            }
+            term discard-v6-udp {
+                from {
+                    next-header udp;
+                }
+                then {
+                    count discard-v6-udp;
+                    log;
+                    discard;
+                }
+            }
+            term discard-v6-icmp {
+                from {
+                    destination-prefix-list {
+                        LOCALS-v6;
+                    }
+                    next-header icmp6;
+                }
+                then {
+                    count discard-v6-icmp;
+                    log;
+                    discard;
+                }
+            }
+            term discard-v6-unknown {
+                then {
+                    count discard-v6-unknown;
+                    log;
+                    discard;
+                }
+            }
+        }
+        filter filter-discard-all-v6 {
+            term discard-all {
+                then discard;
+            }
+        }
+    }
+    policer additional-1m {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 625k;
+        }
+        then discard;
+    }
+    policer management-1m {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 625k;
+        }
+        then discard;
+    }
+    policer management-512k {
+        if-exceeding {
+            bandwidth-limit 512k;
+            burst-size-limit 25k;
+        }
+        then discard;
+    }
+    policer management-5m {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 625k;
+        }
+        then discard;
+    }
+}
+routing-options {
+    rib inet6.0 {
+        static {
+            route ::/0 {
+                next-hop 2a07:7940:dc:18:51:101::2;
+                preference 180;
+            }
+        }
+        aggregate {
+            route 2a07:7940:18::/48;
+        }
+    }
+    router-id 10.3.42.101;
+    static {
+        route 0.0.0.0/0 {
+            next-hop 10.2.42.50;
+            preference 180;
+        }
+        route 10.1.0.0/16 next-hop 10.1.42.1;
+    }
+    aggregate {
+        route 198.51.100.215/24;
+        route 192.0.2.50/24;
+        route 192.0.2.71/24;
+        route 192.0.2.219/24;
+        route 203.0.113.210/24;
+    }
+    forwarding-table {
+        export loadbalance;
+        ecmp-fast-reroute;
+        indirect-next-hop;
+        chained-composite-next-hop {
+            ingress {
+                evpn;
+            }
+        }
+    }
+}
+protocols {
+    router-advertisement {
+        interface et-0/0/0.0;
+        interface et-0/0/1.0;
+        interface et-0/0/2.0;
+        interface et-0/0/3.0;
+        interface et-0/0/4.0;
+        interface et-0/0/5.0;
+        interface et-0/0/6.0;
+        interface et-0/0/7.0;
+        interface et-0/0/8.0;
+        interface et-0/0/9.0;
+        interface et-0/0/10.0;
+        interface et-0/0/11.0;
+    }
+    bgp {
+        group PEER-A-RT-01_V4 {
+            type external;
+            import PEER-A-RT-01_BGP_RCV_V4;
+            family inet {
+                unicast;
+            }
+            export BB_BGP_ADV_V4;
+            peer-as 35793;
+            local-as 4200042101;
+            multipath {
+                multiple-as;
+            }
+            neighbor 10.2.42.50 {
+                description peer-a-rt-01;
+                local-address 10.2.42.51;
+            }
+        }
+        group PEER-A-RT-01_V6 {
+            type external;
+            import PEER-A-RT-01_BGP_RCV_V6;
+            family inet6 {
+                unicast;
+            }
+            export BB_BGP_ADV_V6;
+            peer-as 35793;
+            local-as 4200042101;
+            multipath {
+                multiple-as;
+            }
+            neighbor 2a07:7940:dc:18:51:101::2 {
+                description peer-a-rt-01;
+                local-address 2a07:7940:dc:18:51:101::3;
+            }
+        }
+        group PEER-A-RT-02_V4 {
+            type external;
+            import PEER-A-RT-02_BGP_RCV_V4;
+            family inet {
+                unicast;
+            }
+            export BB_BGP_ADV_V4;
+            peer-as 35793;
+            local-as 4200042101;
+            multipath {
+                multiple-as;
+            }
+            neighbor 10.2.42.52 {
+                description peer-a-rt-02;
+                local-address 10.2.42.53;
+            }
+        }
+        group PEER-A-RT-02_V6 {
+            type external;
+            import PEER-A-RT-02_BGP_RCV_V6;
+            family inet6 {
+                unicast;
+            }
+            export BB_BGP_ADV_V6;
+            peer-as 35793;
+            local-as 4200042101;
+            multipath {
+                multiple-as;
+            }
+            neighbor 2a07:7940:dc:18:52:101::2 {
+                description peer-a-rt-02;
+                local-address 2a07:7940:dc:18:52:101::3;
+            }
+        }
+        group LEAF {
+            type external;
+            import LEAF_BGP_RCV;
+            family inet {
+                unicast {
+                    extended-nexthop;
+                }
+            }
+            family inet6 {
+                unicast;
+            }
+            export LEAF_BGP_ADV;
+            local-as 4200042101;
+            multipath {
+                multiple-as;
+            }
+            bfd-liveness-detection {
+                minimum-interval 1200;
+                multiplier 3;
+                session-mode automatic;
+            }
+            dynamic-neighbor FABRIC {
+                peer-auto-discovery {
+                    family inet6 {
+                        ipv6-nd;
+                    }
+                    interface et-0/0/0.0;
+                    interface et-0/0/1.0;
+                    interface et-0/0/2.0;
+                    interface et-0/0/3.0;
+                    interface et-0/0/4.0;
+                    interface et-0/0/5.0;
+                    interface et-0/0/6.0;
+                    interface et-0/0/7.0;
+                    interface et-0/0/8.0;
+                    interface et-0/0/9.0;
+                    interface et-0/0/10.0;
+                    interface et-0/0/11.0;
+                }
+            }
+            peer-as-list FABRIC_AS_LIST;
+        }
+        traceoptions {
+            file bgp size 5m files 4 world-readable;
+            flag open;
+            flag normal;
+            flag state;
+        }
+        log-updown;
+        bgp-error-tolerance {
+            malformed-update-log-interval 10;
+            malformed-route-limit 5;
+        }
+        graceful-restart;
+    }
+    lldp {
+        port-id-subtype interface-name;
+        interface all;
+    }
+}

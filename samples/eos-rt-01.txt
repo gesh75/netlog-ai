@@ -1,0 +1,2134 @@
+! Command: show running-config
+! device: peer-a-rt-02 (DCS-7280CR3K-32D4A, EOS-4.29.2F)
+!
+! boot system flash:EOS-4.29.2F-x86_64.swi
+!
+enable password sha512 $6$REDACTED$REDACTED
+aaa root secret sha512 $6$REDACTED$REDACTED
+no username admin
+!
+username netadmin4 privilege 15 role network-admin nopassword
+username netadmin4 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username gandalf privilege 15 role network-admin secret sha512 $6$REDACTED$REDACTED
+username gandalf ssh-key <REDACTED-SSH-KEY> gandalf
+username netadmin3 privilege 15 role network-admin nopassword
+username netadmin3 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username gnmi role gnmi secret sha512 $6$REDACTED$REDACTED
+username isivkov privilege 15 role network-admin nopassword
+username isivkov ssh-key <REDACTED-SSH-KEY> Ilya.Sivkov@YubiKey-5C-NFC
+username netadmin5 privilege 15 role network-admin nopassword
+username netadmin5 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username netadmin2 privilege 15 role network-admin nopassword
+username netadmin2 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username nlucier privilege 15 role network-admin nopassword
+username nlucier ssh-key <REDACTED-SSH-KEY> Nate-USB-C
+username netadmin7 privilege 15 role network-admin nopassword
+username netadmin7 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username ttotev privilege 15 role network-admin nopassword
+username ttotev ssh-key <REDACTED-SSH-KEY> ttotev@mirkwoodmac
+username velvet privilege 15 role network-admin secret sha512 $6$REDACTED$REDACTED
+username netadmin1 privilege 15 role network-admin nopassword
+username netadmin1 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username netadmin6 privilege 15 role network-admin nopassword
+username netadmin6 ssh-key <REDACTED-SSH-KEY> admin@example.com
+!
+trace Octa setting */9
+trace OpenConfig setting */9
+!
+hardware counter feature traffic-policy in
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+no lldp run
+!
+logging host 10.1.238.240
+logging source-interface Loopback0
+!
+hostname peer-a-rt-02
+ip name-server vrf default 10.1.251.12
+ip name-server vrf default 10.1.251.18
+dns domain net.example.com
+!
+sflow sample 10000
+sflow polling-interval 60
+sflow destination 10.1.247.240 9995
+sflow source 10.3.254.7
+sflow run
+!
+sflow hardware acceleration
+!
+snmp-server engineID local 00c52c443d42
+snmp-server location PEER-A
+snmp-server view all iso included
+snmp-server group snmp_group_ro v3 priv read all
+snmp-server user snmp_librenms_amer snmp_group_ro v3 localized 00c52c443d42 auth sha a569f9de0791dc87e398b08d6beb633aa3616b53 priv aes b6ea0ed68da9f2c5b4261dd8cda6ef28
+snmp-server user snmp_librenms_apac snmp_group_ro v3 localized 00c52c443d42 auth sha 5898b7b357dc83c04a62e52d483b228d2b587ad8 priv aes 915c28c97f23e6e1ac93cdac095f04c2
+snmp-server user snmp_librenms_emea snmp_group_ro v3 localized 00c52c443d42 auth sha 6498c3bd709f03c23d88b343f0c32af991e52335 priv aes b930e688955e4c928e2e48770225a760
+snmp-server user snmp_telegraf snmp_group_ro v3 localized 00c52c443d42 auth sha 2b62057ea8477c30fce16f76e99984de56da29dd priv aes 715b03487c5dba6a34ae4fd1a53a8bf2
+!
+spanning-tree mode mstp
+!
+service unsupported-transceiver vendorUnlockKey d537d12d
+!
+vlan 2
+   name srx_redundancy
+!
+banner motd
+=================================================================
+WARNING!
+This is a private computer system. Unauthorized access or use
+is prohibited and subject to prosecution and/or disciplinary
+action. All use of this system constitutes consent to
+monitoring at all times and users are not entitled to any
+expectation of privacy. If monitoring reveals possible evidence
+of violation of criminal statutes, this evidence and any other
+related information, including identification information about
+the user, may be provided to law enforcement officials.
+If monitoring reveals violations of security regulations or
+unauthorized use, employees who violate security regulations or
+make unauthorized use of this system are subject to appropriate
+disciplinary action.
+=================================================================
+EOF
+!
+management api http-commands
+   no shutdown
+!
+management console
+   idle-timeout 15
+!
+management api gnmi
+   transport grpc default
+      port 32767
+      listen-addresses 10.3.254.135
+   provider eos-native
+!
+aaa authorization exec default local
+!
+interface Port-Channel1
+   description peer-a-rt-01
+   mtu 9202
+   no switchport
+   ip address 10.2.254.19/31
+   ipv6 enable
+   ipv6 address 2a07:7940:bb::b/127
+   isis enable BB
+   isis metric 10
+   isis network point-to-point
+!
+interface Port-Channel2
+   no switchport
+   mac-address router 0033.0001.3502
+!
+interface Port-Channel2.7
+   traffic-policy input filter-internet-traffic-combined
+   description peer-a-IX-NLIX
+   encapsulation dot1q vlan 7
+   mac-address router 0033.0001.3502
+   ip address 192.0.2.143/22
+   ipv6 address 2001:7f8:13::a503:5793:1/64
+   ipv6 nd ra disabled
+!
+interface Ethernet1/1
+   description peer-a-rt-01
+   channel-group 1 mode active
+   lacp timer fast
+!
+interface Ethernet2/1
+   description peer-a-rt-01
+   channel-group 1 mode active
+   lacp timer fast
+!
+interface Ethernet3/1
+   description peer-a-sw-01a
+   mtu 9202
+   no switchport
+   ip address 10.2.42.52/31
+   ipv6 enable
+   ipv6 address 2a07:7940:dc:18:52:101:0:2/127
+!
+interface Ethernet4/1
+   description peer-a-sw-01b
+   mtu 9202
+   no switchport
+   ip address 10.2.42.56/31
+   ipv6 enable
+   ipv6 address 2a07:7940:dc:18:52:121:0:2/127
+!
+interface Ethernet5/1
+   traffic-policy input filter-internet-traffic-combined
+   description peer-a-ISP-Arelion-IC-389418
+   no switchport
+   ip address 198.51.100.151/31
+   ipv6 address 2001:2035:0:6ff::2/126
+!
+interface Ethernet6/1
+   description peer-a-rt-02-WL-ams1-rt-02-LE-305750
+   mtu 9202
+   no switchport
+   ip address 198.51.100.88/31
+   ipv6 address 2a07:7940:bb::28/127
+   isis enable BB
+   isis metric 550
+   isis network point-to-point
+!
+interface Ethernet7/1
+!
+interface Ethernet8/1
+!
+interface Ethernet9/1
+!
+interface Ethernet10/1
+!
+interface Ethernet11/1
+!
+interface Ethernet12/1
+!
+interface Ethernet13/1
+!
+interface Ethernet14/1
+!
+interface Ethernet15/1
+!
+interface Ethernet16/1
+!
+interface Ethernet17/1
+!
+interface Ethernet18/1
+!
+interface Ethernet19/1
+!
+interface Ethernet20/1
+!
+interface Ethernet21/1
+!
+interface Ethernet22/1
+!
+interface Ethernet23/1
+!
+interface Ethernet24/1
+!
+interface Ethernet25/1
+   description peer-a-IX-NLIX
+   speed forced 10000full
+   channel-group 2 mode active
+   lacp timer fast
+!
+interface Ethernet25/2
+!
+interface Ethernet25/3
+!
+interface Ethernet25/4
+!
+interface Ethernet27/1
+   speed forced 10000full
+!
+interface Ethernet27/2
+!
+interface Ethernet27/3
+!
+interface Ethernet27/4
+!
+interface Ethernet29/1
+   description peer-a-ntw-infra-01
+   speed forced 10000full
+   no switchport
+!
+interface Ethernet29/2
+!
+interface Ethernet29/3
+!
+interface Ethernet29/4
+   description peer-a-fw-01b
+   speed forced 10000full
+   switchport access vlan 2
+!
+interface Ethernet31/1
+   speed forced 10000full
+!
+interface Ethernet31/2
+!
+interface Ethernet31/3
+!
+interface Ethernet31/4
+   description peer-a-fw-01a
+   speed forced 10000full
+   switchport access vlan 2
+!
+interface Ethernet33/1
+!
+interface Ethernet34/1
+!
+interface Ethernet35/1
+!
+interface Ethernet36/1
+!
+interface Loopback0
+   ip address 10.3.254.135/32
+   ipv6 enable
+   ipv6 address 2a07:7940:0:ffff:18::2/128
+   isis enable BB
+   isis passive
+!
+interface Management1
+   ip address 10.1.42.52/24
+!
+interface Vlan2
+   ip address 10.2.254.3/31
+   ipv6 enable
+   ipv6 address 2a07:7940:dc:18:52:1:0:3/127
+!
+hardware tcam
+   profile custom
+      feature traffic-policy cpu ipv4
+         key size limit 160
+         key field dst-ip icmp-type-code ip-frag ip-protocol l4-dst-port l4-src-port src-ip tcp-control ttl
+         action count set-drop-precedence set-policer
+      !
+      feature traffic-policy cpu ipv6
+         key field dst-ipv6 ipv6-next-header l4-dst-port l4-src-port src-ipv6-high src-ipv6-low tcp-control ttl
+         action count set-drop-precedence set-policer
+      !
+      feature traffic-policy port ipv4
+         key size limit 160
+         policy policer unshared action size 5 bits
+         policy policer unshared qualifier size 9 bits
+         key field dscp dst-ip-label icmp-type-code ip-frag ip-fragment-offset ip-length ip-protocol l4-dst-port l4-src-port src-ip-label tcp-control ttl
+         action count drop log set-unshared-policer
+         packet ipv4 forwarding bridged
+         packet ipv4 forwarding routed
+         packet mpls ipv4 forwarding bridged
+         packet mpls ipv4 forwarding mpls
+      !
+      feature traffic-policy port ipv4 egress
+         key size limit 160
+         key field dscp dst-ip-label ip-frag ip-protocol l4-dst-port l4-src-port src-ip-label tcp-control
+         action count drop log
+         packet ipv4 forwarding routed
+         packet mpls ipv4 forwarding mpls
+      !
+      feature traffic-policy port ipv6
+         key field dst-ipv6-label hop-limit ipv6-length ipv6-next-header ipv6-traffic-class l4-dst-port l4-src-port src-ipv6-label tcp-control
+         action count drop log set-unshared-policer
+         packet ipv6 forwarding bridged
+         packet ipv6 forwarding routed
+         packet mpls ipv6 forwarding bridged
+         packet mpls ipv6 forwarding mpls
+      !
+      feature traffic-policy port ipv6 egress
+         key field dscp dst-ipv6-label ipv6-next-header l4-dst-port l4-src-port src-ipv6-label tcp-control
+         action count drop log
+         packet ipv6 forwarding routed
+         packet mpls ipv6 forwarding mpls
+   system profile custom
+!
+ipv6 access-list filter-all-in-one-v6
+   10 permit tcp any any eq bgp
+   11 permit icmpv6 any any
+   12 permit tcp any any established
+!
+ip access-list filter-all-in-one-v4
+   10 remark #allow-tcp-est
+   20 permit tcp any any established
+   30 remark #accept-bfd
+   40 permit udp 10.2.0.0/16 any eq bfd bfd-echo multihop-bfd
+   50 remark #accept-bgp-dst
+   60 permit tcp 10.2.254.0/24 10.2.254.0/24 eq bgp
+   70 permit tcp 10.3.254.0/24 10.3.254.0/24 eq bgp
+   80 permit tcp 10.4.254.0/24 10.4.254.0/24 eq bgp
+   90 permit tcp 203.0.113.134/21 203.0.113.134/21 eq bgp
+   95 permit tcp 203.0.113.239/31 203.0.113.239/31 eq bgp
+   100 permit tcp 192.0.2.187/31 192.0.2.187/31 eq bgp
+   105 permit tcp 203.0.113.48/22 203.0.113.48/22 eq bgp
+   110 remark #accept-bgp-src
+   120 permit tcp 10.2.254.0/24 10.2.254.0/24 eq bgp
+   130 permit tcp 10.3.254.0/24 10.3.254.0/24 eq bgp
+   140 permit tcp 10.4.254.0/24 10.4.254.0/24 eq bgp
+   150 permit tcp 203.0.113.134/21 203.0.113.134/21 eq bgp
+   155 permit tcp 203.0.113.239/31 203.0.113.239/31 eq bgp
+   160 permit tcp 192.0.2.187/31 192.0.2.187/31 eq bgp
+   165 permit tcp 203.0.113.48/22 203.0.113.48/22 eq bgp
+   170 remark #allow-pxe
+   180 permit tcp host 0.0.0.0 any eq 67 68 69 4011
+   190 permit tcp 10.2.0.0/16 any eq 67 68 69 4011
+   200 remark #accept-dns
+   210 permit udp host 10.1.238.12 host 10.3.254.135 eq domain
+   280 permit udp host 10.1.238.18 host 10.3.254.135 eq domain
+   290 permit udp host 10.1.251.12 host 10.3.254.135 eq domain
+   300 permit udp host 10.1.251.18 host 10.3.254.135 eq domain
+   350 remark #accept-icmp
+   360 permit icmp any any
+   370 remark #accept-netconf-mgmt
+   380 permit tcp 10.1.0.0/16 host 10.3.254.135 eq netconf-ssh
+   381 permit tcp 10.1.0.0/16 host 10.3.254.135 eq netconf-ssh
+   390 permit tcp 10.1.0.0/16 host 10.3.254.135 eq https
+   391 permit tcp 10.1.0.0/16 host 10.3.254.135 eq https
+   520 remark #accept-ntp
+   530 permit udp host 10.1.251.49 host 10.3.254.135 eq ntp
+   600 permit udp host 10.1.247.49 host 10.3.254.135 eq ntp
+   670 permit udp host 10.1.238.49 host 10.3.254.135 eq ntp
+   740 permit udp host 10.1.243.49 host 10.3.254.135 eq ntp
+   810 permit udp host 203.0.113.240 host 10.3.254.135 eq ntp
+   880 permit udp host 192.0.2.100 host 10.3.254.135 eq ntp
+   950 permit udp host 203.0.113.10 host 10.3.254.135 eq ntp
+   1020 permit udp host 203.0.113.112 host 10.3.254.135 eq ntp
+   1090 remark #accept-grpc
+   1100 permit tcp host 10.1.238.240 host 10.3.254.135 eq 32767
+   1101 permit tcp host 10.1.247.240 host 10.3.254.135 eq 32767
+   1102 permit tcp host 10.1.251.240 host 10.3.254.135 eq 32767
+   1170 remark #accept-snmp
+   1180 permit udp host 10.1.238.50 host 10.3.254.135 range snmp snmptrap
+   1250 permit udp host 10.1.238.199 host 10.3.254.135 range snmp snmptrap
+   1320 permit udp host 10.1.238.240 host 10.3.254.135 range snmp snmptrap
+   1325 permit udp host 10.1.247.240 host 10.3.254.135 range snmp snmptrap
+   1390 permit udp host 10.1.243.199 host 10.3.254.135 range snmp snmptrap
+   1460 permit udp host 10.1.251.42 host 10.3.254.135 range snmp snmptrap
+   1530 permit udp host 10.1.251.149 host 10.3.254.135 range snmp snmptrap
+   1600 permit udp host 10.1.251.199 host 10.3.254.135 range snmp snmptrap
+   1670 permit udp host 10.1.253.149 host 10.3.254.135 range snmp snmptrap
+   1740 remark #accept-ssh-mgmt
+   1741 permit tcp 10.1.0.0/16 host 10.3.254.135 eq ssh
+   1750 permit tcp 10.1.0.0/16 host 10.3.254.135 eq ssh
+   1820 remark #accept-ssh
+   1830 permit tcp host 198.51.100.19 host 10.3.254.135 eq ssh
+   1840 permit tcp host 198.51.100.19 host 203.0.113.141 eq ssh
+   1900 permit tcp host 198.51.100.251 host 10.3.254.135 eq ssh
+   1910 permit tcp host 198.51.100.251 host 203.0.113.141 eq ssh
+   1970 permit tcp host 203.0.113.47 host 10.3.254.135 eq ssh
+   1980 permit tcp host 203.0.113.47 host 198.51.100.151 eq ssh
+   2040 permit tcp host 203.0.113.156 host 10.3.254.135 eq ssh
+   2050 permit tcp host 203.0.113.156 host 198.51.100.151 eq ssh
+   2110 permit tcp host 192.0.2.240 host 10.3.254.135 eq ssh
+   2120 permit tcp host 192.0.2.240 host 203.0.113.141 eq ssh
+   2180 remark #accept-traceroute-icmp
+   2190 permit icmp any any traceroute
+   2200 remark #accept-mlag
+   2210 permit tcp any any eq mlag ttl eq 255
+   2220 permit udp any any eq mlag ttl eq 255
+   2230 permit tcp any eq mlag any ttl eq 255
+   2240 remark #accept-vrrp
+   2250 permit vrrp any any
+!
+ip routing
+!
+ip community-list SET_ARELION_FRA_GEOTAG permit 1299:35410
+ip community-list SET_ORIGIN_GEO_PEER-A permit 35793:21014
+ip community-list SET_ORIGIN_GEO_PEER-A permit 35793:2101
+ip community-list SET_TYPE_INTERNET_TRANSIT permit 1:51
+!
+ip prefix-list example_BGP_ADV_V4_PREFIXES
+   seq 10 permit 192.0.2.50/24
+   seq 20 permit 192.0.2.71/24
+   seq 30 permit 192.0.2.219/24
+   seq 40 permit 203.0.113.210/24
+   seq 50 permit 198.51.100.215/24
+   seq 60 permit 203.0.113.37/24
+   seq 70 permit 203.0.113.116/24
+   seq 80 permit 192.0.2.28/24
+   seq 90 permit 192.0.2.197/24
+   seq 100 permit 203.0.113.72/24
+   seq 110 permit 198.51.100.121/24
+!
+ip prefix-list ALL_UP_TO_24
+   seq 10 permit 0.0.0.0/0 le 24
+!
+ip prefix-list DEFAULT_ROUTE_V4
+   seq 10 permit 0.0.0.0/0
+!
+ip prefix-list PEER-A-FW-01_PRIVATES_ADV_V4
+   seq 10 permit 10.3.254.0/24 ge 24
+   seq 20 permit 10.2.249.0/24
+   seq 30 permit 10.3.249.0/24 ge 24
+   seq 40 permit 10.2.200.0/24 ge 24
+!
+ip prefix-list PEER-A-FW-01_PRIVATES_RCV_V4
+   seq 10 permit 10.1.144.0/24 ge 24
+   seq 20 permit 10.1.252.0/24 ge 24
+   seq 30 permit 10.1.247.0/24 ge 24
+   seq 40 permit 10.1.238.0/24 ge 24
+   seq 50 permit 10.1.251.0/24 ge 24
+   seq 60 permit 10.1.253.0/24 ge 24
+   seq 70 permit 10.1.145.0/24 ge 24
+   seq 80 permit 10.1.248.0/24 ge 24
+   seq 90 permit 10.1.148.0/24 ge 24
+   seq 100 permit 10.1.42.0/24
+!
+ip prefix-list PEER-A-SW-01_GLOBAL_RCV_V4
+   seq 10 permit 192.0.2.50/24
+   seq 20 permit 192.0.2.71/24
+   seq 30 permit 192.0.2.219/24
+   seq 40 permit 203.0.113.210/24
+   seq 50 permit 198.51.100.215/24
+!
+ip prefix-list PEER-A-SW-01_MGMT_ADV_V4
+   seq 10 permit 10.2.254.0/24 ge 24
+   seq 20 permit 10.3.254.0/24 ge 24
+!
+ip prefix-list GREATER_THAN_24
+   seq 10 permit 0.0.0.0/25 ge 25
+!
+ip prefix-list IANA_RESERVED
+   seq 5 deny 0.0.0.0/8 le 32
+   seq 10 deny 10.0.0.0/8 le 32
+   seq 15 deny 100.64.0.0/10 le 32
+   seq 20 deny 127.0.0.0/8 le 32
+   seq 25 deny 169.254.0.0/16 le 32
+   seq 30 deny 172.16.0.0/12 le 32
+   seq 35 deny 192.0.2.205/24 le 32
+   seq 40 deny 198.51.100.50/24 le 32
+   seq 45 deny 198.51.100.164/24 le 32
+   seq 50 deny 192.168.0.0/16 le 32
+   seq 55 deny 203.0.113.213/15 le 32
+   seq 60 deny 203.0.113.249/24 le 32
+   seq 65 deny 192.0.2.167/24 le 32
+   seq 70 deny 224.0.0.0/4 le 32
+   seq 75 deny 203.0.113.63/4 le 32
+!
+ip prefix-list NTW-INFRA-01_BGP_ADV_V4
+   seq 10 permit 10.1.144.0/24 le 32
+   seq 20 permit 10.1.252.0/24 le 32
+   seq 30 permit 10.2.249.0/24
+   seq 40 permit 10.3.249.0/24
+   seq 50 permit 10.1.251.0/24
+   seq 60 permit 203.0.113.250/24 le 32
+   seq 70 permit 10.5.0.0/16 le 32
+   seq 80 permit 10.1.247.0/24
+!
+ip prefix-list STANDARD_DENIAL_V4
+   seq 5 deny 0.0.0.0/8 le 32
+   seq 10 deny 10.0.0.0/8 le 32
+   seq 15 deny 100.64.0.0/10 le 32
+   seq 20 deny 127.0.0.0/8 le 32
+   seq 25 deny 169.254.0.0/16 le 32
+   seq 30 deny 172.16.0.0/12 le 32
+   seq 35 deny 192.0.2.205/24 le 32
+   seq 40 deny 198.51.100.50/24 le 32
+   seq 45 deny 198.51.100.164/24 le 32
+   seq 50 deny 192.168.0.0/16 le 32
+   seq 55 deny 203.0.113.213/15 le 32
+   seq 60 deny 203.0.113.249/24 le 32
+   seq 65 deny 192.0.2.167/24 le 32
+   seq 70 deny 224.0.0.0/4 le 32
+   seq 75 deny 203.0.113.63/4 le 32
+!
+ipv6 prefix-list example_BGP_ADV_V6_PREFIXES
+   seq 10 permit 2a07:7940:12::/48
+   seq 20 permit 2a07:7940:18::/48
+   seq 30 permit 2a07:7940:41::/48
+   seq 40 permit 2a07:7940:45::/48
+!
+ipv6 prefix-list ALL_UP_TO_48
+   seq 10 permit ::/0 le 48
+!
+ipv6 prefix-list DEFAULT_ROUTE_V6
+   seq 10 permit ::/0
+!
+ipv6 prefix-list PEER-A-SW-01_GLOBAL_RCV_V6
+   seq 10 permit 2a07:7940:18::/48
+!
+ipv6 prefix-list PEER-A-SW-01_MGMT_ADV_V6
+   seq 10 permit 2a07:7940:dc:18::/64 ge 64
+   seq 20 permit 2a07:7940:f:18::/64 ge 64
+!
+ipv6 prefix-list GREATER_THAN_48
+   seq 10 permit ::/49 ge 49
+!
+ipv6 prefix-list STANDARD_DENIAL_V6
+   seq 10 deny ::/0
+   seq 20 deny ::1/128
+   seq 30 deny ff00::/8
+   seq 40 deny fc00::/7
+!
+ipv6 unicast-routing
+!
+system control-plane
+   ip access-group filter-all-in-one-v4 in
+   ipv6 access-group filter-all-in-one-v6 in
+!
+ip route 0.0.0.0/0 198.51.100.220 180
+ip route 0.0.0.0/0 198.51.100.220 185
+ip route 10.1.0.0/16 10.1.42.1
+ip route 10.3.254.0/24 Null0
+!
+ntp local-interface Loopback0
+ntp server 10.1.238.49
+ntp server 10.1.243.49
+ntp server 10.1.247.49
+ntp server 10.1.251.49 prefer
+!
+role gnmi
+   10 deny mode exec command .*
+!
+route-map AKAMAI_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map AKAMAI_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map AKAMAI_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map AKAMAI_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map AKAMAI_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map AKAMAI_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+route-map ARELION_BGP_ADV_V4 permit 10
+   sub-route-map GENERIC_BGP_ADV_V4
+!
+route-map ARELION_BGP_ADV_V6 permit 10
+   sub-route-map GENERIC_BGP_ADV_V6
+!
+route-map ARELION_BGP_RCV_V4 permit 10
+   sub-route-map GENERIC_ISP_BGP_RCV_V4
+   set community REDACTED SET_ARELION_FRA_GEOTAG SET_ORIGIN_GEO_PEER-A SET_TYPE_INTERNET_TRANSIT
+!
+route-map ARELION_BGP_RCV_V6 permit 10
+   sub-route-map GENERIC_ISP_BGP_RCV_V6
+   set community REDACTED SET_ARELION_FRA_GEOTAG SET_ORIGIN_GEO_PEER-A SET_TYPE_INTERNET_TRANSIT
+!
+route-map ATOM86_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map ATOM86_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map ATOM86_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map ATOM86_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map ATOM86_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map ATOM86_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+route-map AWS_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map AWS_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map AWS_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map AWS_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map AWS_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map AWS_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+route-map BB_BGP_ADV_V4 permit 10
+   match source-protocol bgp
+   set metric +igp-metric
+!
+route-map BB_BGP_ADV_V6 permit 10
+   match source-protocol bgp
+   set metric +igp-metric
+!
+route-map BB_BGP_RCV_V4 permit 10
+   match source-protocol bgp
+!
+route-map BB_BGP_RCV_V6 permit 10
+   match source-protocol bgp
+!
+route-map CLOUDFLARE_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map CLOUDFLARE_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map CLOUDFLARE_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map CLOUDFLARE_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map CLOUDFLARE_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map CLOUDFLARE_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+route-map DENY_BGP_ALL deny 10
+!
+route-map PEER-A-FW-01_BGP_ADV_V4 permit 10
+   match ip address prefix-list PEER-A-FW-01_PRIVATES_ADV_V4
+!
+route-map PEER-A-FW-01_BGP_RCV_V4 permit 10
+   match ip address prefix-list PEER-A-FW-01_PRIVATES_RCV_V4
+!
+route-map PEER-A-SW-01_BGP_ADV_V4 permit 10
+   match ip address prefix-list DEFAULT_ROUTE_V4
+!
+route-map PEER-A-SW-01_BGP_ADV_V4 permit 30
+   match ip address prefix-list PEER-A-SW-01_MGMT_ADV_V4
+!
+route-map PEER-A-SW-01_BGP_ADV_V6 permit 10
+   match ipv6 address prefix-list DEFAULT_ROUTE_V6
+!
+route-map PEER-A-SW-01_BGP_RCV_V4 permit 10
+   match ip address prefix-list PEER-A-SW-01_GLOBAL_RCV_V4
+!
+route-map PEER-A-SW-01_BGP_RCV_V4 deny 20
+   match ip address prefix-list DEFAULT_ROUTE_V4
+!
+route-map PEER-A-SW-01_BGP_RCV_V6 permit 10
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map PEER-A-SW-01_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list DEFAULT_ROUTE_V6
+!
+route-map GENERIC_BGP_ADV_V4 permit 10
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+   set community REDACTED
+!
+route-map GENERIC_BGP_ADV_V6 permit 10
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+   set community REDACTED
+!
+route-map GENERIC_DIRECT_BGP_RCV_V4 deny 10
+   match ip address prefix-list DEFAULT_ROUTE_V4
+!
+route-map GENERIC_DIRECT_BGP_RCV_V4 deny 20
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map GENERIC_DIRECT_BGP_RCV_V4 deny 30
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map GENERIC_DIRECT_BGP_RCV_V4 deny 40
+   match origin-as validity invalid
+!
+route-map GENERIC_DIRECT_BGP_RCV_V4 permit 50
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3200
+!
+route-map GENERIC_DIRECT_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list DEFAULT_ROUTE_V6
+!
+route-map GENERIC_DIRECT_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map GENERIC_DIRECT_BGP_RCV_V6 deny 30
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map GENERIC_DIRECT_BGP_RCV_V6 deny 40
+   match origin-as validity invalid
+!
+route-map GENERIC_DIRECT_BGP_RCV_V6 permit 50
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3200
+!
+route-map GENERIC_ISP_BGP_RCV_V4 permit 10
+   match ip address prefix-list DEFAULT_ROUTE_V4
+   set community REDACTED
+!
+route-map GENERIC_ISP_BGP_RCV_V4 deny 20
+   match ip address prefix-list GREATER_THAN_24
+!
+route-map GENERIC_ISP_BGP_RCV_V4 deny 30
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map GENERIC_ISP_BGP_RCV_V4 deny 40
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map GENERIC_ISP_BGP_RCV_V4 deny 50
+   match origin-as validity invalid
+!
+route-map GENERIC_ISP_BGP_RCV_V4 permit 60
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 500
+!
+route-map GENERIC_ISP_BGP_RCV_V6 permit 10
+   match ipv6 address prefix-list DEFAULT_ROUTE_V6
+   set community REDACTED
+!
+route-map GENERIC_ISP_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list GREATER_THAN_48
+!
+route-map GENERIC_ISP_BGP_RCV_V6 deny 30
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map GENERIC_ISP_BGP_RCV_V6 deny 40
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map GENERIC_ISP_BGP_RCV_V6 deny 50
+   match origin-as validity invalid
+!
+route-map GENERIC_ISP_BGP_RCV_V6 permit 60
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 500
+!
+route-map GENERIC_IX_BGP_RCV_V4 deny 10
+   match ip address prefix-list DEFAULT_ROUTE_V4
+   set community REDACTED
+!
+route-map GENERIC_IX_BGP_RCV_V4 deny 20
+   match ip address prefix-list GREATER_THAN_24
+!
+route-map GENERIC_IX_BGP_RCV_V4 deny 30
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map GENERIC_IX_BGP_RCV_V4 deny 40
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map GENERIC_IX_BGP_RCV_V4 deny 50
+   match origin-as validity invalid
+!
+route-map GENERIC_IX_BGP_RCV_V4 permit 60
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   match as-path length = 1
+   set community REDACTED
+   set local-preference 1000
+!
+route-map GENERIC_IX_BGP_RCV_V4 permit 70
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   match as-path length = 2
+   set community REDACTED
+   set local-preference 900
+!
+route-map GENERIC_IX_BGP_RCV_V4 permit 80
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   match as-path length = 3
+   set community REDACTED
+   set local-preference 800
+!
+route-map GENERIC_IX_BGP_RCV_V4 permit 90
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   match as-path length >= 3 and <= 6
+   set community REDACTED
+   set local-preference 700
+!
+route-map GENERIC_IX_BGP_RCV_V4 permit 100
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   match as-path length >= 6 and <= 4000
+   set community REDACTED
+   set local-preference 50
+!
+route-map GENERIC_IX_BGP_RCV_V6 permit 10
+   match ipv6 address prefix-list DEFAULT_ROUTE_V6
+   set community REDACTED
+!
+route-map GENERIC_IX_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list GREATER_THAN_48
+!
+route-map GENERIC_IX_BGP_RCV_V6 deny 30
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map GENERIC_IX_BGP_RCV_V6 deny 40
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map GENERIC_IX_BGP_RCV_V6 deny 50
+   match origin-as validity invalid
+!
+route-map GENERIC_IX_BGP_RCV_V6 permit 60
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   match as-path length = 1
+   set community REDACTED
+   set local-preference 1000
+!
+route-map GENERIC_IX_BGP_RCV_V6 permit 70
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   match as-path length = 2
+   set community REDACTED
+   set local-preference 900
+!
+route-map GENERIC_IX_BGP_RCV_V6 permit 80
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   match as-path length = 3
+   set community REDACTED
+   set local-preference 800
+!
+route-map GENERIC_IX_BGP_RCV_V6 permit 90
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   match as-path length >= 3 and <= 6
+   set community REDACTED
+   set local-preference 700
+!
+route-map GENERIC_IX_BGP_RCV_V6 permit 100
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   match as-path length >= 6 and <= 4000
+   set community REDACTED
+   set local-preference 50
+!
+route-map HETZNER_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map HETZNER_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map HETZNER_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map HETZNER_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map HETZNER_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map HETZNER_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+route-map HE_BGP_ADV_V4 permit 10
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+   set as-path prepend 35793
+   set community REDACTED
+!
+route-map HE_BGP_ADV_V6 permit 10
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+   set as-path prepend 35793
+   set community REDACTED
+!
+route-map HE_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map HE_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map HE_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 700
+!
+route-map HE_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map HE_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map HE_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 700
+!
+route-map I3DNET_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map I3DNET_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map I3DNET_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map I3DNET_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map I3DNET_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map I3DNET_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+route-map M247_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map M247_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map M247_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map M247_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map M247_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map M247_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+route-map NLIX_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map NLIX_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map NLIX_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set local-preference 700
+!
+route-map SIPARTECH_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map SIPARTECH_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map SIPARTECH_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map SIPARTECH_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map SIPARTECH_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map SIPARTECH_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+route-map TEAMBLUE_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map TEAMBLUE_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map TEAMBLUE_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map TEAMBLUE_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map TEAMBLUE_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map TEAMBLUE_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+route-map ZETNET_BGP_RCV_V4 deny 10
+   match ip address prefix-list STANDARD_DENIAL_V4
+!
+route-map ZETNET_BGP_RCV_V4 deny 20
+   match ip address prefix-list example_BGP_ADV_V4_PREFIXES
+!
+route-map ZETNET_BGP_RCV_V4 permit 30
+   match ip address prefix-list ALL_UP_TO_24
+   match source-protocol bgp
+   set community REDACTED
+   set local-preference 3000
+!
+route-map ZETNET_BGP_RCV_V6 deny 10
+   match ipv6 address prefix-list STANDARD_DENIAL_V6
+!
+route-map ZETNET_BGP_RCV_V6 deny 20
+   match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
+!
+route-map ZETNET_BGP_RCV_V6 permit 30
+   match source-protocol bgp
+   match ipv6 address prefix-list ALL_UP_TO_48
+   set community REDACTED
+   set local-preference 3000
+!
+router bgp 35793
+   router-id 10.3.254.135
+   distance bgp 170 170 170
+   maximum-paths 10 ecmp 10
+   neighbor AKAMAI_IXPEER_V4 peer group
+   neighbor AKAMAI_IXPEER_V4 remote-as 20940
+   neighbor AKAMAI_IXPEER_V4 remove-private-as
+   neighbor AKAMAI_IXPEER_V4 update-source Port-Channel2.7
+   neighbor AKAMAI_IXPEER_V4 description AKAMAI_IX_PEER_V4
+   neighbor AKAMAI_IXPEER_V4 route-map AKAMAI_BGP_RCV_V4 in
+   neighbor AKAMAI_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor AKAMAI_IXPEER_V4 maximum-routes 0
+   neighbor AKAMAI_IXPEER_V6 peer group
+   neighbor AKAMAI_IXPEER_V6 remote-as 20940
+   neighbor AKAMAI_IXPEER_V6 remove-private-as
+   neighbor AKAMAI_IXPEER_V6 update-source Port-Channel2.7
+   neighbor AKAMAI_IXPEER_V6 description AKAMAI_IX_PEER_V6
+   neighbor AKAMAI_IXPEER_V6 route-map AKAMAI_BGP_RCV_V6 in
+   neighbor AKAMAI_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor AKAMAI_IXPEER_V6 maximum-routes 0
+   neighbor ARELION_ISP_V4 peer group
+   neighbor ARELION_ISP_V4 remote-as 1299
+   neighbor ARELION_ISP_V4 remove-private-as
+   neighbor ARELION_ISP_V4 update-source 198.51.100.151
+   neighbor ARELION_ISP_V4 route-map ARELION_BGP_RCV_V4 in
+   neighbor ARELION_ISP_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor ARELION_ISP_V4 maximum-routes 0
+   neighbor ARELION_ISP_V6 peer group
+   neighbor ARELION_ISP_V6 remote-as 1299
+   neighbor ARELION_ISP_V6 remove-private-as
+   neighbor ARELION_ISP_V6 update-source 2001:2035:0:6ff::2
+   neighbor ARELION_ISP_V6 route-map ARELION_BGP_RCV_V6 in
+   neighbor ARELION_ISP_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor ARELION_ISP_V6 maximum-routes 0
+   neighbor ATOM86_IXPEER_V4 peer group
+   neighbor ATOM86_IXPEER_V4 remote-as 8455
+   neighbor ATOM86_IXPEER_V4 remove-private-as
+   neighbor ATOM86_IXPEER_V4 update-source Port-Channel2.7
+   neighbor ATOM86_IXPEER_V4 description ATOM86_IX_PEER_V4
+   neighbor ATOM86_IXPEER_V4 route-map ATOM86_BGP_RCV_V4 in
+   neighbor ATOM86_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor ATOM86_IXPEER_V4 maximum-routes 0
+   neighbor ATOM86_IXPEER_V6 peer group
+   neighbor ATOM86_IXPEER_V6 remote-as 8455
+   neighbor ATOM86_IXPEER_V6 remove-private-as
+   neighbor ATOM86_IXPEER_V6 update-source Port-Channel2.7
+   neighbor ATOM86_IXPEER_V6 description ATOM86_IX_PEER_V6
+   neighbor ATOM86_IXPEER_V6 route-map ATOM86_BGP_RCV_V6 in
+   neighbor ATOM86_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor ATOM86_IXPEER_V6 maximum-routes 0
+   neighbor AWS_IXPEER_V4 peer group
+   neighbor AWS_IXPEER_V4 remote-as 16509
+   neighbor AWS_IXPEER_V4 remove-private-as
+   neighbor AWS_IXPEER_V4 update-source Port-Channel2.7
+   neighbor AWS_IXPEER_V4 description AWS_IX_PEER_V4
+   neighbor AWS_IXPEER_V4 route-map AWS_BGP_RCV_V4 in
+   neighbor AWS_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor AWS_IXPEER_V4 maximum-routes 0
+   neighbor AWS_IXPEER_V6 peer group
+   neighbor AWS_IXPEER_V6 remote-as 16509
+   neighbor AWS_IXPEER_V6 remove-private-as
+   neighbor AWS_IXPEER_V6 update-source Port-Channel2.7
+   neighbor AWS_IXPEER_V6 description AWS_IX_PEER_V6
+   neighbor AWS_IXPEER_V6 route-map AWS_BGP_RCV_V6 in
+   neighbor AWS_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor AWS_IXPEER_V6 maximum-routes 0
+   neighbor BB_V4 peer group
+   neighbor BB_V4 remote-as 35793
+   neighbor BB_V4 next-hop-self
+   neighbor BB_V4 update-source Loopback0
+   neighbor BB_V4 description BB_V4
+   neighbor BB_V4 route-map BB_BGP_RCV_V4 in
+   neighbor BB_V4 route-map BB_BGP_ADV_V4 out
+   neighbor BB_V4 send-community
+   REDACTED BB_V4 maximum-routes 0
+   neighbor BB_V6 peer group
+   neighbor BB_V6 remote-as 35793
+   neighbor BB_V6 next-hop-self
+   neighbor BB_V6 update-source 2a07:7940:0:ffff:18::2
+   neighbor BB_V6 description CYBERNET_BACKBONE_V6
+   neighbor BB_V6 route-map BB_BGP_RCV_V6 in
+   neighbor BB_V6 route-map BB_BGP_ADV_V6 out
+   neighbor BB_V6 send-community
+   REDACTED BB_V6 maximum-routes 0
+   neighbor CLOUDFLARE_IXPEER_V4 peer group
+   neighbor CLOUDFLARE_IXPEER_V4 remote-as 13335
+   neighbor CLOUDFLARE_IXPEER_V4 remove-private-as
+   neighbor CLOUDFLARE_IXPEER_V4 update-source Port-Channel2.7
+   neighbor CLOUDFLARE_IXPEER_V4 description CLOUDFLARE_IX_PEER_V4
+   neighbor CLOUDFLARE_IXPEER_V4 route-map CLOUDFLARE_BGP_RCV_V4 in
+   neighbor CLOUDFLARE_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor CLOUDFLARE_IXPEER_V4 maximum-routes 0
+   neighbor CLOUDFLARE_IXPEER_V6 peer group
+   neighbor CLOUDFLARE_IXPEER_V6 remote-as 13335
+   neighbor CLOUDFLARE_IXPEER_V6 remove-private-as
+   neighbor CLOUDFLARE_IXPEER_V6 update-source Port-Channel2.7
+   neighbor CLOUDFLARE_IXPEER_V6 description CLOUDFLARE_IX_PEER_V6
+   neighbor CLOUDFLARE_IXPEER_V6 route-map CLOUDFLARE_BGP_RCV_V6 in
+   neighbor CLOUDFLARE_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor CLOUDFLARE_IXPEER_V6 maximum-routes 0
+   neighbor PEER-A-FW-01_V4 peer group
+   neighbor PEER-A-FW-01_V4 remote-as 4200042001
+   neighbor PEER-A-FW-01_V4 update-source 10.2.254.3
+   neighbor PEER-A-FW-01_V4 route-map PEER-A-FW-01_BGP_RCV_V4 in
+   neighbor PEER-A-FW-01_V4 route-map PEER-A-FW-01_BGP_ADV_V4 out
+   neighbor PEER-A-FW-01_V6 peer group
+   neighbor PEER-A-FW-01_V6 remote-as 4200009001
+   neighbor PEER-A-FW-01_V6 update-source 2a07:7940:dc:18:52:1:0:3
+   neighbor PEER-A-FW-01_V6 route-map PEER-A-FW-01_BGP_RCV_V6 in
+   neighbor PEER-A-FW-01_V6 route-map PEER-A-FW-01_BGP_ADV_V6 out
+   neighbor PEER-A-SW-01A_V4 peer group
+   neighbor PEER-A-SW-01A_V4 remote-as 4200042101
+   neighbor PEER-A-SW-01A_V4 next-hop-self
+   neighbor PEER-A-SW-01A_V4 update-source 10.2.42.52
+   neighbor PEER-A-SW-01A_V4 route-map PEER-A-SW-01_BGP_RCV_V4 in
+   neighbor PEER-A-SW-01A_V4 route-map PEER-A-SW-01_BGP_ADV_V4 out
+   neighbor PEER-A-SW-01A_V6 peer group
+   neighbor PEER-A-SW-01A_V6 remote-as 4200042101
+   neighbor PEER-A-SW-01A_V6 next-hop-self
+   neighbor PEER-A-SW-01A_V6 update-source 2a07:7940:dc:18:52:101:0:2
+   neighbor PEER-A-SW-01A_V6 route-map PEER-A-SW-01_BGP_RCV_V6 in
+   neighbor PEER-A-SW-01A_V6 route-map PEER-A-SW-01_BGP_ADV_V6 out
+   neighbor PEER-A-SW-01B_V4 peer group
+   neighbor PEER-A-SW-01B_V4 remote-as 4200042121
+   neighbor PEER-A-SW-01B_V4 next-hop-self
+   neighbor PEER-A-SW-01B_V4 update-source 10.2.42.56
+   neighbor PEER-A-SW-01B_V4 route-map PEER-A-SW-01_BGP_RCV_V4 in
+   neighbor PEER-A-SW-01B_V4 route-map PEER-A-SW-01_BGP_ADV_V4 out
+   neighbor PEER-A-SW-01B_V6 peer group
+   neighbor PEER-A-SW-01B_V6 remote-as 4200042121
+   neighbor PEER-A-SW-01B_V6 next-hop-self
+   neighbor PEER-A-SW-01B_V6 update-source 2a07:7940:dc:18:52:121:0:2
+   neighbor PEER-A-SW-01B_V6 route-map PEER-A-SW-01_BGP_RCV_V6 in
+   neighbor PEER-A-SW-01B_V6 route-map PEER-A-SW-01_BGP_ADV_V6 out
+   neighbor HETZNER_IXPEER_V4 peer group
+   neighbor HETZNER_IXPEER_V4 remote-as 24940
+   neighbor HETZNER_IXPEER_V4 remove-private-as
+   neighbor HETZNER_IXPEER_V4 update-source Port-Channel2.7
+   neighbor HETZNER_IXPEER_V4 description HETZNER_IX_PEER_V4
+   neighbor HETZNER_IXPEER_V4 route-map HETZNER_BGP_RCV_V4 in
+   neighbor HETZNER_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor HETZNER_IXPEER_V4 maximum-routes 0
+   neighbor HETZNER_IXPEER_V6 peer group
+   neighbor HETZNER_IXPEER_V6 remote-as 24940
+   neighbor HETZNER_IXPEER_V6 remove-private-as
+   neighbor HETZNER_IXPEER_V6 update-source Port-Channel2.7
+   neighbor HETZNER_IXPEER_V6 description HETZNER_IX_PEER_V6
+   neighbor HETZNER_IXPEER_V6 route-map HETZNER_BGP_RCV_V6 in
+   neighbor HETZNER_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor HETZNER_IXPEER_V6 maximum-routes 0
+   neighbor HE_IXPEER_V4 peer group
+   neighbor HE_IXPEER_V4 remote-as 6939
+   neighbor HE_IXPEER_V4 remove-private-as
+   neighbor HE_IXPEER_V4 update-source Port-Channel2.7
+   neighbor HE_IXPEER_V4 description HE_IX_PEER_V4
+   neighbor HE_IXPEER_V4 route-map HE_BGP_RCV_V4 in
+   neighbor HE_IXPEER_V4 route-map HE_BGP_ADV_V4 out
+   neighbor HE_IXPEER_V4 maximum-routes 0
+   neighbor HE_IXPEER_V6 peer group
+   neighbor HE_IXPEER_V6 remote-as 6939
+   neighbor HE_IXPEER_V6 remove-private-as
+   neighbor HE_IXPEER_V6 update-source Port-Channel2.7
+   neighbor HE_IXPEER_V6 description HE_IX_PEER_V6
+   neighbor HE_IXPEER_V6 route-map HE_BGP_RCV_V6 in
+   neighbor HE_IXPEER_V6 route-map HE_BGP_ADV_V6 out
+   neighbor HE_IXPEER_V6 maximum-routes 0
+   neighbor I3DNET_IXPEER_V4 peer group
+   neighbor I3DNET_IXPEER_V4 remote-as 49544
+   neighbor I3DNET_IXPEER_V4 remove-private-as
+   neighbor I3DNET_IXPEER_V4 update-source Port-Channel2.7
+   neighbor I3DNET_IXPEER_V4 description I3DNET_IX_PEER_V4
+   neighbor I3DNET_IXPEER_V4 route-map I3DNET_BGP_RCV_V4 in
+   neighbor I3DNET_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor I3DNET_IXPEER_V4 maximum-routes 0
+   neighbor I3DNET_IXPEER_V6 peer group
+   neighbor I3DNET_IXPEER_V6 remote-as 49544
+   neighbor I3DNET_IXPEER_V6 remove-private-as
+   neighbor I3DNET_IXPEER_V6 update-source Port-Channel2.7
+   neighbor I3DNET_IXPEER_V6 description I3DNET_IX_PEER_V6
+   neighbor I3DNET_IXPEER_V6 route-map I3DNET_BGP_RCV_V6 in
+   neighbor I3DNET_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor I3DNET_IXPEER_V6 maximum-routes 0
+   neighbor M247_IXPEER_V4 peer group
+   neighbor M247_IXPEER_V4 remote-as 9009
+   neighbor M247_IXPEER_V4 remove-private-as
+   neighbor M247_IXPEER_V4 update-source Port-Channel2.7
+   neighbor M247_IXPEER_V4 description M247_IX_PEER_V4
+   neighbor M247_IXPEER_V4 route-map M247_BGP_RCV_V4 in
+   neighbor M247_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor M247_IXPEER_V4 maximum-routes 0
+   neighbor M247_IXPEER_V6 peer group
+   neighbor M247_IXPEER_V6 remote-as 9009
+   neighbor M247_IXPEER_V6 remove-private-as
+   neighbor M247_IXPEER_V6 update-source Port-Channel2.7
+   neighbor M247_IXPEER_V6 description M247_IX_PEER_V6
+   neighbor M247_IXPEER_V6 route-map M247_BGP_RCV_V6 in
+   neighbor M247_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor M247_IXPEER_V6 maximum-routes 0
+   neighbor NLIX_IXRS_V4 peer group
+   neighbor NLIX_IXRS_V4 remote-as 34307
+   neighbor NLIX_IXRS_V4 remove-private-as
+   neighbor NLIX_IXRS_V4 update-source Port-Channel2.7
+   neighbor NLIX_IXRS_V4 description NLIX_IXRS_V4
+   neighbor NLIX_IXRS_V4 route-map NLIX_BGP_RCV_V4 in
+   neighbor NLIX_IXRS_V4 route-map GENERIC_BGP_ADV_V4 out
+   no neighbor NLIX_IXRS_V4 enforce-first-as
+   neighbor NLIX_IXRS_V4 maximum-routes 0
+   neighbor NLIX_IXRS_V6 peer group
+   neighbor NLIX_IXRS_V6 remote-as 34307
+   neighbor NLIX_IXRS_V6 remove-private-as
+   neighbor NLIX_IXRS_V6 update-source Port-Channel2.7
+   neighbor NLIX_IXRS_V6 description NLIX_IXRS_V6
+   neighbor NLIX_IXRS_V6 route-map NLIX_BGP_RCV_V6 in
+   neighbor NLIX_IXRS_V6 route-map GENERIC_BGP_ADV_V6 out
+   no neighbor NLIX_IXRS_V6 enforce-first-as
+   neighbor NLIX_IXRS_V6 maximum-routes 0
+   neighbor SIPARTECH_IXPEER_V4 peer group
+   neighbor SIPARTECH_IXPEER_V4 remote-as 8309
+   neighbor SIPARTECH_IXPEER_V4 remove-private-as
+   neighbor SIPARTECH_IXPEER_V4 update-source Port-Channel2.7
+   neighbor SIPARTECH_IXPEER_V4 description SIPARTECH_IX_PEER_V4
+   neighbor SIPARTECH_IXPEER_V4 route-map SIPARTECH_BGP_RCV_V4 in
+   neighbor SIPARTECH_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor SIPARTECH_IXPEER_V4 maximum-routes 0
+   neighbor SIPARTECH_IXPEER_V6 peer group
+   neighbor SIPARTECH_IXPEER_V6 remote-as 8309
+   neighbor SIPARTECH_IXPEER_V6 remove-private-as
+   neighbor SIPARTECH_IXPEER_V6 update-source Port-Channel2.7
+   neighbor SIPARTECH_IXPEER_V6 description SIPARTECH_IX_PEER_V6
+   neighbor SIPARTECH_IXPEER_V6 route-map SIPARTECH_BGP_RCV_V6 in
+   neighbor SIPARTECH_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor SIPARTECH_IXPEER_V6 maximum-routes 0
+   neighbor TEAMBLUE_IXPEER_V4 peer group
+   neighbor TEAMBLUE_IXPEER_V4 remote-as 48185
+   neighbor TEAMBLUE_IXPEER_V4 remove-private-as
+   neighbor TEAMBLUE_IXPEER_V4 update-source Port-Channel2.7
+   neighbor TEAMBLUE_IXPEER_V4 description Team Blue v4 Peer via NL-ix
+   neighbor TEAMBLUE_IXPEER_V4 route-map TEAMBLUE_BGP_RCV_V4 in
+   neighbor TEAMBLUE_IXPEER_V4 route-map DENY_BGP_ALL out
+   neighbor TEAMBLUE_IXPEER_V4 password <REDACTED>
+   neighbor TEAMBLUE_IXPEER_V4 maximum-routes 0
+   neighbor TEAMBLUE_IXPEER_V6 peer group
+   neighbor TEAMBLUE_IXPEER_V6 remote-as 48185
+   neighbor TEAMBLUE_IXPEER_V6 remove-private-as
+   neighbor TEAMBLUE_IXPEER_V6 update-source Port-Channel2.7
+   neighbor TEAMBLUE_IXPEER_V6 description Team Blue v6 Peer via NL-ix
+   neighbor TEAMBLUE_IXPEER_V6 route-map TEAMBLUE_BGP_RCV_V6 in
+   neighbor TEAMBLUE_IXPEER_V6 route-map DENY_BGP_ALL out
+   neighbor TEAMBLUE_IXPEER_V6 password <REDACTED>
+   neighbor TEAMBLUE_IXPEER_V6 maximum-routes 0
+   neighbor ZETNET_IXPEER_V4 peer group
+   neighbor ZETNET_IXPEER_V4 remote-as 6204
+   neighbor ZETNET_IXPEER_V4 remove-private-as
+   neighbor ZETNET_IXPEER_V4 update-source Port-Channel2.7
+   neighbor ZETNET_IXPEER_V4 description ZETNET_IX_PEER_V4
+   neighbor ZETNET_IXPEER_V4 route-map ZETNET_BGP_RCV_V4 in
+   neighbor ZETNET_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor ZETNET_IXPEER_V4 maximum-routes 0
+   neighbor ZETNET_IXPEER_V6 peer group
+   neighbor ZETNET_IXPEER_V6 remote-as 6204
+   neighbor ZETNET_IXPEER_V6 remove-private-as
+   neighbor ZETNET_IXPEER_V6 update-source Port-Channel2.7
+   neighbor ZETNET_IXPEER_V6 description ZETNET_IX_PEER_V6
+   neighbor ZETNET_IXPEER_V6 route-map ZETNET_BGP_RCV_V6 in
+   neighbor ZETNET_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor ZETNET_IXPEER_V6 maximum-routes 0
+   neighbor 10.2.42.53 peer group PEER-A-SW-01A_V4
+   neighbor 10.2.42.53 description peer-a-sw-01a
+   neighbor 10.2.42.57 peer group PEER-A-SW-01B_V4
+   neighbor 10.2.42.57 description peer-a-sw-01b
+   neighbor 10.2.254.2 peer group PEER-A-FW-01_V4
+   neighbor 10.2.254.2 description PEER-A-FW-01_V4
+   neighbor 10.3.254.5 peer group BB_V4
+   neighbor 10.3.254.5 description ams1-rt-01
+   neighbor 10.3.254.6 peer group BB_V4
+   neighbor 10.3.254.6 description peer-b-rt-01
+   neighbor 10.3.254.7 peer group BB_V4
+   neighbor 10.3.254.7 description peer-a-rt-01
+   neighbor 10.3.254.8 peer group BB_V4
+   neighbor 10.3.254.8 description cdg1-rt-01
+   neighbor 10.3.254.133 peer group BB_V4
+   neighbor 10.3.254.133 description ams1-rt-02
+   neighbor 10.3.254.134 peer group BB_V4
+   neighbor 10.3.254.134 description peer-b-rt-02
+   neighbor 10.3.254.136 peer group BB_V4
+   neighbor 10.3.254.136 description cdg1-rt-02
+   neighbor 198.51.100.220 peer group ARELION_ISP_V4
+   neighbor 198.51.100.220 description ARELION_ISP_V4
+   neighbor 192.0.2.159 peer group HE_IXPEER_V4
+   neighbor 192.0.2.159 description HE_IXPEER_V4
+   neighbor 192.0.2.79 peer group AKAMAI_IXPEER_V4
+   neighbor 192.0.2.79 description AKAMAI_IXPEER_02_V4
+   neighbor 198.51.100.122 peer group NLIX_IXRS_V4
+   neighbor 198.51.100.122 description NLIX_IXRS_01_V4
+   neighbor 192.0.2.225 peer group NLIX_IXRS_V4
+   neighbor 192.0.2.225 description NLIX_IXRS_02_V4
+   neighbor 192.0.2.235 peer group CLOUDFLARE_IXPEER_V4
+   neighbor 192.0.2.235 description CLOUDFLARE_IXPEER_02_V4
+   neighbor 203.0.113.148 peer group ZETNET_IXPEER_V4
+   neighbor 203.0.113.148 description ZETNET_IXPEER_01_V4
+   neighbor 192.0.2.68 peer group I3DNET_IXPEER_V4
+   neighbor 192.0.2.68 description I3DNET_IXPEER_V4
+   neighbor 198.51.100.53 peer group ATOM86_IXPEER_V4
+   neighbor 198.51.100.53 description ATOM86_IXPEER_V4
+   neighbor 198.51.100.158 peer group HETZNER_IXPEER_V4
+   neighbor 198.51.100.158 description HETZNER_IXPEER_V4
+   neighbor 198.51.100.11 peer group CLOUDFLARE_IXPEER_V4
+   neighbor 198.51.100.11 description CLOUDFLARE_IXPEER_01_V4
+   neighbor 192.0.2.97 peer group AKAMAI_IXPEER_V4
+   neighbor 192.0.2.97 description AKAMAI_IXPEER_01_V4
+   neighbor 192.0.2.110 peer group ZETNET_IXPEER_V4
+   neighbor 192.0.2.110 description ZETNET_IXPEER_02_V4
+   neighbor 192.0.2.38 peer group M247_IXPEER_V4
+   neighbor 192.0.2.38 description M247_IXPEER_01_V4
+   neighbor 203.0.113.188 peer group M247_IXPEER_V4
+   neighbor 203.0.113.188 description M247_IXPEER_02_V4
+   neighbor 203.0.113.235 peer group CLOUDFLARE_IXPEER_V4
+   neighbor 203.0.113.235 description CLOUDFLARE_IXPEER_03_V4
+   neighbor 203.0.113.244 peer group CLOUDFLARE_IXPEER_V4
+   neighbor 203.0.113.244 description CLOUDFLARE_IXPEER_04_V4
+   neighbor 198.51.100.190 peer group AWS_IXPEER_V4
+   neighbor 198.51.100.190 description AWS_IXPEER_01_V4
+   neighbor 198.51.100.82 peer group AWS_IXPEER_V4
+   neighbor 198.51.100.82 description AWS_IXPEER_02_V4
+   neighbor 203.0.113.241 peer group AKAMAI_IXPEER_V4
+   neighbor 203.0.113.241 description AKAMAI_IXPEER_04_V4
+   neighbor 192.0.2.217 peer group SIPARTECH_IXPEER_V4
+   neighbor 192.0.2.217 description SIPARTECH_IXPEER_V4
+   neighbor 198.51.100.132 peer group TEAMBLUE_IXPEER_V4
+   neighbor 198.51.100.132 description TEAMBLUE_IXPEER_V4
+   neighbor 2001:7f8:13::a500:6204:1 peer group ZETNET_IXPEER_V6
+   neighbor 2001:7f8:13::a500:6204:1 description ZETNET_IXPEER_01_V6
+   neighbor 2001:7f8:13::a500:6204:2 peer group ZETNET_IXPEER_V6
+   neighbor 2001:7f8:13::a500:6204:2 description ZETNET_IXPEER_02_V6
+   neighbor 2001:7f8:13::a500:6939:1 peer group HE_IXPEER_V6
+   neighbor 2001:7f8:13::a500:6939:1 description HE_IXPEER_V6
+   neighbor 2001:7f8:13::a500:8309:1 peer group SIPARTECH_IXPEER_V6
+   neighbor 2001:7f8:13::a500:8309:1 description SIPARTECH_IXPEER_V6
+   neighbor 2001:7f8:13::a500:8455:1 peer group ATOM86_IXPEER_V6
+   neighbor 2001:7f8:13::a500:8455:1 description ATOM86_IXPEER_V6
+   neighbor 2001:7f8:13::a500:9009:2 peer group M247_IXPEER_V6
+   neighbor 2001:7f8:13::a500:9009:2 description M247_IXPEER_01_V6
+   neighbor 2001:7f8:13::a500:9009:3 peer group M247_IXPEER_V6
+   neighbor 2001:7f8:13::a500:9009:3 description M247_IXPEER_02_V6
+   neighbor 2001:7f8:13::a501:3335:1 peer group CLOUDFLARE_IXPEER_V6
+   neighbor 2001:7f8:13::a501:3335:1 description CLOUDFLARE_IXPEER_01_V6
+   neighbor 2001:7f8:13::a501:3335:2 peer group CLOUDFLARE_IXPEER_V6
+   neighbor 2001:7f8:13::a501:3335:2 description CLOUDFLARE_IXPEER_02_V6
+   neighbor 2001:7f8:13::a501:3335:3 peer group CLOUDFLARE_IXPEER_V6
+   neighbor 2001:7f8:13::a501:3335:3 description CLOUDFLARE_IXPEER_03_V6
+   neighbor 2001:7f8:13::a501:3335:4 peer group CLOUDFLARE_IXPEER_V6
+   neighbor 2001:7f8:13::a501:3335:4 description CLOUDFLARE_IXPEER_04_V6
+   neighbor 2001:7f8:13::a501:6509:1 peer group AWS_IXPEER_V6
+   neighbor 2001:7f8:13::a501:6509:1 description AWS_IXPEER_01_V6
+   neighbor 2001:7f8:13::a502:940:1 peer group AKAMAI_IXPEER_V6
+   neighbor 2001:7f8:13::a502:940:1 description AKAMAI_IXPEER_01_V6
+   neighbor 2001:7f8:13::a502:940:3 peer group AKAMAI_IXPEER_V6
+   neighbor 2001:7f8:13::a502:940:3 description AKAMAI_IXPEER_02_V6
+   neighbor 2001:7f8:13::a502:940:4 peer group AKAMAI_IXPEER_V6
+   neighbor 2001:7f8:13::a502:940:4 description AKAMAI_IXPEER_03_V6
+   neighbor 2001:7f8:13::a502:4940:1 peer group HETZNER_IXPEER_V6
+   neighbor 2001:7f8:13::a502:4940:1 description HETZNER_IXPEER_V6
+   neighbor 2001:7f8:13::a503:4307:1 peer group NLIX_IXRS_V6
+   neighbor 2001:7f8:13::a503:4307:1 description NLIX_IXRS_01_V6
+   neighbor 2001:7f8:13::a503:4307:2 peer group NLIX_IXRS_V6
+   neighbor 2001:7f8:13::a503:4307:2 description NLIX_IXRS_02_V6
+   neighbor 2001:7f8:13::a504:8185:1 peer group TEAMBLUE_IXPEER_V6
+   neighbor 2001:7f8:13::a504:8185:1 description TEAMBLUE_NLIX_V6
+   neighbor 2001:7f8:13::a504:9544:1 peer group I3DNET_IXPEER_V6
+   neighbor 2001:7f8:13::a504:9544:1 description I3DNET_IXPEER_V6
+   neighbor 2001:2035:0:6ff::1 peer group ARELION_ISP_V6
+   neighbor 2001:2035:0:6ff::1 description ARELION_ISP_V6
+   neighbor 2a07:7940:0:ffff:12::1 peer group BB_V6
+   neighbor 2a07:7940:0:ffff:12::1 description peer-b-rt-01
+   neighbor 2a07:7940:0:ffff:12::2 peer group BB_V6
+   neighbor 2a07:7940:0:ffff:12::2 description peer-b-rt-02
+   neighbor 2a07:7940:0:ffff:13::1 peer group BB_V6
+   neighbor 2a07:7940:0:ffff:13::1 description ams1-rt-01
+   neighbor 2a07:7940:0:ffff:13::2 peer group BB_V6
+   neighbor 2a07:7940:0:ffff:13::2 description ams1-rt-02
+   neighbor 2a07:7940:0:ffff:17::1 peer group BB_V6
+   neighbor 2a07:7940:0:ffff:17::1 description cdg1-rt-01
+   neighbor 2a07:7940:0:ffff:17::2 peer group BB_V6
+   neighbor 2a07:7940:0:ffff:17::2 description cdg1-rt-02
+   neighbor 2a07:7940:0:ffff:18::1 peer group BB_V6
+   neighbor 2a07:7940:0:ffff:18::1 description peer-a-rt-02
+   neighbor 2a07:7940:dc:18:52:101:0:3 peer group PEER-A-SW-01A_V6
+   neighbor 2a07:7940:dc:18:52:101:0:3 description peer-a-sw-01a
+   neighbor 2a07:7940:dc:18:52:121:0:3 peer group PEER-A-SW-01B_V6
+   neighbor 2a07:7940:dc:18:52:121:0:3 description peer-a-sw-01b
+   !
+   address-family ipv4
+      network 10.3.254.0/24
+   !
+   address-family ipv6
+      neighbor 2001:7f8:13::a500:6204:1 activate
+      neighbor 2001:7f8:13::a500:6204:2 activate
+      neighbor 2001:7f8:13::a500:6939:1 activate
+      neighbor 2001:7f8:13::a500:8309:1 activate
+      neighbor 2001:7f8:13::a500:8455:1 activate
+      neighbor 2001:7f8:13::a500:9009:2 activate
+      neighbor 2001:7f8:13::a500:9009:3 activate
+      neighbor 2001:7f8:13::a501:3335:1 activate
+      neighbor 2001:7f8:13::a501:3335:2 activate
+      neighbor 2001:7f8:13::a501:3335:3 activate
+      neighbor 2001:7f8:13::a501:3335:4 activate
+      neighbor 2001:7f8:13::a501:6509:1 activate
+      neighbor 2001:7f8:13::a502:940:1 activate
+      neighbor 2001:7f8:13::a502:940:3 activate
+      neighbor 2001:7f8:13::a502:940:4 activate
+      neighbor 2001:7f8:13::a502:4940:1 activate
+      neighbor 2001:7f8:13::a503:4307:1 activate
+      neighbor 2001:7f8:13::a503:4307:2 activate
+      neighbor 2001:7f8:13::a504:8185:1 activate
+      neighbor 2001:7f8:13::a504:9544:1 activate
+      neighbor 2001:2035:0:6ff::1 activate
+      neighbor 2a07:7940:0:ffff:12::1 activate
+      neighbor 2a07:7940:0:ffff:12::2 activate
+      neighbor 2a07:7940:0:ffff:13::1 activate
+      neighbor 2a07:7940:0:ffff:13::2 activate
+      neighbor 2a07:7940:0:ffff:17::1 activate
+      neighbor 2a07:7940:0:ffff:17::2 activate
+      neighbor 2a07:7940:0:ffff:18::1 activate
+      neighbor 2a07:7940:dc:18:52:101:0:3 activate
+      neighbor 2a07:7940:dc:18:52:121:0:3 activate
+   !
+   rpki cache peer-b-ntw-vali-01
+      host 10.1.251.55 port 3323
+      local-interface Loopback0
+      !
+      transport tcp
+   !
+   rpki cache peer-c-ntw-vali-01
+      host 10.1.238.55 port 3323
+      local-interface Loopback0
+      !
+      transport tcp
+!
+router isis BB
+   net 49.0001.0100.0325.4135.00
+   router-id ipv4 10.3.254.135
+   is-type level-2
+   log-adjacency-changes
+   graceful-restart
+   !
+   address-family ipv4 unicast
+   !
+   address-family ipv6 unicast
+!
+traffic-policies
+   field-set ipv4 prefix 636-to-peer-c-security
+      198.51.100.188/27 203.0.113.149/32 203.0.113.129/32 192.0.2.75/32 198.51.100.115/32 198.51.100.179/24 192.0.2.26/27 203.0.113.106/25 203.0.113.156/32 192.0.2.197/25 192.0.2.13/28
+   !
+   field-set ipv4 prefix example-office-networks
+      192.0.2.216/32 192.0.2.186/28 203.0.113.99/32 198.51.100.109/32 192.0.2.170/29 192.0.2.83/29 198.51.100.138/32 198.51.100.147/27 192.0.2.190/32 198.51.100.249/32 198.51.100.91/32 198.51.100.210/32 198.51.100.183/32 198.51.100.179/24
+   !
+   field-set ipv4 prefix bgp-locals-v4
+      10.2.254.19/32 10.3.254.135/32 198.51.100.151/32 192.0.2.143/32
+   !
+   field-set ipv4 prefix bgp-neighbors-v4
+      10.2.42.53/32 10.2.42.57/32 10.2.254.18/32 10.3.254.5/32 10.3.254.6/32 10.3.254.8/32 10.3.254.133/32 10.3.254.134/32 10.3.254.136/32 203.0.113.228/32 203.0.113.48/22
+   !
+   field-set ipv4 prefix dco-external-ssh
+      198.51.100.19/29 198.51.100.251/32 203.0.113.47/32 203.0.113.156/32 192.0.2.240/32
+   !
+   field-set ipv4 prefix dr2-public-subnets
+      198.51.100.228/25 203.0.113.132/25 203.0.113.124/26 203.0.113.189/25 203.0.113.220/26 203.0.113.143/24 198.51.100.215/26 192.0.2.6/26 198.51.100.245/26 198.51.100.245/25 198.51.100.202/26 192.0.2.86/25 192.0.2.138/32 203.0.113.116/24 192.0.2.183/25 192.0.2.197/26 198.51.100.74/25 192.0.2.197/24 192.0.2.219/24 203.0.113.210/24
+   !
+   field-set ipv4 prefix eu9-acs1-servers
+      203.0.113.144/32 203.0.113.27/32 192.0.2.229/32 198.51.100.221/32 203.0.113.49/32 198.51.100.38/32 198.51.100.186/32 203.0.113.202/32 198.51.100.43/32 198.51.100.200/32 192.0.2.245/32 203.0.113.151/32
+   !
+   field-set ipv4 prefix fra2-acs2-servers
+   !
+   field-set ipv4 prefix fra2-arp
+      198.51.100.127/32 198.51.100.142/32 192.0.2.60/32 198.51.100.232/32 203.0.113.179/32 192.0.2.16/32 203.0.113.15/32 198.51.100.156/32 203.0.113.113/32 198.51.100.214/32
+   !
+   field-set ipv4 prefix peer-a-arp
+      198.51.100.34/32 203.0.113.126/32 198.51.100.20/32 192.0.2.176/32 192.0.2.150/32 192.0.2.84/32 203.0.113.95/32 192.0.2.34/32 198.51.100.168/32 203.0.113.237/32
+   !
+   field-set ipv4 prefix global-example-fwag
+      192.0.2.57/32 192.0.2.9/32 192.0.2.221/32 203.0.113.71/32 203.0.113.3/32 198.51.100.54/32 192.0.2.232/32 198.51.100.163/32 203.0.113.67/32 192.0.2.192/32 192.0.2.19/32 203.0.113.245/32
+   !
+   field-set ipv4 prefix global-example-prefixes
+      203.0.113.152/26 192.0.2.184/22 198.51.100.10/22 192.0.2.131/24 192.0.2.191/24 192.0.2.131/22 198.51.100.233/23 203.0.113.120/24 198.51.100.101/22 203.0.113.117/23 203.0.113.184/24 198.51.100.56/24 198.51.100.230/24 198.51.100.69/27 203.0.113.37/22 192.0.2.50/22 203.0.113.38/24 203.0.113.104/24 203.0.113.38/22 203.0.113.222/22 192.0.2.136/23 198.51.100.169/24 192.0.2.220/24
+   !
+   field-set ipv4 prefix internet-dns-servers-v4
+      203.0.113.240/32 192.0.2.100/32 203.0.113.10/32 203.0.113.112/32
+   !
+   field-set ipv4 prefix locals-v4
+      10.1.42.52/32 10.2.42.52/32 10.2.42.56/32 10.2.254.18/31 10.3.254.135/32 198.51.100.151/32 192.0.2.143/32
+   !
+   field-set ipv4 prefix not-owned-by-example-prefixes
+      192.0.2.203/26 198.51.100.205/26 203.0.113.121/26 198.51.100.105/24 192.0.2.121/22 203.0.113.152/26 192.0.2.184/22 203.0.113.93/26 198.51.100.10/22 203.0.113.107/24 192.0.2.131/24 192.0.2.191/24 192.0.2.131/22 192.0.2.59/27 203.0.113.5/26 198.51.100.246/26 198.51.100.102/26 192.0.2.65/26 203.0.113.168/24 198.51.100.121/24 203.0.113.145/27 198.51.100.234/26 192.0.2.202/26 198.51.100.84/26 198.51.100.237/27 192.0.2.81/28 192.0.2.228/24 192.0.2.168/24 192.0.2.189/24 203.0.113.19/26 192.0.2.177/24 192.0.2.115/24 198.51.100.123/24 198.51.100.180/24 203.0.113.215/26 203.0.113.153/24 203.0.113.231/26 203.0.113.120/24 203.0.113.243/27 192.0.2.222/25 198.51.100.101/22 192.0.2.164/27 192.0.2.206/27 198.51.100.149/27 203.0.113.57/26 198.51.100.124/26 192.0.2.132/27 203.0.113.203/26 192.0.2.61/24 203.0.113.72/24 203.0.113.20/27 203.0.113.181/27 203.0.113.117/23 203.0.113.184/24 198.51.100.56/24 203.0.113.154/27 198.51.100.230/24 192.0.2.210/25 203.0.113.147/26 203.0.113.54/24 198.51.100.69/27 203.0.113.37/22 198.51.100.1/26 198.51.100.248/27 198.51.100.216/28 198.51.100.26/26 203.0.113.109/24 192.0.2.185/26 198.51.100.119/27 198.51.100.12/27 198.51.100.224/26 192.0.2.13/28 192.0.2.133/26 192.0.2.3/25 203.0.113.38/24 203.0.113.104/24 203.0.113.38/22 203.0.113.222/22 198.51.100.42/26 198.51.100.218/29 192.0.2.136/23 198.51.100.222/27 192.0.2.74/27 198.51.100.94/26 203.0.113.204/27 203.0.113.73/24 203.0.113.125/24 192.0.2.10/26 198.51.100.169/24 192.0.2.220/24 192.0.2.251/25
+   !
+   field-set ipv4 prefix og-att-lte-ranges-GLB
+      198.51.100.219/32 192.0.2.2/30 192.0.2.173/30
+   !
+   field-set ipv4 prefix pondmobile-lte-ranges-AP
+      203.0.113.196/32 203.0.113.114/32
+   !
+   field-set ipv4 prefix pondmobile-lte-ranges-EU
+      203.0.113.135/32 192.0.2.196/31 192.0.2.92/31 198.51.100.113/32 198.51.100.93/31 198.51.100.13/31 203.0.113.155/32 198.51.100.128/31 198.51.100.68/31 203.0.113.236/32 203.0.113.101/31 192.0.2.179/31 192.0.2.172/32 198.51.100.191/31 203.0.113.183/31 203.0.113.166/32 203.0.113.42/31 198.51.100.181/31 203.0.113.118/32 192.0.2.39/31 198.51.100.116/31 192.0.2.2/30 192.0.2.173/30 198.51.100.103/29 203.0.113.24/32 203.0.113.216/31 203.0.113.75/31 203.0.113.221/32 198.51.100.14/31 198.51.100.159/31 192.0.2.55/32 198.51.100.125/31 203.0.113.177/31 192.0.2.204/29 203.0.113.232/32 203.0.113.127/31 203.0.113.43/31 198.51.100.31/31 192.0.2.43/29 203.0.113.196/32 203.0.113.114/32 203.0.113.51/29 203.0.113.219/32 203.0.113.219/30 198.51.100.60/31 192.0.2.89/32 203.0.113.56/30 192.0.2.155/32 198.51.100.170/31 198.51.100.78/29
+   !
+   field-set ipv4 prefix pondmobile-lte-ranges-US
+      198.51.100.31/31 192.0.2.43/29 203.0.113.51/29 203.0.113.219/32 203.0.113.219/30 198.51.100.60/31 192.0.2.89/32 203.0.113.56/30 192.0.2.155/32 198.51.100.170/31 198.51.100.78/29
+   !
+   field-set ipv4 prefix public-ntp-servers-v4
+      203.0.113.240/32 192.0.2.100/32 203.0.113.10/32 203.0.113.112/32
+   !
+   field-set ipv6 prefix example-office-networks-v6
+      2405:a280:ff80::/44 2a07:7940:fffd::/48 2a07:7940:fffe::/48 2a07:7947:ff40::/44 2a07:7947:ff80::/44 2a07:7947:ffc0::/44
+   !
+   field-set ipv6 prefix bgp-locals-v6
+      2001:7f8:13::a503:5793:1/128 2001:2035:0:6ff::2/128 2a07:7940:0:ffff:18::2/128 2a07:7940:bb::b/128 2a07:7940:dc:18:52:101:0:2/128 2a07:7940:dc:18:52:121:0:2/128
+   !
+   field-set ipv6 prefix bgp-neighbors-v6
+      2001:2035:0:6ff::1/128 2a07:7940:0:ffff:12::1/128 2a07:7940:0:ffff:12::2/128 2a07:7940:0:ffff:13::1/128 2a07:7940:0:ffff:13::2/128 2a07:7940:0:ffff:14::1/128 2a07:7940:0:ffff:14::4/128 2a07:7940:0:ffff:17::1/128 2a07:7940:0:ffff:17::2/128 2a07:7940:dc:18:52:101:0:3/128 2a07:7940:dc:18:52:121:0:3/128
+   !
+   field-set ipv6 prefix dr2-public-ip-net-v6
+      2602:80b:6012:97::/64 2602:80b:6012:99::/64 2602:80b:6036:97::/64 2602:80b:6039:97::/64 2602:80b:603a:97::/64 2a07:7940:12:97::/64 2a07:7940:12:99::/64 2a07:7940:14:97::/64 2a07:7940:14:98::/64 2a07:7940:14:99::/64 2a07:7940:14:100::/64 2a07:7940:16:99::/64
+   !
+   field-set ipv6 prefix global-example-prefixes-v6
+      2405:a280:22::/48 2405:a280:32::/48 2405:a280:33::/48 2405:a280:34::/48 2405:a280:42::/48 2405:a280:43::/48 2602:80b:6012::/48 2602:80b:6013::/48 2602:80b:6014::/48 2602:80b:6015::/48 2602:80b:6016::/48 2602:80b:6022::/48 2602:80b:6032::/48 2602:80b:6033::/48 2602:80b:6034::/48 2602:80b:6035::/48 2602:80b:6036::/48 2602:80b:6037::/48 2602:80b:6038::/48 2602:80b:6039::/48 2602:80b:603a::/48 2602:80b:6042::/48 2602:80b:6044::/48 2602:80b:6045::/48 2602:80b:6046::/48 2602:80b:6047::/48 2a07:7940:12::/48 2a07:7940:13::/48 2a07:7940:15::/48 2a07:7940:16::/48 2a07:7940:17::/48 2a07:7940:18::/48 2a07:7940:41::/48 2a07:7940:42::/48 2a07:7940:44::/48 2a07:7940:45::/48 2a07:7940:46::/48 2a07:7940:47::/48 2a07:7940:48::/48
+   !
+   field-set ipv6 prefix not-owned-by-example-prefixes-v6
+      2001:8c1:5840::/48 2001:1a68:37::/48 2001:1b28:410::/48 2401:a040:10::/48 2402:1c00:101::/48 2402:6c00:d003::/48 2405:ec00:fa03::/48 2a00:1728:48::/46 2a00:1a28:1154::/48 2a00:1a28:2411::/48 2a00:1f68:ff::/48 2a00:da60:b01::/48 2a01:288:400e::/48 2a01:ae20:851:4092::/64 2a02:480:3419::/48 2a02:a40:324::/48 2a02:2160:8001::/48 2a05:a900:100::/48 2a06:e8c0:a::/48 2a07:9300:8000::/48 2a0a:a142::/48 2c0f:1f00::/48
+   !
+   traffic-policy filter-internet-traffic-combined
+      counter accept-example-office-networks-v4 accept-example-office-networks-v6 accept-any-to-dr2-public-ip-net-v4 accept-any-to-dr2-public-ip-net-v6 accept-bgp-dst-v4 accept-bgp-dst-v6 accept-bgp-src-v4 accept-bgp-src-v6 accept-cross-datacenter-traffic-v4 accept-cross-datacenter-traffic-v6 accept-cross-datacenter-vpn-esp-v4 accept-cross-datacenter-vpn-udp-v4 accept-dns-server-v4 accept-dns-traffic-v4 accept-fra2-arp-to-peer-a-arp accept-icmp-to-example-prefixes-v4 accept-icmp-v6 accept-ntp-traffic-v4 accept-port-10000-10300-to-minidc-reverse-ssh-server-v4 accept-port-1194-to-example-prefixes-v4 accept-port-1194-to-example-prefixes-v6 accept-port-18443-19443-to-elk-on-prem-v4 accept-port-31032-31034-to-example-prefixes-v4 accept-port-31032-31034-to-fwag accept-port-443-to-example-lighthouse-gui-v4 accept-port-443-to-example-prefixes-v4 accept-port-443-to-example-prefixes-v6 accept-port-44445-to-example-prefixes-v4 accept-port-44445-to-example-prefixes-v6 accept-port-55555-to-example-prefixes-v4 accept-port-55555-to-example-prefixes-v6 accept-port-55556-to-example-prefixes-v4 accept-port-636-to-peer-c-security-01-v4 accept-port-7770-7800-to-example-prefixes-v4 accept-port-7770-7800-to-example-prefixes-v6 accept-port-80-to-example-prefixes-v4 accept-port-80-to-example-prefixes-v6 accept-port-8080-to-example-prefixes-v4 accept-port-8080-to-example-prefixes-v6 accept-port-8200-to-peer-a-vault accept-port-8443-to-example-prefixes-v4 accept-port-8443-to-example-prefixes-v6 accept-port-8444-to-example-prefixes-v4 accept-port-8444-to-example-prefixes-v6 accept-port-8800-8888-to-example-zta-v4 accept-port-9090-to-example-prefixes-v4 accept-port-9090-to-example-prefixes-v6 accept-ports-443-to-example-lighthouse-v4 accept-source-port-1194-to-example-prefixes-v4 accept-source-port-1194-to-example-prefixes-v6 accept-ssh-to-device-v4 accept-tcp-established-v4 accept-temp-pentester-access-DCN-5554 accept-tracert-udp-to-example-prefixes-v4 accept-tracert-udp-to-example-prefixes-v6 accept-traffic-to-ntp-servers-v4 accept-udp-port-44447-to-storage-test-poc-v4 allow-tcp-est-v6 block-not-allowed-traffic-from-dr2-customers-v4 discard-port-8443-to-example-lighthouse-api-v4 discard-ports-443-to-example-lighthouse-gui-v4 discard-unknown-v6 fra2-acs2-to-peer-a-acs1-ssh-temp-DCN-5452 longhaul-and-fra2-to-peer-a-ssh-temp reject-amplified-reflection-attack-v4 reject-amplified-reflection-attack-v6 ssh-explicit-denial ssh-explicit-denial-v4
+      !
+      match rule-0-accept-port-31032-31034-to-fwag ipv4
+         destination prefix field-set global-example-fwag
+         protocol udp source port all destination port 31032-31034
+         !
+         actions
+            count accept-port-31032-31034-to-fwag
+      !
+      match rule-1-reject-amplified-reflection-attack ipv4
+         protocol udp source port 17, 19, 111, 137, 161, 389, 520, 751, 1434, 1900, 5353, 6881, 11211, 27015, 27960 destination port all
+         !
+         actions
+            count reject-amplified-reflection-attack-v4
+            drop
+      !
+      match rule-2-allow-tcp-est ipv4
+         protocol tcp flags established
+         !
+         actions
+            count accept-tcp-established-v4
+      !
+      match rule-3-accept-port-8443-to-example-lighthouse-api ipv4
+         source prefix field-set og-att-lte-ranges-GLB pondmobile-lte-ranges-AP pondmobile-lte-ranges-EU pondmobile-lte-ranges-US
+         destination prefix field-set example-lighthouse
+         protocol tcp source port all destination port 8443
+         !
+         actions
+            count accept-ports-443-to-example-lighthouse-v4
+      !
+      match rule-4-discard-port-8443-to-example-lighthouse-api ipv4
+         destination prefix field-set example-lighthouse
+         protocol tcp source port all destination port 8443
+         !
+         actions
+            count discard-port-8443-to-example-lighthouse-api-v4
+            drop
+      !
+      match rule-4.1-accept-port-8800-8888-to-example-zta-v4 ipv4
+         destination prefix 198.51.100.129/32 198.51.100.18/32
+         protocol tcp source port all destination port 8800, 8888
+         !
+         actions
+            count accept-port-8800-8888-to-example-zta-v4
+      !
+      match rule-5-accept-port-443-to-example-lighthouse-gui ipv4
+         source prefix 198.51.100.139/32 203.0.113.108/32 203.0.113.61/32 198.51.100.136/32
+         destination prefix field-set example-lighthouse
+         protocol tcp source port all destination port https
+         !
+         actions
+            count accept-port-443-to-example-lighthouse-gui-v4
+      !
+      match rule-6-discard-ports-443-to-example-lighthouse-gui ipv4
+         destination prefix field-set example-lighthouse
+         protocol tcp source port all destination port https
+         !
+         actions
+            count discard-ports-443-to-example-lighthouse-gui-v4
+            drop
+      !
+      match rule-7-accept-port-443-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port https
+         !
+         actions
+            count accept-port-443-to-example-prefixes-v4
+      !
+      match rule-8-accept-port-44445-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port 44445
+         !
+         actions
+            count accept-port-44445-to-example-prefixes-v4
+      !
+      match rule-9-accept-udp-port-44447-to-storage-test-poc ipv4
+         destination prefix 198.51.100.218/29
+         protocol tcp source port all destination port 44447
+         !
+         actions
+            count accept-udp-port-44447-to-storage-test-poc-v4
+      !
+      match rule-10-accept-any-to-dr2-public-ip-net ipv4
+         destination prefix field-set dr2-public-subnets
+         protocol tcp udp esp
+         !
+         actions
+            count accept-any-to-dr2-public-ip-net-v4
+      !
+      match rule-11-accept-icmp-to-example-prefixes ipv4
+         protocol icmp type echo-reply echo time-exceeded timestamp-request code all
+         !
+         actions
+            count accept-icmp-to-example-prefixes-v4
+            police rate 1000 kbps burst-size 625 kbytes
+      !
+      match rule-12-accept-cross-datacenter-vpn-esp ipv4
+         source prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol esp
+         !
+         actions
+            count accept-cross-datacenter-vpn-esp-v4
+      !
+      match rule-13-accept-cross-datacenter-vpn-udp ipv4
+         source prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol udp source port all destination port isakmp non500-isakmp
+         !
+         actions
+            count accept-cross-datacenter-vpn-udp-v4
+      !
+      match rule-14-accept-port-31032-31034-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol udp source port all destination port 31032-31034
+         !
+         actions
+            count accept-port-31032-31034-to-example-prefixes-v4
+      !
+      match rule-15-accept-port-9090-from-to-example-prefixes ipv4
+         source prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port 9090
+         !
+         actions
+            count accept-port-9090-to-example-prefixes-v4
+      !
+      match rule-16-accept-tracert-udp-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes
+         protocol udp source port all destination port 33434-33534
+         !
+         actions
+            count accept-tracert-udp-to-example-prefixes-v4
+            police rate 1000 kbps burst-size 625 kbytes
+      !
+      match rule-17-accept-port-80-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port www
+         !
+         actions
+            count accept-port-80-to-example-prefixes-v4
+      !
+      match rule-18-accept-port-7780-7900-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port 7770-7800
+         !
+         actions
+            count accept-port-7770-7800-to-example-prefixes-v4
+      !
+      match rule-19-accept-port-8080-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port 8080
+         !
+         actions
+            count accept-port-8080-to-example-prefixes-v4
+      !
+      match rule-20-accept-port-8443-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port 8443
+         !
+         actions
+            count accept-port-8443-to-example-prefixes-v4
+      !
+      match rule-21-accept-port-8444-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port 8444
+         !
+         actions
+            count accept-port-8444-to-example-prefixes-v4
+      !
+      match rule-22-accept-port-55555-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port 55555
+         !
+         actions
+            count accept-port-55555-to-example-prefixes-v4
+      !
+      match rule-23-accept-port-55556-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port 55556
+         !
+         actions
+            count accept-port-55556-to-example-prefixes-v4
+      !
+      match rule-24-accept-port-1194-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port openvpn
+         protocol udp source port all destination port openvpn
+         !
+         actions
+            count accept-port-1194-to-example-prefixes-v4
+      !
+      match rule-25-accept-source-port-1194-to-example-prefixes ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol udp source port all destination port openvpn
+         !
+         actions
+            count accept-source-port-1194-to-example-prefixes-v4
+      !
+      match rule-26-accept-port-10000-10300-to-minidc-reverse-ssh-server ipv4
+         destination prefix 198.51.100.107/32
+         protocol tcp source port all destination port 10000-10300
+         !
+         actions
+            count accept-port-10000-10300-to-minidc-reverse-ssh-server-v4
+      !
+      match rule-27-accept-port-636-to-peer-c-security-01 ipv4
+         source prefix field-set 636-to-peer-c-security
+         destination prefix 203.0.113.84/32
+         protocol tcp source port all destination port ldaps
+         !
+         actions
+            count accept-port-636-to-peer-c-security-01-v4
+      !
+      match rule-28-accept-port-18443-19443-to-elk-on-prem ipv4
+         source prefix field-set global-example-prefixes not-owned-by-example-prefixes on-prem-customers
+         destination prefix field-set on_prem_servers
+         protocol tcp source port all destination port 18443, 19443
+         !
+         actions
+            count accept-port-18443-19443-to-elk-on-prem-v4
+      !
+      match rule-29-accept-dns-server ipv4
+         destination prefix field-set internet-dns-servers-v4
+         protocol tcp source port all destination port domain
+         protocol udp source port all destination port domain
+         !
+         actions
+            count accept-dns-server-v4
+      !
+      match rule-29a-accept-dns-server-inbound ipv4
+         destination prefix 203.0.113.61/32
+         protocol tcp source port all destination port domain
+         protocol udp source port all destination port domain
+         !
+         actions
+            count accept-dns-server-inbound-v4
+      !
+      match rule-30-accept-ntp-traffic ipv4
+         source prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         destination prefix field-set public-ntp-servers-v4
+         protocol udp source port ntp destination port ntp
+         !
+         actions
+            count accept-ntp-traffic-v4
+            police rate 1000 kbps burst-size 625 kbytes
+      !
+      match rule-31-accept-traffic-to-ntp-servers ipv4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes public-ntp-servers-v4
+         protocol udp source port ntp destination port all
+         !
+         actions
+            count accept-traffic-to-ntp-servers-v4
+            police rate 1000 kbps burst-size 625 kbytes
+      !
+      match rule-32-accept-dns-traffic ipv4
+         source prefix field-set internet-dns-servers-v4
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         protocol udp source port domain destination port all
+         !
+         actions
+            count accept-dns-traffic-v4
+            police rate 1000 kbps burst-size 625 kbytes
+      !
+      match rule-33-accept-ssh-to-device ipv4
+         source prefix field-set dco-external-ssh
+         destination prefix field-set locals-v4
+         protocol tcp source port all destination port ssh
+         !
+         actions
+            count accept-ssh-to-device-v4
+            police rate 5000 kbps burst-size 625 kbytes
+      !
+      match rule-34-ssh-explicit-denial ipv4
+         source prefix field-set example-office-networks global-example-prefixes not-owned-by-example-prefixes
+         protocol tcp source port all destination port ssh
+         !
+         actions
+            count ssh-explicit-denial-v4
+            drop
+      !
+      match rule-35-accept-bgp-dst ipv4
+         source prefix field-set bgp-neighbors-v4
+         destination prefix field-set bgp-locals-v4
+         protocol tcp source port all destination port bgp
+         !
+         actions
+            count accept-bgp-dst-v4
+      !
+      match rule-36-accept-bgp-src ipv4
+         source prefix field-set bgp-neighbors-v4
+         destination prefix field-set bgp-locals-v4
+         protocol tcp source port bgp destination port all
+         !
+         actions
+            count accept-bgp-src-v4
+      !
+      match rule-37-block-not-allowed-traffic-from-dr2-customers ipv4
+         source prefix field-set dr2-public-subnets
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes on-prem-customers
+         !
+         actions
+            count block-not-allowed-traffic-from-dr2-customers-v4
+            drop
+      !
+      match rule-38-accept-cross-datacenter-traffic ipv4
+         source prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         !
+         actions
+            count accept-cross-datacenter-traffic-v4
+      !
+      match rule-39-accept-example-office-networks ipv4
+         source prefix field-set acro_office
+         destination prefix field-set global-example-prefixes not-owned-by-example-prefixes
+         !
+         actions
+            count accept-example-office-networks
+      !
+      match rule-40-allow-any-to-it-fw ipv4
+         destination prefix 198.51.100.148/24 203.0.113.136/32
+         !
+         actions
+            count allow-any-to-it-fw
+      !
+      match rule-101-accept-v6-icmp ipv6
+         protocol icmpv6 type 1-4, 129, 133-137 code all
+         !
+         actions
+            count accept-icmp-v6
+            police rate 1000 kbps burst-size 625 kbytes
+      !
+      match rule-102-reject-amplified-reflection-attack ipv6
+         protocol udp source port 17, 19, 111, 137, 161, 389, 520, 751, 1434, 1900, 5353, 6881, 11211, 27015, 27960 destination port all
+         !
+         actions
+            count reject-amplified-reflection-attack-v6
+            drop
+      !
+      match rule-103-allow-tcp-est ipv6
+         protocol tcp flags established
+         !
+         actions
+            count accept-tcp-established-v6
+      !
+      match rule-104-accept-port-443-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port all destination port https
+         !
+         actions
+            count accept-port-443-to-example-prefixes-v6
+      !
+      match rule-105-accept-port-44445-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port all destination port 44445
+         !
+         actions
+            count accept-port-44445-to-example-prefixes-v6
+      !
+      match rule-106-accept-any-to-dr2-public-ip-net-v6 ipv6
+         destination prefix field-set dr2-public-ip-net-v6
+         protocol 6, 17, 50
+         !
+         actions
+            count accept-any-to-dr2-public-ip-net-v6
+      !
+      match rule-107-ssh-explicit-denial ipv6
+         source prefix field-set example-office-networks-v6 global-example-prefixes-v6 not-owned-by-example-prefixes-v6
+         protocol tcp source port all destination port ssh
+         !
+         actions
+            count ssh-explicit-denial
+            drop
+      !
+      match rule-108-accept-example-office-networks-v6 ipv6
+         source prefix field-set example-office-networks-v6
+         destination prefix field-set global-example-prefixes-v6
+         !
+         actions
+            count accept-example-office-networks-v6
+      !
+      match rule-109-accept-cross-datacenter-traffic-v6 ipv6
+         source prefix field-set global-example-prefixes-v6 not-owned-by-example-prefixes-v6
+         destination prefix field-set global-example-prefixes-v6 not-owned-by-example-prefixes-v6
+         !
+         actions
+            count accept-cross-datacenter-traffic-v6
+      !
+      match rule-110-accept-port-9090-from-to-example-prefixes-v6 ipv6
+         source prefix field-set global-example-prefixes-v6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port all destination port 9090
+         !
+         actions
+            count accept-port-9090-to-example-prefixes-v6
+      !
+      match rule-111-accept-tracert-udp-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol udp source port all destination port 33434-33534
+         !
+         actions
+            count accept-tracert-udp-to-example-prefixes-v6
+            police rate 1000 kbps burst-size 625 kbytes
+      !
+      match rule-112-accept-port-80-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port www destination port all
+         protocol tcp source port all destination port www
+         !
+         actions
+            count accept-port-80-to-example-prefixes-v6
+      !
+      match rule-113-accept-port-7780-7900-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port all destination port 7770-7800
+         !
+         actions
+            count accept-port-7770-7800-to-example-prefixes-v6
+      !
+      match rule-114-accept-port-8080-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port all destination port 8080
+         !
+         actions
+            count accept-port-8080-to-example-prefixes-v6
+      !
+      match rule-115-accept-port-8443-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port all destination port 8443
+         !
+         actions
+            count accept-port-8443-to-example-prefixes-v6
+      !
+      match rule-116-accept-port-8444-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port all destination port 8444
+         !
+         actions
+            count accept-port-8444-to-example-prefixes-v6
+      !
+      match rule-117-accept-port-55555-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port all destination port 55555
+         !
+         actions
+            count accept-port-55555-to-example-prefixes-v6
+      !
+      match rule-118-accept-port-55556-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6
+         protocol tcp source port all destination port 55556
+         !
+         actions
+            count accept-port-55556-to-example-prefixes
+      !
+      match rule-119-accept-source-port-1194-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6 not-owned-by-example-prefixes-v6
+         protocol tcp source port all destination port openvpn
+         protocol udp source port all destination port openvpn
+         !
+         actions
+            count accept-port-1194-to-example-prefixes-v6
+      !
+      match rule-120-accept-source-port-1194-to-example-prefixes-v6 ipv6
+         destination prefix field-set global-example-prefixes-v6 not-owned-by-example-prefixes-v6
+         protocol udp source port openvpn destination port all
+         !
+         actions
+            count accept-source-port-1194-to-example-prefixes-v6
+      !
+      match rule-121-accept-bgp-dst ipv6
+         source prefix field-set bgp-neighbors-v6
+         destination prefix field-set bgp-locals-v6
+         protocol tcp source port all destination port bgp
+         !
+         actions
+            count accept-bgp-dst-v6
+      !
+      match rule-122-accept-bgp-src ipv6
+         source prefix field-set bgp-neighbors-v6
+         destination prefix field-set bgp-locals-v6
+         protocol tcp source port bgp destination port all
+         !
+         actions
+            count accept-bgp-src-v6
+      !
+      match rule-accept-port-8200-to-peer-a-vault ipv4
+         destination prefix 198.51.100.130/32
+         protocol tcp source port all destination port 8200
+         !
+         actions
+            count accept-port-8200-to-peer-a-vault
+      !
+      match rule-fra2-acs2-to-peer-a-acs1-ssh-temp-DCN-5452 ipv4
+         source prefix field-set fra2-acs2-servers
+         destination prefix field-set eu9-acs1-servers
+         protocol tcp source port all destination port ssh
+         !
+         actions
+            count fra2-acs2-to-peer-a-acs1-ssh-temp-DCN-5452
+      !
+      match ipv4-all-default ipv4
+         actions
+            drop
+      !
+      match ipv6-all-default ipv6
+         actions
+            drop
+!
+management ssh
+   idle-timeout 15
+!

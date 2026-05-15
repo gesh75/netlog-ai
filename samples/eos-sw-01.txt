@@ -1,0 +1,461 @@
+! Command: show running-config
+! device: got1-sw-03a (DCS-7050SX3-48YC8C, EOS-4.30.4M)
+!
+! boot system flash:/EOS-4.30.4M-x86_64.swi
+!
+enable password sha512 $6$REDACTED$REDACTED
+aaa root secret sha512 $6$REDACTED$REDACTED
+no username admin
+!
+username netadmin4 privilege 15 role network-admin nopassword
+username netadmin4 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username gandalf privilege 15 role network-admin secret sha512 $6$REDACTED$REDACTED
+username gandalf ssh-key <REDACTED-SSH-KEY> gandalf
+username netadmin3 privilege 15 role network-admin nopassword
+username netadmin3 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username gnmi role gnmi secret sha512 $6$REDACTED$REDACTED
+username isivkov privilege 15 role network-admin nopassword
+username isivkov ssh-key <REDACTED-SSH-KEY> Ilya.Sivkov@YubiKey-5C-NFC
+username netadmin2 privilege 15 role network-admin nopassword
+username netadmin2 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username nlucier privilege 15 role network-admin nopassword
+username nlucier ssh-key <REDACTED-SSH-KEY> Nate-USB-C
+username ttotev privilege 15 role network-admin nopassword
+username ttotev ssh-key <REDACTED-SSH-KEY> ttotev@mirkwoodmac
+username velvet privilege 15 role network-admin secret sha512 $6$REDACTED$REDACTED
+username netadmin1 privilege 15 role network-admin nopassword
+username netadmin1 ssh-key <REDACTED-SSH-KEY> admin@example.com
+username netadmin6 privilege 15 role network-admin nopassword
+username netadmin6 ssh-key <REDACTED-SSH-KEY> admin@example.com
+!
+service routing protocols model multi-agent
+!
+logging vrf mgmt host 10.1.238.240
+logging vrf mgmt source-interface Management1
+!
+hostname got1-sw-03a
+!
+snmp-server engineID local 00c52c443d42
+snmp-server location GOT1
+snmp-server local-interface Management1
+snmp-server view all iso included
+snmp-server group snmp_group_ro v3 priv read all
+snmp-server user snmp_librenms_amer snmp_group_ro v3 localized 00c52c443d42 auth sha a569f9de0791dc87e398b08d6beb633aa3616b53 priv aes b6ea0ed68da9f2c5b4261dd8cda6ef28
+snmp-server user snmp_librenms_apac snmp_group_ro v3 localized 00c52c443d42 auth sha 5898b7b357dc83c04a62e52d483b228d2b587ad8 priv aes 915c28c97f23e6e1ac93cdac095f04c2
+snmp-server user snmp_librenms_emea snmp_group_ro v3 localized 00c52c443d42 auth sha 6498c3bd709f03c23d88b343f0c32af991e52335 priv aes b930e688955e4c928e2e48770225a760
+snmp-server user snmp_telegraf snmp_group_ro v3 localized 00c52c443d42 auth sha 2b62057ea8477c30fce16f76e99984de56da29dd priv aes 715b03487c5dba6a34ae4fd1a53a8bf2
+snmp-server vrf mgmt
+!
+spanning-tree mode mstp
+!
+service unsupported-transceiver vendorUnlockKey d537d12d
+!
+system l1
+   unsupported speed action error
+   unsupported error-correction action error
+!
+vlan 10,14,19-22,28,33-34,66,115,206,216,226
+!
+vlan 4094
+   trunk group MLAG-SW01AB
+!
+vrf instance mgmt
+!
+banner motd
+=================================================================
+WARNING!
+This is a private computer system. Unauthorized access or use
+is prohibited and subject to prosecution and/or disciplinary
+action. All use of this system constitutes consent to
+monitoring at all times and users are not entitled to any
+expectation of privacy. If monitoring reveals possible evidence
+of violation of criminal statutes, this evidence and any other
+related information, including identification information about
+the user, may be provided to law enforcement officials.
+If monitoring reveals violations of security regulations or
+unauthorized use, employees who violate security regulations or
+make unauthorized use of this system are subject to appropriate
+disciplinary action.
+=================================================================
+EOF
+!
+management api http-commands
+   no shutdown
+   !
+   vrf mgmt
+      no shutdown
+!
+management console
+   idle-timeout 15
+!
+management api gnmi
+   transport grpc default
+      port 32767
+      listen-addresses 10.1.46.103
+   provider eos-native
+!
+aaa authorization exec default local
+!
+interface Port-Channel1
+   description got1-sw-04
+   switchport trunk allowed vlan 14,21-22
+   switchport mode trunk
+   mlag 1
+!
+interface Port-Channel2
+   description got1-sw-01
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-22,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 2
+!
+interface Port-Channel9
+   description got1-sw-03b
+   mtu 9202
+   switchport mode trunk
+   switchport trunk group MLAG-SW01AB
+!
+interface Port-Channel10
+   description got1-aci01-11
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 10
+!
+interface Port-Channel11
+   description got1-aci01-12
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 11
+!
+interface Port-Channel12
+   description got1-aci01-13
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 12
+!
+interface Port-Channel13
+   description got1-aci01-14
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 13
+!
+interface Port-Channel14
+   description got1-aci01-15
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 14
+!
+interface Port-Channel15
+   description got1-aci01-16
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 15
+!
+interface Port-Channel16
+   description got1-aci01-17
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 16
+!
+interface Port-Channel17
+   description got1-aci01-18
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 17
+!
+interface Port-Channel18
+   description got1-aci01-19
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 18
+!
+interface Port-Channel19
+   description got1-aci01-20
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 19
+!
+interface Port-Channel20
+   description got1-aci01-21
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 20
+!
+interface Port-Channel21
+   description got1-aci01-22
+   mtu 9202
+   switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
+   switchport mode trunk
+   mlag 21
+!
+interface Ethernet1
+   description got1-aci01-11
+   channel-group 10 mode active
+   lacp timer fast
+!
+interface Ethernet2
+   description got1-aci01-12
+   channel-group 11 mode active
+   lacp timer fast
+!
+interface Ethernet3
+   description got1-aci01-13
+   channel-group 12 mode active
+   lacp timer fast
+!
+interface Ethernet4
+   description got1-aci01-14
+   channel-group 13 mode active
+   lacp timer fast
+!
+interface Ethernet5
+   description got1-aci01-15
+   channel-group 14 mode active
+   lacp timer fast
+!
+interface Ethernet6
+   description got1-aci01-16
+   channel-group 15 mode active
+   lacp timer fast
+!
+interface Ethernet7
+   description got1-aci01-17
+   channel-group 16 mode active
+   lacp timer fast
+!
+interface Ethernet8
+   description got1-aci01-18
+   channel-group 17 mode active
+   lacp timer fast
+!
+interface Ethernet9
+   description got1-aci01-19
+   channel-group 18 mode active
+   lacp timer fast
+!
+interface Ethernet10
+   description got1-aci01-20
+   channel-group 19 mode active
+   lacp timer fast
+!
+interface Ethernet11
+   description got1-aci01-21
+   channel-group 20 mode active
+   lacp timer fast
+!
+interface Ethernet12
+   description got1-aci01-22
+   channel-group 21 mode active
+   lacp timer fast
+!
+interface Ethernet13
+!
+interface Ethernet14
+!
+interface Ethernet15
+!
+interface Ethernet16
+!
+interface Ethernet17
+!
+interface Ethernet18
+!
+interface Ethernet19
+!
+interface Ethernet20
+!
+interface Ethernet21
+!
+interface Ethernet22
+!
+interface Ethernet23
+!
+interface Ethernet24
+!
+interface Ethernet25
+!
+interface Ethernet26
+!
+interface Ethernet27
+!
+interface Ethernet28
+!
+interface Ethernet29
+!
+interface Ethernet30
+!
+interface Ethernet31
+!
+interface Ethernet32
+!
+interface Ethernet33
+!
+interface Ethernet34
+!
+interface Ethernet35
+!
+interface Ethernet36
+!
+interface Ethernet37
+!
+interface Ethernet38
+!
+interface Ethernet39
+!
+interface Ethernet40
+!
+interface Ethernet41
+!
+interface Ethernet42
+!
+interface Ethernet43
+!
+interface Ethernet44
+!
+interface Ethernet45
+!
+interface Ethernet46
+!
+interface Ethernet47
+!
+interface Ethernet48
+   description got1-sw-04
+   channel-group 1 mode active
+!
+interface Ethernet49/1
+   description got1-sw-03b
+   channel-group 9 mode active
+!
+interface Ethernet50/1
+   description got1-sw-03b
+   channel-group 9 mode active
+!
+interface Ethernet51/1
+!
+interface Ethernet52/1
+!
+interface Ethernet53/1
+!
+interface Ethernet54/1
+!
+interface Ethernet55/1
+!
+interface Ethernet56/1
+   description got1-sw-01a
+   channel-group 2 mode active
+   lacp timer fast
+!
+interface Management1
+   vrf mgmt
+   ip address 10.1.46.103/24
+!
+interface Vlan4094
+   no autostate
+   ip address 192.0.2.129/31
+!
+ip virtual-router mac-address 00:00:00:00:dc:01
+!
+ipv6 access-list filter-all-in-one-v6
+   10 permit tcp any any eq bgp
+   11 permit icmpv6 any any
+   12 permit tcp any any established
+!
+ip access-list filter-all-in-one
+   10 remark #allow-tcp-est
+   20 permit tcp any any established
+   30 remark #accept-bfd
+   40 permit udp 10.2.0.0/16 any eq bfd bfd-echo multihop-bfd
+   50 remark #accept-bgp-dst
+   60 permit tcp 10.2.255.0/24 10.2.255.0/24 eq bgp
+   70 permit tcp 10.3.255.0/24 10.3.255.0/24 eq bgp
+   80 permit tcp 10.4.255.0/24 10.4.255.0/24 eq bgp
+   90 remark #accept-bgp-src
+   100 permit tcp 10.2.255.0/24 10.2.255.0/24 eq bgp
+   110 permit tcp 10.3.255.0/24 10.3.255.0/24 eq bgp
+   120 permit tcp 10.4.255.0/24 10.4.255.0/24 eq bgp
+   130 remark #allow-pxe
+   140 permit tcp host 0.0.0.0 any eq 67 68 69 4011
+   150 permit tcp 10.2.0.0/16 any eq 67 68 69 4011
+   160 remark #accept-dns
+   170 permit udp host 10.1.251.12 host 10.1.46.103 eq domain
+   180 permit udp host 10.1.251.18 host 10.1.46.103 eq domain
+   190 remark #accept-icmp
+   200 permit icmp any any
+   210 remark #accept-netconf-mgmt
+   220 permit tcp 10.1.0.0/16 host 10.1.46.103 eq netconf-ssh
+   221 permit tcp 10.1.0.0/16 host 10.1.46.103 eq https
+   230 remark #accept-ntp
+   240 permit udp host 10.1.251.49 host 10.1.46.103 eq ntp
+   250 permit udp host 10.1.247.49 host 10.1.46.103 eq ntp
+   260 permit udp host 10.1.238.49 host 10.1.46.103 eq ntp
+   270 permit udp host 10.1.243.49 host 10.1.46.103 eq ntp
+   280 permit udp host 203.0.113.240 host 10.1.46.103 eq ntp
+   290 permit udp host 192.0.2.100 host 10.1.46.103 eq ntp
+   300 permit udp host 203.0.113.10 host 10.1.46.103 eq ntp
+   310 permit udp host 203.0.113.112 host 10.1.46.103 eq ntp
+   320 remark #accept-grpc
+   330 permit tcp host 10.1.238.240 host 10.1.46.103 eq 32767
+   340 remark #accept-snmp
+   350 permit udp host 10.1.238.50 host 10.1.46.103 range snmp snmptrap
+   360 permit udp host 10.1.238.199 host 10.1.46.103 range snmp snmptrap
+   370 permit udp host 10.1.238.240 host 10.1.46.103 range snmp snmptrap
+   380 permit udp host 10.1.243.199 host 10.1.46.103 range snmp snmptrap
+   390 permit udp host 10.1.251.42 host 10.1.46.103 range snmp snmptrap
+   400 permit udp host 10.1.251.149 host 10.1.46.103 range snmp snmptrap
+   410 permit udp host 10.1.251.199 host 10.1.46.103 range snmp snmptrap
+   420 permit udp host 10.1.253.149 host 10.1.46.103 range snmp snmptrap
+   430 remark #accept-ssh-mgmt
+   440 permit tcp 10.1.0.0/16 host 10.1.46.103 eq ssh
+   445 permit tcp 10.4.0.0/16 host 10.4.11.139 eq ssh
+   450 remark #accept-ssh
+   460 remark #accept-traceroute-icmp
+   470 permit icmp any any traceroute
+   480 remark #accept-mlag
+   490 permit tcp any any eq mlag ttl eq 255
+   500 permit udp any any eq mlag ttl eq 255
+   510 permit tcp any eq mlag any ttl eq 255
+   520 remark #accept-vrrp
+   530 permit vrrp any any
+!
+ip routing
+ip routing vrf mgmt
+!
+system control-plane
+   ip access-group filter-all-in-one in
+   ipv6 access-group filter-all-in-one-v6 in
+!
+mlag configuration
+   domain-id MLAG-01
+   local-interface Vlan4094
+   peer-address 203.0.113.173
+   peer-address heartbeat 10.1.46.123
+   peer-link Port-Channel9
+   dual-primary detection delay 5 action errdisable all-interfaces
+!
+ip route vrf mgmt 10.1.0.0/16 10.1.46.1
+!
+ntp local-interface Management1
+ntp server 10.1.238.49
+ntp server 10.1.243.49
+ntp server 10.1.247.49
+ntp server 10.1.251.49 prefer
+!
+role gnmi
+   10 deny mode exec command .*
+!
+management ssh
+   idle-timeout 15
+   !
+   vrf mgmt
+!

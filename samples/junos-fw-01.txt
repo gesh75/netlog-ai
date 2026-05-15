@@ -1,0 +1,2963 @@
+
+## Last commit: 2026-02-02 14:17:50 GMT by isivkov
+version 21.4R3-S9.8;
+groups {
+    node0 {
+        system {
+            host-name peer-a-fw-01a;
+            services {
+                ssh {
+                    max-sessions-per-connection 32;
+                }
+            }
+        }
+    }
+    node1 {
+        system {
+            host-name peer-a-fw-01b;
+            services {
+                ssh {
+                    max-sessions-per-connection 32;
+                }
+            }
+        }
+    }
+}
+apply-groups "${node}";
+system {
+    root-authentication {
+        encrypted-password "<REDACTED>";
+    }
+    login {
+        retry-options {
+            tries-before-disconnect 3;
+            backoff-threshold 3;
+            backoff-factor 10;
+            lockout-period 4;
+        }
+        idle-timeout 15;
+        class config_backup {
+            permissions [ secret view view-configuration ];
+            deny-commands all;
+        }
+        class config_control {
+            permissions [ configure control view ];
+        }
+        class network-operations-team {
+            permissions all;
+        }
+        class read_only {
+            permissions [ network routing view-configuration ];
+            allow-commands show;
+            deny-commands "(clear)|(file)|(file show)|(help)|(load)|(monitor)|(op)|(request)|(save)|(set)|(start)|(test)";
+            deny-configuration all;
+        }
+        user netadmin4 {
+            uid 1117;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user gandalf {
+            uid 2105;
+            class config_control;
+            authentication {
+                ssh-rsa "<REDACTED-SSH-KEY> gandalf";
+            }
+        }
+        user netadmin3 {
+            uid 1121;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user isivkov {
+            uid 1122;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> Ilya.Sivkov@YubiKey-5C-NFC";
+                ssh-ecdsa "<REDACTED-SSH-KEY> Ilya.Sivkov@YubiKey-5-NFC";
+            }
+        }
+        user junos_backup {
+            uid 2101;
+            class config_backup;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY>";
+            }
+        }
+        user netadmin5 {
+            uid 1112;
+            class read_only;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user netadmin2 {
+            uid 1123;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user oelliott {
+            uid 1120;
+            class read_only;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> oliver.elliott@YubiKey1";
+                ssh-ecdsa "<REDACTED-SSH-KEY> oliver.elliott@YubiKey2";
+            }
+        }
+        user sdaniels {
+            uid 1119;
+            class read_only;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> shaun Key Management";
+                ssh-ecdsa "<REDACTED-SSH-KEY> shaun Key Management";
+            }
+        }
+        user ttotev {
+            uid 1115;
+            class read_only;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> ttotev@mirkwoodmac";
+            }
+        }
+        user velvet {
+            uid 2000;
+            class network-operations-team;
+            authentication {
+                encrypted-password "<REDACTED>";
+            }
+        }
+        user netadmin1 {
+            uid 1116;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        user netadmin6 {
+            uid 1125;
+            class network-operations-team;
+            authentication {
+                ssh-ecdsa "<REDACTED-SSH-KEY> admin@example.com";
+            }
+        }
+        message "\n\n=================================================================\n\n WARNING! \n\n\n This is a private computer system. Unauthorized access or use \n is prohibited and subject to prosecution and/or disciplinary \n action. All use of this system constitutes consent to \n monitoring at all times and users are not entitled to any \n expectation of privacy. If monitoring reveals possible evidence \n of violation of criminal statutes, this evidence and any other \n related information, including identification information about \n the user, may be provided to law enforcement officials. \n If monitoring reveals violations of security regulations or \n unauthorized use, employees who violate security regulations or \n make unauthorized use of this system are subject to appropriate \n disciplinary action.\n\n=================================================================\n\n";
+    }
+    services {
+        ssh {
+            root-login deny;
+            sftp-server;
+        }
+        netconf {
+            ssh;
+        }
+    }
+    domain-name net.example.com;
+    time-zone GMT;
+    no-redirects;
+    no-redirects-ipv6;
+    no-ping-time-stamp;
+    internet-options {
+        no-source-quench;
+        no-tcp-reset drop-all-tcp;
+    }
+    authentication-order password;
+    name-server {
+        10.1.251.12;
+        10.1.251.18;
+    }
+    syslog {
+        user * {
+            any emergency;
+        }
+        host 10.1.148.10 {
+            any notice;
+        }
+        host 10.1.238.240 {
+            any notice;
+            authorization info;
+            match "!(.*usage requires a license.*|.*is Unreachable.*|.*last message repeated.*|.*kernel time sync enabled.*|.*tcp_timer_keep.*|.*RT_IPSEC_BAD_SPI.*|.*JTASK_IO_CONNECT_FAILED.*)";
+        }
+        file default-log-messages {
+            any any;
+            match "(requested 'commit' operation)|(requested 'commit synchronize' operation)|(copying configuration to juniper.save)|(commit complete)|ifAdminStatus|(FRU power)|(FRU removal)|(FRU insertion)|(link UP)|transitioned|Transferred|transfer-file|(license add)|(license delete)|(package -X update)|(package -X delete)|(FRU Online)|(FRU Offline)|(plugged in)|(unplugged)|QF_NODE|QF_SERVER_NODE_GROUP|QF_INTERCONNECT|QF_DIRECTOR|QF_NETWORK_NODE_GROUP|(Master Unchanged, Members Changed)|(Master Changed, Members Changed)|(Master Detected, Members Changed)|(vc add)|(vc delete)|(Master detected)|(Master changed)|(Backup detected)|(Backup changed)|(interface vcp-)";
+            archive size 5m files 10;
+            structured-data;
+        }
+        file messages {
+            any notice;
+            authorization info;
+            match "!(.*usage requires a license.*|.*is Unreachable.*|.*last message repeated.*|.*kernel time sync enabled.*|.*tcp_timer_keep.*|.*RT_IPSEC_BAD_SPI.*|.*JTASK_IO_CONNECT_FAILED.*)";
+            archive size 5m files 10;
+            structured-data;
+        }
+        source-address 10.1.42.1;
+    }
+    ntp {
+        server 10.1.251.49;
+        server 10.1.238.49;
+        server 10.1.247.49;
+        server 10.1.243.49;
+        source-address 10.1.42.1;
+    }
+}
+chassis {
+    cluster {
+        reth-count 4;
+        redundancy-group 0 {
+            node 1 priority 1;
+            node 0 priority 100;
+        }
+        redundancy-group 1 {
+            node 1 priority 1;
+            node 0 priority 100;
+            interface-monitor {
+                xe-0/0/16 weight 255;
+                xe-7/0/16 weight 255;
+                xe-0/0/17 weight 255;
+                xe-7/0/17 weight 255;
+            }
+        }
+    }
+}
+security {
+    log {
+        mode stream;
+        format sd-syslog;
+        source-address 10.1.42.1;
+        stream peer-c-ntw-junspace-log-01 {
+            format sd-syslog;
+            category all;
+            host {
+                10.1.238.145;
+                port 514;
+            }
+        }
+    }
+    pki {
+        ca-profile PEER-C-NTW-WIN-01 {
+            ca-identity ASH1-SRV01-CA;
+            enrollment {
+                url http://192.0.2.231/certsrv/mscep/mscep.dll;
+                retry 20;
+                retry-interval 1800;
+            }
+            revocation-check {
+                use-crl;
+                crl {
+                    url http://192.0.2.231/CertEnroll/ash1-srv01-ca.crl;
+                }
+            }
+        }
+        ca-profile PEER-B-NTW-WIN-01 {
+            ca-identity PEER-B-NTW-WIN-01-CA;
+            enrollment {
+                url http://203.0.113.61/certsrv/mscep/mscep.dll;
+                retry 20;
+                retry-interval 1800;
+            }
+            revocation-check {
+                use-crl;
+                crl {
+                    url http://203.0.113.61/CertEnroll/peer-b-ntw-win-01-ca.crl;
+                }
+            }
+        }
+    }
+    ike {
+        proposal IKE_PROP {
+            authentication-method rsa-signatures;
+            dh-group group19;
+            encryption-algorithm aes-256-gcm;
+        }
+        policy IKE_POL {
+            proposals IKE_PROP;
+            certificate {
+                local-certificate peer-a-fw-01;
+            }
+        }
+        gateway PARTNER_GW {
+            ike-policy IKE_POL;
+            address 198.51.100.217;
+            dead-peer-detection;
+            local-identity distinguished-name;
+            remote-identity distinguished-name;
+            external-interface reth0.10;
+            local-address 203.0.113.40;
+            advpn {
+                suggester {
+                    disable;
+                }
+                partner {
+                    idle-time 86400;
+                    idle-threshold 3;
+                }
+            }
+            version v2-only;
+        }
+    }
+    ipsec {
+        proposal IPSEC_PROP {
+            protocol esp;
+            encryption-algorithm aes-256-gcm;
+        }
+        policy IPSEC_POL {
+            perfect-forward-secrecy {
+                keys group5;
+            }
+            proposals IPSEC_PROP;
+        }
+        vpn PARTNER_VPN {
+            bind-interface st0.1;
+            vpn-monitor {
+                optimized;
+            }
+            ike {
+                gateway PARTNER_GW;
+                idle-time 86400;
+                ipsec-policy IPSEC_POL;
+            }
+            establish-tunnels immediately;
+        }
+    }
+    flow {
+        tcp-mss {
+            ipsec-vpn {
+                mss 1350;
+            }
+        }
+    }
+    screen {
+        ids-option untrust-screen {
+            icmp {
+                ping-death;
+            }
+            ip {
+                spoofing;
+                source-route-option;
+                tear-drop;
+            }
+            tcp {
+                syn-flood {
+                    alarm-threshold 1024;
+                    attack-threshold 200;
+                    source-threshold 1024;
+                    destination-threshold 2048;
+                    queue-size 2000;
+                    timeout 20;
+                }
+                land;
+            }
+        }
+    }
+    nat {
+        source {
+            pool public {
+                address {
+                    203.0.113.40/32 to 192.0.2.12/32;
+                }
+            }
+            rule-set ntw-loc-to-ntw-wan {
+                from zone ntw-loc;
+                to zone ntw-wan;
+                rule ntw_servers {
+                    match {
+                        source-address 10.1.247.0/24;
+                    }
+                    then {
+                        source-nat {
+                            pool {
+                                public;
+                            }
+                        }
+                    }
+                }
+            }
+            rule-set ntw-vlan14-to-ntw-wan {
+                description DCN-2153;
+                from zone [ junos-host ntw-vlan14 ];
+                to zone ntw-wan;
+                rule ntw-vlan14-to-ntp-servers {
+                    match {
+                        source-address 10.1.42.0/24;
+                        destination-address [ 203.0.113.240/32 203.0.113.112/32 203.0.113.10/32 192.0.2.100/32 ];
+                    }
+                    then {
+                        source-nat {
+                            pool {
+                                public;
+                            }
+                        }
+                    }
+                }
+                rule ntw-vlan14 {
+                    match {
+                        source-address 10.1.42.40/30;
+                    }
+                    then {
+                        source-nat {
+                            pool {
+                                public;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        destination {
+            pool peer-a-ntw-win-01 {
+                address 10.1.247.149/32 port 443;
+            }
+            pool peer-a-ntw-saltdev-01-4505 {
+                address 10.1.247.10/32 port 4505;
+            }
+            pool peer-a-ntw-saltdev-01-4506 {
+                address 10.1.247.10/32 port 4506;
+            }
+            rule-set peer-a {
+                from zone ntw-wan;
+                rule to-peer-a-ntw-saltdev-01-4505 {
+                    match {
+                        destination-address 203.0.113.40/32;
+                        application tcp-port-4505;
+                    }
+                    then {
+                        destination-nat {
+                            pool {
+                                peer-a-ntw-saltdev-01-4505;
+                            }
+                        }
+                    }
+                }
+                rule to-peer-a-ntw-saltdev-01-4506 {
+                    match {
+                        destination-address 203.0.113.40/32;
+                        application tcp-port-4506;
+                    }
+                    then {
+                        destination-nat {
+                            pool {
+                                peer-a-ntw-saltdev-01-4506;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    policies {
+        from-zone ntw-advpn to-zone ntw-advpn {
+            policy ntw-advpn-to-ntw-advpn-allow-all {
+                match {
+                    source-address 10.1.0.0/16;
+                    destination-address 10.1.0.0/16;
+                    application any;
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-advpn to-zone ntw-vlan14 {
+            policy ntw-opnsense-to-ntw-vlan14-allow-ssh {
+                match {
+                    source-address [ 10.1.144.0/24 10.1.252.0/24 ];
+                    destination-address 10.1.42.0/24;
+                    application junos-ssh;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-advpn-to-ntw-vlan14-any {
+                match {
+                    source-address 10.1.0.0/16;
+                    destination-address 10.1.42.0/24;
+                    application [ udp-port-161 udp-port-162 junos-icmp-all udp-ports-33434-33534 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-advpn-to-ntw-vlan14 {
+                description DCN-970;
+                match {
+                    source-address fra2-ntw-mon-01;
+                    destination-address 10.1.42.0/24;
+                    application [ tcp-port-32767 junos-ping snmp udp-ports-33434-33534 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-c-ntw-proxyminions-to-ntw-vlan14 {
+                match {
+                    source-address [ peer-c-ntw-proxyminion-01 peer-c-ntw-proxyminion-02 ];
+                    destination-address 10.1.42.0/24;
+                    application [ tcp-port-830 junos-ping junos-ssh junos-https ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-b-ntw-proxyminions-to-ntw-vlan14 {
+                match {
+                    source-address peer-b-ntw-proxyminion-01;
+                    destination-address 10.1.42.0/24;
+                    application [ tcp-port-830 junos-ping junos-ssh junos-https ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy mmj1-ntw-proxyminions-to-ntw-vlan14 {
+                match {
+                    source-address mmj1-ntw-proxyminion-01;
+                    destination-address 10.1.42.0/24;
+                    application [ tcp-port-830 junos-ping junos-ssh junos-https ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-b-ntw-device42-ntw-vlan14 {
+                match {
+                    source-address peer-b-ntw-device42;
+                    destination-address 10.1.42.0/24;
+                    application [ junos-ping snmp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-c-ntw-saltprod-01-to-ntw-vlan14 {
+                description DCN-270;
+                match {
+                    source-address peer-c-ntw-saltprod-01;
+                    destination-address 10.1.42.0/24;
+                    application [ junos-icmp-ping junos-ssh tcp-port-830 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy drone-suzieq-to-ntw-vlan14 {
+                description "DCN-3388 DCN-4019";
+                match {
+                    source-address [ peer-c-ntw-drone-01 peer-c-ntw-suzieq-01 ];
+                    destination-address 10.1.42.0/24;
+                    application [ tcp-port-830 junos-ping junos-ssh junos-https junos-icmp-ping ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-opnsense-to-ntw-vlan14-allow-https-to-opengear {
+                match {
+                    source-address [ 10.1.144.0/24 10.1.252.0/24 ];
+                    destination-address [ 10.1.42.41/32 10.1.42.42/32 ];
+                    application junos-https;
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-advpn to-zone ntw-loc {
+            policy admin-network-to-ntw-loc {
+                match {
+                    source-address [ 10.1.252.0/24 10.1.144.0/24 ];
+                    destination-address 10.1.247.0/24;
+                    application [ junos-ssh junos-ftp junos-https junos-http junos-icmp-ping junos-dns-udp junos-dns-tcp tcp-port-3389 tcp-port-4343 tcp-port-8200 tcp-port-8080 tcp-port-8081 tcp-port-8082 tcp-port-8088 tcp-port-8090 tcp-port-8443 tcp-port-8888 tcp-port-9090 tcp-port-9092 tcp-port-9095 udp-ports-33434-33534 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-advpn-to-ntp-servers {
+                description DCN-1454;
+                match {
+                    source-address [ 10.1.0.0/16 10.3.255.0/24 10.3.254.0/24 ];
+                    destination-address peer-a-ntw-ntp-01;
+                    application [ junos-ping junos-ntp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-c-ntw-term-01-to-kvm-servers {
+                match {
+                    source-address peer-c-ntw-term-01;
+                    destination-address 10.1.247.0/24;
+                    application junos-ssh;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy services-to-peer-a-ntw-ipa {
+                match {
+                    source-address 10.1.0.0/16;
+                    destination-address peer-a-ntw-ipa-01;
+                    application [ tcp-port-636 tcp-port-389 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ipa-replicas-to-peer-a-ntw-ipa-01 {
+                match {
+                    source-address [ peer-c-ntw-ipa-01 peer-c-ntw-ipa-02 peer-b-ntw-ipa-01 mmj1-ntw-ipa-01 ];
+                    destination-address peer-a-ntw-ipa-01;
+                    application [ junos-https junos-http tcp-port-88 tcp-port-389 tcp-port-464 tcp-port-636 tcp-port-7389 udp-port-88 udp-port-464 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy regional-salt-master-to-ntw-loc {
+                description DCN-252;
+                match {
+                    source-address peer-b-ntw-saltprod-01;
+                    destination-address 10.1.247.0/24;
+                    application junos-ssh;
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-advpn to-zone ntw-cybernet {
+            policy ntw-advpn-to-ntw-cybernet {
+                match {
+                    source-address 10.1.0.0/16;
+                    destination-address [ 10.3.254.0/24 10.3.249.0/24 ];
+                    application [ junos-ping snmp udp-ports-33434-33534 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy admin-subnet-to-ntw-cybernet {
+                match {
+                    source-address [ 10.1.144.0/24 10.1.252.0/24 ];
+                    destination-address [ 10.3.254.0/24 10.3.249.0/24 ];
+                    application [ junos-ssh junos-ping udp-ports-33434-33534 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-b-ntw-mon-01-to-ntw-cybernet {
+                description DCN-970;
+                match {
+                    source-address peer-b-ntw-mon-01;
+                    destination-address 10.3.254.0/24;
+                    application [ tcp-port-32767 junos-ping snmp udp-ports-33434-33534 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-c-ntw-saltprod-01-to-ntw-cybernet {
+                match {
+                    source-address peer-c-ntw-saltprod-01;
+                    destination-address 10.3.254.0/24;
+                    application [ junos-ssh tcp-port-830 junos-icmp-ping ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-b-ntw-proxyminions-to-ntw-cybernet {
+                match {
+                    source-address peer-b-ntw-proxyminion-01;
+                    destination-address 10.3.254.0/24;
+                    application [ junos-ssh tcp-port-830 junos-ping junos-https ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-b-ntw-saltprod-01-to-bb-servers-ztp {
+                match {
+                    source-address peer-b-ntw-saltprod-01;
+                    destination-address 10.2.200.32/27;
+                    application [ junos-ssh junos-icmp-ping ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-b-ntw-saltprod-01-to-bb-servers {
+                match {
+                    source-address peer-b-ntw-saltprod-01;
+                    destination-address 10.3.249.0/24;
+                    application [ junos-ssh junos-icmp-ping ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy drone-suzieq-to-ntw-cybernet {
+                description DCN-3388;
+                match {
+                    source-address [ peer-c-ntw-drone-01 peer-c-ntw-suzieq-01 ];
+                    destination-address 10.3.254.0/24;
+                    application [ tcp-port-830 junos-ping junos-ssh junos-https junos-icmp-ping ];
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-cybernet to-zone ntw-advpn {
+            policy ntw-cybernet-to-ntw-advpn-syslog {
+                match {
+                    source-address 10.3.254.0/24;
+                    destination-address 10.1.0.0/16;
+                    application [ junos-syslog udp-port-9995 junos-icmp-all ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-cybernet-to-ntw-advpn-ntp {
+                description DCN-1454;
+                match {
+                    source-address 10.3.254.0/24;
+                    destination-address [ peer-b-ntw-ntp-01 mmj1-ntw-ntp-01 peer-c-ntw-ntp-01 ];
+                    application [ junos-ping junos-ntp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-cybernet-to-ntw-val {
+                match {
+                    source-address 10.3.254.0/24;
+                    destination-address [ peer-c-ntw-vali-01 peer-b-ntw-vali-01 ];
+                    application tcp-port-3323;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy bb-servers-ztp-to-peer-b-ntw-saltprod-01 {
+                match {
+                    source-address 10.2.200.32/27;
+                    destination-address peer-b-ntw-saltprod-01;
+                    application [ junos-ping tcp-port-4505 tcp-port-4506 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy bb-servers-ztp-to-peer-b-ntw-dns-01 {
+                match {
+                    source-address 10.2.200.32/27;
+                    destination-address [ peer-b-ntw-dnsauth-01 peer-b-ntw-dnsauth-02 ];
+                    application [ junos-dns-tcp junos-dns-udp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy bb-servers-ztp-to-peer-b-ntw-ntp-01 {
+                match {
+                    source-address 10.2.200.32/27;
+                    destination-address peer-b-ntw-ntp-01;
+                    application junos-ntp;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy bb-servers-to-peer-b-ntw-saltprod-01 {
+                description DCN-3444;
+                match {
+                    source-address [ cybernet-infra-servers 10.5.0.0/16 ];
+                    destination-address peer-b-ntw-saltprod-01;
+                    application [ junos-ping tcp-port-4505 tcp-port-4506 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy bb-servers-to-peer-b-ntw-ntp-01 {
+                match {
+                    source-address 10.3.249.0/24;
+                    destination-address peer-b-ntw-ntp-01;
+                    application junos-ntp;
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-cybernet to-zone ntw-loc {
+            policy ntw-cybernet-to-peer-a-ntw-mon-01 {
+                description DCN-432;
+                match {
+                    source-address 10.3.254.0/24;
+                    destination-address peer-a-ntw-mon-01;
+                    application [ udp-port-9995 junos-syslog ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy bb-servers-ztp-to-peer-a-ntw-ntp-01 {
+                match {
+                    source-address 10.2.200.32/27;
+                    destination-address peer-a-ntw-ntp-01;
+                    application junos-ntp;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-cybernet-to-ntw-loc-ntp {
+                description DCN-1454;
+                match {
+                    source-address 10.3.254.0/24;
+                    destination-address peer-a-ntw-ntp-01;
+                    application [ junos-ping junos-ntp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy bb-servers-ztp-to-peer-a-ntw-pxe-01 {
+                match {
+                    source-address 10.2.200.32/27;
+                    destination-address peer-a-ntw-pxe-01;
+                    application [ junos-http junos-https junos-tftp junos-ftp junos-dhcp-relay tcp-port-3128 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy bb-servers-to-peer-a-ntw-pxe-01 {
+                match {
+                    source-address [ cybernet-infra-servers 10.3.249.0/24 ];
+                    destination-address peer-a-ntw-pxe-01;
+                    application tcp-port-3128;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy bb-servers-to-peer-a-ntw-ntp-01 {
+                match {
+                    source-address 10.3.249.0/24;
+                    destination-address peer-a-ntw-ntp-01;
+                    application [ junos-ntp junos-ping ];
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-loc to-zone ntw-wan {
+            policy ntw-loc-to-wan {
+                description "DCO-258118 DCN-1891";
+                match {
+                    source-address [ peer-a-ntw-srv01 peer-a-ntw-srv02 peer-a-ntw-ipa-01 peer-a-ntw-pxe-01 ];
+                    destination-address any;
+                    application [ junos-ping junos-ntp junos-http junos-https junos-smtp junos-dns-udp junos-dns-tcp udp-ports-33434-33534 ];
+                }
+                then {
+                    permit;
+                    log {
+                        session-init;
+                    }
+                }
+            }
+            policy servers-to-example-elastic {
+                description DCN-432;
+                match {
+                    source-address peer-a-ntw-mon-01;
+                    destination-address [ esc01.peer-c.example.net esc02.peer-c.example.net esc03.peer-c.example.net esc04.peer-c.example.net ];
+                    application tcp-port-18443;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-loc-to-wan-ntp {
+                description DCO-38889;
+                match {
+                    source-address peer-a-device42-collector;
+                    destination-address any;
+                    application junos-ntp;
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-loc to-zone ntw-vlan14 {
+            policy peer-a-ntw-ztp-01-to-ntw-vlan14 {
+                description DCO-101723;
+                match {
+                    source-address peer-a-ntw-ztp-01;
+                    destination-address 10.1.42.0/24;
+                    application [ tcp-port-830 junos-ssh ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-a-device42-collector-to-ntw-vlan14 {
+                description DCO-38889;
+                match {
+                    source-address peer-a-device42-collector;
+                    destination-address 10.1.42.0/24;
+                    application [ junos-icmp-ping snmp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-a-ntw-mon-01-to-ntw-vlan14 {
+                description DCN-432;
+                match {
+                    source-address peer-a-ntw-mon-01;
+                    destination-address 10.1.42.0/24;
+                    application [ tcp-port-32767 snmp junos-icmp-all ];
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-loc to-zone ntw-advpn {
+            policy peer-a-ntw-mon-01-to-ntw-advpn {
+                description DCN-970;
+                match {
+                    source-address peer-a-ntw-mon-01;
+                    destination-address 10.1.0.0/16;
+                    application [ tcp-port-32767 junos-icmp-all snmp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-loc-to-kafka {
+                description DCN-432/DCN-1026;
+                match {
+                    source-address 10.1.247.0/24;
+                    destination-address 10.1.0.0/16;
+                    application [ tcp-port-9092 tcp-port-9093 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-a-device42-collector-to-peer-b-ntw-device42 {
+                description DCO-38889;
+                match {
+                    source-address peer-a-device42-collector;
+                    destination-address peer-b-ntw-device42;
+                    application junos-https;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-loc-to-ldap-servers {
+                description DCO-258955;
+                match {
+                    source-address 10.1.247.0/24;
+                    destination-address [ peer-b-ntw-ipa-01 mmj1-ntw-ipa-01 peer-c-ntw-ipa-01 peer-c-ntw-ipa-02 ];
+                    application tcp-port-636;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-loc-to-dns-servers {
+                description DCO-258963;
+                match {
+                    source-address 10.1.247.0/24;
+                    destination-address [ mmj1-ntw-dnsauth-01 mmj1-ntw-dnsauth-02 peer-b-ntw-dnsauth-01 peer-b-ntw-dnsauth-02 peer-c-ntw-dnsauth-01 peer-c-ntw-dnsauth-02 ];
+                    application [ junos-dns-udp junos-dns-tcp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-a-ntw-ipa-01-to-ntw-advpn {
+                description DCO-258655;
+                match {
+                    source-address peer-a-ntw-ipa-01;
+                    destination-address 10.1.0.0/16;
+                    application [ junos-ntp junos-dns-tcp junos-dns-udp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ipa-to-ipa-replicas {
+                match {
+                    source-address peer-a-ntw-ipa-01;
+                    destination-address [ peer-b-ntw-ipa-01 mmj1-ntw-ipa-01 peer-c-ntw-ipa-01 peer-c-ntw-ipa-02 ];
+                    application [ junos-https junos-http tcp-port-88 tcp-port-389 tcp-port-464 tcp-port-636 tcp-port-7389 udp-port-88 udp-port-464 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy to-peer-c-ntw-smaster01 {
+                match {
+                    source-address [ peer-a-ntw-ztp-01 peer-a-ntw-srv01 peer-a-ntw-srv02 peer-a-ntw-ipa-01 ];
+                    destination-address peer-c-ntw-smaster01;
+                    application [ tcp-port-4505 tcp-port-4506 junos-icmp-ping ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-loc-to-regional-salt-master {
+                description DCN-254;
+                match {
+                    source-address 10.1.247.0/24;
+                    destination-address peer-b-ntw-saltprod-01;
+                    application [ tcp-port-4505 tcp-port-4506 ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-loc-to-peer-c-ntw-dnsauth-01 {
+                description DCN-252;
+                match {
+                    source-address 10.1.247.0/24;
+                    destination-address peer-c-ntw-dnsauth-01;
+                    application [ junos-dns-tcp junos-dns-udp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-loc-to-regional-syslog-collector {
+                description DCN-1180;
+                match {
+                    source-address 10.1.247.0/24;
+                    destination-address peer-b-ntw-syslog-01;
+                    application junos-syslog;
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-loc to-zone ntw-cybernet {
+            policy peer-a-ntw-mon-01-to-ntw-cybernet {
+                description DCN-432;
+                match {
+                    source-address peer-a-ntw-mon-01;
+                    destination-address 10.3.254.0/24;
+                    application [ tcp-port-32767 snmp junos-icmp-all ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy peer-a-ntw-pxe-01-to-bb-servers-ztp {
+                description DCN-3444;
+                match {
+                    source-address peer-a-ntw-pxe-01;
+                    destination-address 10.2.200.32/27;
+                    application [ junos-icmp-ping junos-ssh ];
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-vlan14 to-zone ntw-advpn {
+            policy ntw-vlan14-to-ntw-advpn-any {
+                description DCN-2877;
+                match {
+                    source-address 10.1.42.0/24;
+                    destination-address 10.1.0.0/16;
+                    application [ junos-ping junos-ntp junos-dns-tcp junos-dns-udp junos-syslog tcp-port-3323 udp-port-2055 udp-ports-4000-7000 udp-port-9995 udp-port-10514 udp-ports-33434-33534 tcp-port-389 tcp-port-636 ];
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-vlan14 to-zone ntw-loc {
+            policy ntw-vlan14-to-ntp-servers {
+                description DCN-1454;
+                match {
+                    source-address 10.1.42.0/24;
+                    destination-address peer-a-ntw-ntp-01;
+                    application [ junos-ping junos-ntp ];
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-vlan14-to-ntw-loc-ipa-servers {
+                description DCN-4401;
+                match {
+                    source-address 10.1.42.0/24;
+                    destination-address peer-a-ntw-ipa-01;
+                    application [ tcp-port-389 tcp-port-636 ];
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-vlan14 to-zone ntw-wan {
+            policy ntw-vlan14-to-public-ntp-servers {
+                description DCO-341479;
+                match {
+                    source-address 10.1.42.0/24;
+                    destination-address public-ntp-servers;
+                    application junos-ntp;
+                }
+                then {
+                    permit;
+                }
+            }
+            policy ntw-vlan14-ntw-wan-allow-og-to-lh {
+                description DCN-2153;
+                match {
+                    source-address local-console-servers;
+                    destination-address lighthouse-servers;
+                    application [ tcp-port-8443 junos-ping udp-port-1194 ];
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        from-zone ntw-wan to-zone ntw-loc {
+            policy tll1-ntw-fw-to-saltdev-vm {
+                description DCN-521;
+                match {
+                    source-address tll1-ntw-fw-01;
+                    destination-address peer-a-ntw-saltdev-01;
+                    application [ tcp-port-4505 tcp-port-4506 ];
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+        global {
+            policy default-deny {
+                match {
+                    source-address any;
+                    destination-address any;
+                    application any;
+                }
+                then {
+                    deny;
+                    log {
+                        session-init;
+                    }
+                }
+            }
+        }
+    }
+    zones {
+        security-zone ntw-advpn {
+            address-book {
+                address 10.1.42.0/24 10.1.42.0/24;
+                address peer-a-ntw-monitoring-net 10.1.42.0/24;
+                address peer-a-pdu-net 10.1.150.0/24;
+                address 10.1.252.0/24 10.1.252.0/24;
+                address 10.1.144.0/24 10.1.144.0/24;
+                address 10.1.0.0/16 10.1.0.0/16;
+                address peer-b-ntw-win-01 10.1.251.149/32;
+                address iad1-ntw-win-01 10.1.253.149/32;
+                address peer-b-ntw-device42 10.1.251.42/32;
+                address peer-c-ntw-smaster01 10.1.238.200/32;
+                address peer-c-ntw-term-01 10.1.238.201/32;
+                address 10.3.255.0/24 10.3.255.0/24;
+                address 10.1.148.0/24 10.1.148.0/24;
+                address 10.1.156.0/24 10.1.156.0/24;
+                address mmj1-ntw-win-01 10.1.243.149/32;
+                address peer-c-ntw-win-01 10.1.238.149/32;
+                address 10.1.248.2/32 10.1.248.2/32;
+                address 10.1.248.3/32 10.1.248.3/32;
+                address 10.1.251.149/32 10.1.251.149/32;
+                address 10.1.253.149/32 10.1.253.149/32;
+                address peer-a-ntw-val-01 10.1.247.204/32;
+                address mmj1-ntw-ipa-01 10.1.243.206/32;
+                address peer-c-ntw-ipa-01 10.1.238.206/32;
+                address peer-c-ntw-ipa-02 10.1.238.207/32;
+                address peer-b-ntw-ipa-01 10.1.251.206/32;
+                address peer-c-ntw-vali-01 10.1.238.55/32;
+                address peer-b-ntw-vali-01 10.1.251.55/32;
+                address 10.3.254.0/24 10.3.254.0/24;
+                address peer-c-ntw-proxyminion-01 10.1.238.35/32;
+                address peer-c-ntw-proxyminion-02 10.1.238.37/32;
+                address peer-b-ntw-proxyminion-01 10.1.251.48/32;
+                address mmj1-ntw-proxyminion-01 10.1.243.35/32;
+                address peer-b-ntw-saltprod-01 10.1.251.10/32;
+                address peer-c-ntw-saltprod-01 10.1.238.10/32;
+                address peer-c-ntw-dnsauth-01 10.1.238.12/32;
+                address peer-c-ntw-dnsauth-02 10.1.238.18/32;
+                address peer-b-ntw-dnsauth-01 10.1.251.12/32;
+                address peer-b-ntw-dnsauth-02 10.1.251.18/32;
+                address mmj1-ntw-dnsauth-01 10.1.243.12/32;
+                address mmj1-ntw-dnsauth-02 10.1.243.18/32;
+                address peer-b-ntw-mon-01 10.1.251.240/32;
+                address peer-c-ntw-drone-01 10.1.238.39/32;
+                address peer-c-ntw-suzieq-01 10.1.238.31/32;
+                address peer-b-ntw-ntp-01 10.1.251.49/32;
+                address mmj1-ntw-ntp-01 10.1.243.49/32;
+                address peer-c-ntw-ntp-01 10.1.238.49/32;
+                address peer-b-ntw-syslog-01 10.1.251.202/32;
+                address 10.2.200.32/27 {
+                    description "CyberNet Server ZTP range(EU)";
+                    10.2.200.32/27;
+                }
+                address 10.3.249.0/24 10.3.249.0/24;
+                address fra2-ntw-mon-01 10.1.247.240/32;
+            }
+            interfaces {
+                st0.1 {
+                    host-inbound-traffic {
+                        system-services {
+                            ping;
+                            ssh;
+                        }
+                        protocols {
+                            ospf;
+                        }
+                    }
+                }
+            }
+        }
+        security-zone ntw-cybernet {
+            address-book {
+                address 10.3.254.0/24 10.3.254.0/24;
+                address 10.3.249.0/24 10.3.249.0/24;
+                address 10.2.200.32/27 {
+                    description "CyberNet Server ZTP range(EU)";
+                    10.2.200.32/27;
+                }
+                address 10.5.0.0/16 10.5.0.0/16;
+                address peer-a-ntw-infra-01-enp1s0f1 10.2.249.5/32;
+                address ams1-ntw-infra-01-enp1s0f1 10.2.249.13/32;
+                address peer-b-ntw-infra-01-enp1s0f1 10.2.249.21/32;
+                address cdg1-ntw-infra-01-enp1s0f1 10.2.249.29/32;
+                address peer-a-ntw-infra-01-enp1s0f0 10.2.249.7/32;
+                address ams1-ntw-infra-01-enp1s0f0 10.2.249.15/32;
+                address peer-b-ntw-infra-01-enp1s0f0 10.2.249.23/32;
+                address cdg1-ntw-infra-01-enp1s0f0 10.2.249.31/32;
+                address-set cybernet-infra-servers {
+                    address peer-a-ntw-infra-01-enp1s0f1;
+                    address ams1-ntw-infra-01-enp1s0f1;
+                    address peer-b-ntw-infra-01-enp1s0f1;
+                    address cdg1-ntw-infra-01-enp1s0f1;
+                    address peer-a-ntw-infra-01-enp1s0f0;
+                    address ams1-ntw-infra-01-enp1s0f0;
+                    address peer-b-ntw-infra-01-enp1s0f0;
+                    address cdg1-ntw-infra-01-enp1s0f0;
+                }
+            }
+            interfaces {
+                reth2.0 {
+                    host-inbound-traffic {
+                        system-services {
+                            ping;
+                        }
+                        protocols {
+                            bgp;
+                        }
+                    }
+                }
+                reth3.0 {
+                    host-inbound-traffic {
+                        system-services {
+                            ping;
+                        }
+                        protocols {
+                            bgp;
+                        }
+                    }
+                }
+            }
+        }
+        security-zone ntw-loc {
+            address-book {
+                address 10.1.0.0/16 10.1.0.0/16;
+                address peer-a-ntw-srv01 10.1.247.147/32;
+                address peer-a-ntw-srv02 10.1.247.148/32;
+                address peer-a-device42-collector 10.1.247.50/32;
+                address peer-a-ntw-ztp-01 10.1.247.200/32;
+                address 10.1.247.0/24 10.1.247.0/24;
+                address peer-a-ntw-win-01 10.1.247.149/32;
+                address peer-a-ntw-ntp-01 10.1.247.49/32;
+                address peer-a-ntw-ipa-01 10.1.247.206/32;
+                address peer-a-ntw-graphite-01 10.1.247.198/32;
+                address peer-a-ntw-pxe-01 10.1.247.15/32;
+                address peer-a-ntw-mon-01 10.1.247.240/32;
+                address peer-a-ntw-saltdev-01 10.1.247.10/32;
+            }
+            interfaces {
+                reth0.66 {
+                    host-inbound-traffic {
+                        system-services {
+                            ping;
+                        }
+                    }
+                }
+            }
+        }
+        security-zone ntw-pdu {
+            interfaces {
+                reth1.15 {
+                    host-inbound-traffic {
+                        system-services {
+                            ping;
+                            dhcp;
+                        }
+                    }
+                }
+            }
+        }
+        security-zone ntw-vlan14 {
+            address-book {
+                address 10.1.42.0/24 10.1.42.0/24;
+                address peer-a-ntw-monitoring-net 10.1.42.0/24;
+                address peer-a-pdu-net 10.1.150.0/24;
+                address 10.1.254.0/24 10.1.254.0/24;
+                address 10.1.252.0/24 10.1.252.0/24;
+                address 10.1.144.0/24 10.1.144.0/24;
+                address 10.1.0.0/16 10.1.0.0/16;
+                address peer-b-ntw-win-01 10.1.251.149/32;
+                address iad1-ntw-win-01 10.1.253.149/32;
+                address peer-b-ntw-device42 10.1.251.42/32;
+                address peer-c-ntw-smaster01 10.1.238.200/32;
+                address peer-c-ntw-term-01 10.1.238.201/32;
+                address 10.3.255.0/24 10.3.255.0/24;
+                address 10.1.148.0/24 10.1.148.0/24;
+                address mmj1-ntw-win-01 10.1.243.149/32;
+                address peer-c-ntw-win-01 10.1.238.149/32;
+                address 10.1.42.42/32 10.1.42.42/32;
+                address 10.1.42.41/32 10.1.42.41/32;
+                address-set local-console-servers {
+                    address 10.1.42.41/32;
+                    address 10.1.42.42/32;
+                }
+            }
+            interfaces {
+                lo0.0 {
+                    host-inbound-traffic {
+                        system-services {
+                            ping;
+                            ssh;
+                        }
+                    }
+                }
+                reth1.14 {
+                    host-inbound-traffic {
+                        system-services {
+                            ssh;
+                            ping;
+                            snmp;
+                            netconf;
+                        }
+                    }
+                }
+            }
+        }
+        security-zone ntw-wan {
+            address-book {
+                address esc01.peer-c.example.net {
+                    dns-name esc01.peer-c.example.net {
+                        ipv4-only;
+                    }
+                }
+                address esc02.peer-c.example.net {
+                    dns-name esc02.peer-c.example.net {
+                        ipv4-only;
+                    }
+                }
+                address esc03.peer-c.example.net {
+                    dns-name esc03.peer-c.example.net {
+                        ipv4-only;
+                    }
+                }
+                address esc04.peer-c.example.net {
+                    dns-name esc04.peer-c.example.net {
+                        ipv4-only;
+                    }
+                }
+                address mm.example.com {
+                    dns-name mm.example.com {
+                        ipv4-only;
+                    }
+                }
+                address time.windows.com {
+                    dns-name time.windows.com {
+                        ipv4-only;
+                    }
+                }
+                address 203.0.113.103/32 203.0.113.103/32;
+                address 192.0.2.209/32 192.0.2.209/32;
+                address 192.0.2.125/32 192.0.2.125/32;
+                address 203.0.113.141/32 203.0.113.141/32;
+                address 203.0.113.240/32 203.0.113.240/32;
+                address 203.0.113.112/32 203.0.113.112/32;
+                address 203.0.113.10/32 203.0.113.10/32;
+                address 192.0.2.100/32 192.0.2.100/32;
+                address 198.51.100.55/32 198.51.100.55/32;
+                address 203.0.113.65/32 203.0.113.65/32;
+                address 203.0.113.37/22 203.0.113.37/22;
+                address 192.0.2.131/22 192.0.2.131/22;
+                address 203.0.113.222/22 203.0.113.222/22;
+                address 198.51.100.101/22 198.51.100.101/22;
+                address 203.0.113.117/23 203.0.113.117/23;
+                address 192.0.2.184/22 192.0.2.184/22;
+                address 198.51.100.10/22 198.51.100.10/22;
+                address 198.51.100.119/27 198.51.100.119/27;
+                address 198.51.100.157/24 198.51.100.157/24;
+                address 192.0.2.74/27 192.0.2.74/27;
+                address 192.0.2.164/27 192.0.2.164/27;
+                address 192.0.2.132/27 192.0.2.132/27;
+                address 203.0.113.109/24 203.0.113.109/24;
+                address 192.0.2.65/26 192.0.2.65/26;
+                address 203.0.113.243/27 203.0.113.243/27;
+                address 203.0.113.147/26 203.0.113.147/26;
+                address 198.51.100.248/27 198.51.100.248/27;
+                address 192.0.2.210/25 192.0.2.210/25;
+                address tll1-ntw-fw-01 203.0.113.137/32;
+                address 192.0.2.166/32 192.0.2.166/32;
+                address 192.0.2.96/23 192.0.2.96/23;
+                address 198.51.100.148/24 198.51.100.148/24;
+                address 198.51.100.179/24 198.51.100.179/24;
+                address 198.51.100.19/29 198.51.100.19/29;
+                address 198.51.100.183/32 198.51.100.183/32;
+                address 198.51.100.210/32 198.51.100.210/32;
+                address 198.51.100.109/32 198.51.100.109/32;
+                address 192.0.2.216/32 192.0.2.216/32;
+                address 198.51.100.249/32 198.51.100.249/32;
+                address 198.51.100.91/32 198.51.100.91/32;
+                address 203.0.113.99/32 203.0.113.99/32;
+                address 192.0.2.83/29 192.0.2.83/29;
+                address 192.0.2.15/32 192.0.2.15/32;
+                address 192.0.2.182/32 192.0.2.182/32;
+                address 192.0.2.170/29 192.0.2.170/29;
+                address 198.51.100.138/32 198.51.100.138/32;
+                address 192.0.2.186/28 192.0.2.186/28;
+                address 192.0.2.190/32 192.0.2.190/32;
+                address 198.51.100.147/27 198.51.100.147/27;
+                address 198.51.100.236/32 198.51.100.236/32;
+                address 192.0.2.95/32 192.0.2.95/32;
+                address 192.0.2.50/22 192.0.2.50/22;
+                address 198.51.100.180/24 192.0.2.175/24;
+                address-set public-ntp-servers {
+                    address 203.0.113.240/32;
+                    address 203.0.113.112/32;
+                    address 203.0.113.10/32;
+                    address 192.0.2.100/32;
+                }
+                address-set lighthouse-servers {
+                    address 198.51.100.55/32;
+                    address 203.0.113.65/32;
+                }
+                address-set global-example-prefixes {
+                    address 203.0.113.37/22;
+                    address 192.0.2.131/22;
+                    address 203.0.113.222/22;
+                    address 198.51.100.101/22;
+                    address 203.0.113.117/23;
+                    address 192.0.2.184/22;
+                    address 198.51.100.10/22;
+                    address 198.51.100.119/27;
+                    address 192.0.2.74/27;
+                    address 192.0.2.164/27;
+                    address 192.0.2.132/27;
+                    address 203.0.113.109/24;
+                    address 192.0.2.65/26;
+                    address 203.0.113.243/27;
+                    address 203.0.113.147/26;
+                    address 198.51.100.248/27;
+                    address 192.0.2.210/25;
+                    address 192.0.2.50/22;
+                    address 198.51.100.180/24;
+                }
+                address-set example-office-networks {
+                    address 198.51.100.179/24;
+                    address 198.51.100.183/32;
+                    address 198.51.100.210/32;
+                    address 192.0.2.170/29;
+                    address 192.0.2.83/29;
+                    address 192.0.2.15/32;
+                    address 192.0.2.182/32;
+                    address 198.51.100.109/32;
+                    address 192.0.2.216/32;
+                    address 198.51.100.249/32;
+                    address 198.51.100.91/32;
+                    address 198.51.100.138/32;
+                    address 192.0.2.186/28;
+                    address 192.0.2.190/32;
+                    address 198.51.100.147/27;
+                    address 203.0.113.99/32;
+                }
+            }
+            screen untrust-screen;
+            interfaces {
+                reth0.10 {
+                    host-inbound-traffic {
+                        system-services {
+                            ike;
+                            ping;
+                            ssh;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+interfaces {
+    ge-0/0/0 {
+        description fab0;
+    }
+    ge-0/0/1 {
+        description fab0;
+    }
+    ge-0/0/2 {
+        description peer-a-sw-99a;
+        gigether-options {
+            redundant-parent reth1;
+        }
+    }
+    ge-0/0/3 {
+        description peer-a-sw-99b;
+        gigether-options {
+            redundant-parent reth1;
+        }
+    }
+    xe-0/0/16 {
+        description peer-a-rt-01;
+        gigether-options {
+            redundant-parent reth2;
+        }
+    }
+    xe-0/0/17 {
+        description peer-a-rt-02;
+        gigether-options {
+            redundant-parent reth3;
+        }
+    }
+    xe-0/0/18 {
+        description peer-a-sw-11a;
+        gigether-options {
+            redundant-parent reth0;
+        }
+    }
+    xe-0/0/19 {
+        description peer-a-sw-11b;
+        gigether-options {
+            redundant-parent reth0;
+        }
+    }
+    ge-7/0/0 {
+        description fab1;
+    }
+    ge-7/0/1 {
+        description fab1;
+    }
+    ge-7/0/2 {
+        description peer-a-sw-99a;
+        gigether-options {
+            redundant-parent reth1;
+        }
+    }
+    ge-7/0/3 {
+        description peer-a-sw-99b;
+        gigether-options {
+            redundant-parent reth1;
+        }
+    }
+    xe-7/0/16 {
+        description peer-a-rt-01;
+        gigether-options {
+            redundant-parent reth2;
+        }
+    }
+    xe-7/0/17 {
+        description peer-a-rt-02;
+        gigether-options {
+            redundant-parent reth3;
+        }
+    }
+    xe-7/0/18 {
+        description peer-a-sw-11a;
+        gigether-options {
+            redundant-parent reth0;
+        }
+    }
+    xe-7/0/19 {
+        description peer-a-sw-11b;
+        gigether-options {
+            redundant-parent reth0;
+        }
+    }
+    fab0 {
+        fabric-options {
+            member-interfaces {
+                ge-0/0/0;
+                ge-0/0/1;
+            }
+        }
+    }
+    fab1 {
+        fabric-options {
+            member-interfaces {
+                ge-7/0/0;
+                ge-7/0/1;
+            }
+        }
+    }
+    fxp0 {
+        unit 0 {
+            family inet {
+                filter {
+                    input filter-all-in-one;
+                }
+            }
+            family inet6 {
+                filter {
+                    input filter-all-in-one-v6;
+                }
+            }
+        }
+    }
+    lo0 {
+        unit 0 {
+            family inet {
+                filter {
+                    input filter-all-in-one;
+                }
+            }
+            family inet6 {
+                filter {
+                    input filter-all-in-one-v6;
+                }
+            }
+        }
+    }
+    reth0 {
+        description peer-a-sw-11;
+        vlan-tagging;
+        redundant-ether-options {
+            redundancy-group 1;
+            lacp {
+                active;
+                periodic fast;
+            }
+        }
+        unit 10 {
+            description storage-wan;
+            vlan-id 10;
+            family inet {
+                address 203.0.113.40/24 {
+                    preferred;
+                }
+                address 192.0.2.12/24;
+            }
+        }
+        unit 66 {
+            description peer-a-srv-network;
+            vlan-id 66;
+            family inet {
+                address 10.1.247.1/24;
+            }
+        }
+    }
+    reth1 {
+        description peer-a-sw-99;
+        vlan-tagging;
+        redundant-ether-options {
+            redundancy-group 1;
+            lacp {
+                active;
+                periodic fast;
+            }
+        }
+        unit 14 {
+            description peer-a-mng-network;
+            vlan-id 14;
+            family inet {
+                address 10.1.42.1/24;
+            }
+        }
+        unit 15 {
+            description peer-a-pdu-network;
+            vlan-id 15;
+            family inet;
+        }
+    }
+    reth2 {
+        description peer-a-rt-01;
+        redundant-ether-options {
+            redundancy-group 1;
+        }
+        unit 0 {
+            family inet {
+                address 10.2.254.0/31;
+            }
+        }
+    }
+    reth3 {
+        description peer-a-rt-02;
+        redundant-ether-options {
+            redundancy-group 1;
+        }
+        unit 0 {
+            family inet {
+                address 10.2.254.2/31;
+            }
+        }
+    }
+    st0 {
+        unit 1 {
+            multipoint;
+            family inet {
+                address 10.1.250.247/24;
+            }
+        }
+    }
+}
+snmp {
+    location PEER-A;
+    v3 {
+        usm {
+            local-engine {
+                user snmp_librenms_amer {
+                    authentication-sha {
+                        authentication-key "REDACTED";
+                    }
+                    privacy-aes128 {
+                        privacy-key "<REDACTED>";
+                    }
+                }
+                user snmp_librenms_emea {
+                    authentication-sha {
+                        authentication-key "REDACTED";
+                    }
+                    privacy-aes128 {
+                        privacy-key "<REDACTED>";
+                    }
+                }
+                user snmp_librenms_apac {
+                    authentication-sha {
+                        authentication-key "REDACTED";
+                    }
+                    privacy-aes128 {
+                        privacy-key "<REDACTED>";
+                    }
+                }
+                user snmp_telegraf {
+                    authentication-sha {
+                        authentication-key "REDACTED";
+                    }
+                    privacy-aes128 {
+                        privacy-key "<REDACTED>";
+                    }
+                }
+            }
+        }
+        vacm {
+            security-to-group {
+                security-model usm {
+                    security-name snmp_librenms_amer {
+                        group snmp_group_ro;
+                    }
+                    security-name snmp_librenms_emea {
+                        group snmp_group_ro;
+                    }
+                    security-name snmp_librenms_apac {
+                        group snmp_group_ro;
+                    }
+                    security-name snmp_telegraf {
+                        group snmp_group_ro;
+                    }
+                }
+            }
+            access {
+                group snmp_group_ro {
+                    default-context-prefix {
+                        security-model usm {
+                            security-level privacy {
+                                read-view snmp_view;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    engine-id {
+        local 00c52c443d42;
+    }
+    view snmp_view {
+        oid .1 include;
+    }
+}
+forwarding-options {
+    sampling {
+        input {
+            rate 100;
+        }
+        family inet {
+            output {
+                flow-server 10.1.238.149 {
+                    port 2055;
+                    version 5;
+                }
+            }
+        }
+    }
+}
+policy-options {
+    prefix-list BGP-locals-inst-v4 {
+        apply-path "routing-instances <*> protocols bgp group <*> local-address <*.*>";
+    }
+    prefix-list BGP-locals-inst-v6 {
+        apply-path "routing-instances <*> protocols bgp group <*> neighbor <*:*> local-address <*:*>";
+    }
+    prefix-list BGP-locals-v4 {
+        apply-path "protocols bgp group <*> neighbor <*> local-address <*.*>";
+    }
+    prefix-list BGP-locals-v6 {
+        apply-path "protocols bgp group <*> neighbor <*:*> local-address <*:*>";
+    }
+    prefix-list BGP-neighbors-inst-v4 {
+        apply-path "routing-instances <*> protocols bgp group <*> neighbor <*.*>";
+    }
+    prefix-list BGP-neighbors-inst-v6 {
+        apply-path "routing-instances <*> protocols bgp group <*> neighbor <*:*>";
+    }
+    prefix-list BGP-neighbors-v4 {
+        apply-path "protocols bgp group <*> neighbor <*.*>";
+    }
+    prefix-list BGP-neighbors-v6 {
+        apply-path "protocols bgp group <*> neighbor <*:*>";
+    }
+    prefix-list DNS-servers-v4 {
+        apply-path "system name-server <*.*>";
+    }
+    prefix-list DNS-servers-v6 {
+        apply-path "system name-server <*:*>";
+    }
+    prefix-list GRPC-SERVERS-v4 {
+        10.1.247.240/32;
+        10.1.251.240/32;
+    }
+    prefix-list LOCALS-v4 {
+        apply-path "interfaces <*> unit <*> family inet address <*>";
+    }
+    prefix-list LOCALS-v6 {
+        apply-path "interfaces <*> unit <*> family inet6 address <*>";
+    }
+    prefix-list NTP-servers-v4 {
+        apply-path "system ntp server <*.*>";
+    }
+    prefix-list NTP-servers-v6 {
+        apply-path "system ntp server <*:*>";
+    }
+    prefix-list OSPF-destination {
+        10.1.0.0/16;
+    }
+    prefix-list OSPF-destination-mcast {
+        224.0.0.5/32;
+        224.0.0.6/32;
+    }
+    prefix-list OSPF-source {
+        10.1.0.0/16;
+    }
+    prefix-list RADIUS-servers {
+        apply-path "system radius-server <*>";
+    }
+    prefix-list SNMP-clients {
+        10.1.238.199/32;
+        10.1.243.199/32;
+        10.1.247.240/32;
+        10.1.251.42/32;
+        10.1.251.199/32;
+    }
+    prefix-list SNMP-community-clients {
+        apply-path "snmp community REDACTED clients <*>";
+    }
+    prefix-list VPN-destination {
+        apply-path "security ike gateway <*> local-address <*.*>";
+    }
+    prefix-list VPN-locals-v4 {
+        198.51.100.206/32;
+        192.0.2.233/32;
+        192.0.2.165/32;
+        198.51.100.62/32;
+        203.0.113.214/32;
+        203.0.113.191/32;
+        192.0.2.80/32;
+        203.0.113.68/32;
+        198.51.100.28/32;
+        198.51.100.135/32;
+        192.0.2.250/32;
+        198.51.100.22/32;
+        192.0.2.40/32;
+        203.0.113.137/32;
+        203.0.113.92/32;
+        198.51.100.120/32;
+        192.0.2.66/32;
+        198.51.100.48/32;
+        203.0.113.66/32;
+        192.0.2.18/32;
+        203.0.113.74/32;
+        198.51.100.242/32;
+        192.0.2.109/32;
+        192.0.2.120/32;
+        203.0.113.26/32;
+        203.0.113.119/32;
+        192.0.2.101/32;
+        192.0.2.118/32;
+        203.0.113.88/32;
+        203.0.113.175/32;
+        203.0.113.180/32;
+        203.0.113.78/32;
+        192.0.2.8/32;
+        192.0.2.78/32;
+        198.51.100.141/32;
+        203.0.113.25/32;
+        198.51.100.92/32;
+        203.0.113.167/32;
+        198.51.100.160/32;
+        203.0.113.150/32;
+        198.51.100.98/32;
+        198.51.100.137/32;
+        198.51.100.41/32;
+        192.0.2.231/32;
+        198.51.100.217/32;
+        198.51.100.187/32;
+        198.51.100.49/32;
+        203.0.113.61/32;
+        203.0.113.247/32;
+        192.0.2.29/32;
+        203.0.113.40/32;
+        198.51.100.173/32;
+        198.51.100.189/32;
+        198.51.100.167/32;
+        192.0.2.44/32;
+        198.51.100.126/32;
+        203.0.113.100/32;
+        192.0.2.56/32;
+        192.0.2.139/32;
+        192.0.2.200/32;
+        198.51.100.30/32;
+        198.51.100.247/32;
+        192.0.2.108/32;
+        192.0.2.116/32;
+        198.51.100.235/32;
+        203.0.113.190/32;
+        192.0.2.154/32;
+        203.0.113.178/32;
+        203.0.113.142/32;
+        192.0.2.119/32;
+    }
+    prefix-list all-unit0-interfaces {
+        apply-path "interfaces <*> unit 0 family inet address <*>";
+    }
+    prefix-list dco-external-ssh {
+        198.51.100.19/29;
+        198.51.100.251/32;
+        203.0.113.47/32;
+        198.51.100.18/32;
+        203.0.113.156/32;
+    }
+    prefix-list fxp-interface {
+        apply-path "interfaces fxp0 unit 0 family inet address <*>";
+    }
+    prefix-list our-CA {
+        198.51.100.21/32;
+        192.0.2.45/32;
+    }
+    prefix-list public-NTP-servers-v4 {
+        203.0.113.240/32;
+        192.0.2.100/32;
+        203.0.113.10/32;
+        203.0.113.112/32;
+    }
+    prefix-list source-ip-bfd {
+        10.2.0.0/16;
+    }
+    prefix-list source-ip-prefixes {
+        10.1.0.0/16;
+    }
+    policy-statement PEER-A-RT-01-02_BGP_ADV_V4 {
+        term 1 {
+            from {
+                protocol ospf;
+                route-filter 10.1.0.0/16 orlonger;
+            }
+            then accept;
+        }
+        term 2 {
+            from {
+                protocol direct;
+                route-filter 10.1.0.0/16 orlonger;
+            }
+            then accept;
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement PEER-A-RT-01-02_BGP_RCV_V4 {
+        term 1 {
+            from {
+                protocol bgp;
+                route-filter 10.3.254.0/24 orlonger;
+                route-filter 10.3.249.0/24 orlonger;
+                route-filter 10.2.249.0/24 orlonger;
+                route-filter 10.2.200.0/24 orlonger;
+            }
+            then accept;
+        }
+        term reject-all {
+            then reject;
+        }
+    }
+    policy-statement loadbalance {
+        then {
+            load-balance per-packet;
+        }
+    }
+}
+firewall {
+    family inet {
+        filter filter-all-in-one {
+            term accept-vpn-esp {
+                from {
+                    source-prefix-list {
+                        VPN-locals-v4;
+                    }
+                    destination-prefix-list {
+                        VPN-destination;
+                    }
+                    protocol esp;
+                }
+                then {
+                    count accept-vpn-esp;
+                    accept;
+                }
+            }
+            term accept-vpn-ike {
+                from {
+                    source-prefix-list {
+                        VPN-locals-v4;
+                    }
+                    destination-prefix-list {
+                        VPN-destination;
+                    }
+                    protocol udp;
+                    port [ 4500 500 ];
+                }
+                then {
+                    count accept-vpn-ike;
+                    accept;
+                }
+            }
+            term accept-ospf {
+                from {
+                    source-prefix-list {
+                        OSPF-source;
+                    }
+                    destination-prefix-list {
+                        OSPF-destination;
+                        OSPF-destination-mcast;
+                    }
+                    protocol ospf;
+                }
+                then {
+                    count accept-ospf;
+                    accept;
+                }
+            }
+            term accept-ca {
+                from {
+                    source-prefix-list {
+                        our-CA;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v4;
+                    }
+                    protocol tcp;
+                    source-port 80;
+                }
+                then {
+                    count accept-ca;
+                    accept;
+                }
+            }
+            term accept-dns {
+                from {
+                    source-prefix-list {
+                        DNS-servers-v4;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v4;
+                    }
+                    protocol [ udp tcp ];
+                    source-port 53;
+                }
+                then {
+                    policer management-1m;
+                    count accept-dns;
+                    accept;
+                }
+            }
+            term accept-icmp {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-reply echo-request time-exceeded unreachable source-quench router-advertisement parameter-problem timestamp ];
+                }
+                then {
+                    policer management-1m;
+                    count accept-icmp;
+                    accept;
+                }
+            }
+            term accept-netconf-mgmt {
+                from {
+                    source-prefix-list {
+                        source-ip-prefixes;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v4;
+                    }
+                    protocol tcp;
+                    destination-port 830;
+                }
+                then {
+                    count accept-netconf;
+                    log;
+                    accept;
+                }
+            }
+            term accept-ntp-src {
+                from {
+                    source-prefix-list {
+                        NTP-servers-v4;
+                        source-ip-prefixes;
+                    }
+                    destination-prefix-list {
+                        NTP-servers-v4;
+                        source-ip-prefixes;
+                    }
+                    protocol udp;
+                    port ntp;
+                }
+                then {
+                    policer management-512k;
+                    count accept-ntp-src;
+                    accept;
+                }
+            }
+            term accept-ntp-dst {
+                from {
+                    source-prefix-list {
+                        NTP-servers-v4;
+                    }
+                    protocol udp;
+                    destination-port 1024-65535;
+                }
+                then {
+                    policer management-512k;
+                    count accept-ntp-dst;
+                    accept;
+                }
+            }
+            term accept-snmp {
+                from {
+                    destination-address {
+                        10.1.42.1/32;
+                    }
+                    source-prefix-list {
+                        SNMP-clients;
+                    }
+                    protocol udp;
+                    destination-port snmp;
+                }
+                then {
+                    count accept-snmp;
+                    accept;
+                }
+            }
+            term accept-ssh-mgmt {
+                from {
+                    source-prefix-list {
+                        source-ip-prefixes;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v4;
+                    }
+                    protocol tcp;
+                    destination-port ssh;
+                }
+                then {
+                    count accept-ssh;
+                    log;
+                    accept;
+                }
+            }
+            term accept-ssh {
+                from {
+                    source-prefix-list {
+                        dco-external-ssh;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v4;
+                    }
+                    protocol tcp;
+                    destination-port ssh;
+                }
+                then {
+                    policer management-5m;
+                    count accept-ssh;
+                    log;
+                    accept;
+                }
+            }
+            term accept-traceroute-icmp {
+                from {
+                    destination-prefix-list {
+                        LOCALS-v4;
+                    }
+                    protocol icmp;
+                    ttl 1;
+                    icmp-type [ echo-request echo-reply timestamp time-exceeded ];
+                }
+                then {
+                    policer management-1m;
+                    count accept-traceroute-icmp;
+                    accept;
+                }
+            }
+            term accept-traceroute-udp {
+                from {
+                    destination-prefix-list {
+                        LOCALS-v4;
+                    }
+                    protocol udp;
+                    ttl 1;
+                    destination-port 33434-33534;
+                }
+                then {
+                    policer management-1m;
+                    count accept-traceroute-udp;
+                    accept;
+                }
+            }
+            term allow-tcp-est {
+                from {
+                    protocol tcp;
+                    tcp-established;
+                }
+                then {
+                    count accept-tcp-established;
+                    accept;
+                }
+            }
+            term discard-icmp-fragments {
+                from {
+                    is-fragment;
+                    protocol icmp;
+                }
+                then {
+                    count discard-icmp-fragments;
+                    discard;
+                }
+            }
+            term discard-icmp {
+                from {
+                    protocol icmp;
+                }
+                then {
+                    count discard-icmp;
+                    discard;
+                }
+            }
+            term discard-ip-options {
+                from {
+                    ip-options any;
+                }
+                then {
+                    count discard-ip-options;
+                    discard;
+                }
+            }
+            term discard-tcp {
+                from {
+                    protocol tcp;
+                }
+                then {
+                    count discard-tcp;
+                    discard;
+                }
+            }
+            term discard-TTL_1-unknown {
+                from {
+                    ttl 1;
+                }
+                then {
+                    count discard-TTL_1-unknown;
+                    discard;
+                }
+            }
+            term discard-udp {
+                from {
+                    protocol udp;
+                }
+                then {
+                    count discard-udp;
+                    discard;
+                }
+            }
+            term discard-unknown {
+                then {
+                    count discard-unknown;
+                    discard;
+                }
+            }
+        }
+    }
+    family inet6 {
+        filter filter-all-in-one-v6 {
+            term accept-v6-icmp {
+                from {
+                    next-header icmp6;
+                    icmp-type [ echo-reply echo-request time-exceeded router-advertisement parameter-problem destination-unreachable packet-too-big router-solicit neighbor-solicit neighbor-advertisement redirect ];
+                }
+                then {
+                    policer management-1m;
+                    count accept-v6-icmp;
+                    accept;
+                }
+            }
+            term accept-tcp-est-v6 {
+                from {
+                    next-header tcp;
+                    tcp-established;
+                }
+                then {
+                    count accept-tcp-established-v6;
+                    accept;
+                }
+            }
+            term accept-v6bgp-dst {
+                from {
+                    source-prefix-list {
+                        BGP-neighbors-v6;
+                        BGP-neighbors-inst-v6;
+                    }
+                    destination-prefix-list {
+                        BGP-locals-v6;
+                        BGP-locals-inst-v6;
+                    }
+                    next-header tcp;
+                    destination-port bgp;
+                }
+                then {
+                    count accept-v6bgp-dst;
+                    accept;
+                }
+            }
+            term accept-v6bgp-src {
+                from {
+                    source-prefix-list {
+                        BGP-neighbors-v6;
+                        BGP-neighbors-inst-v6;
+                    }
+                    destination-prefix-list {
+                        BGP-locals-v6;
+                        BGP-locals-inst-v6;
+                    }
+                    next-header tcp;
+                    source-port bgp;
+                }
+                then {
+                    count accept-v6bgp-src;
+                    accept;
+                }
+            }
+            term accept-v6-traceroute-udp {
+                from {
+                    destination-prefix-list {
+                        LOCALS-v6;
+                    }
+                    next-header udp;
+                    destination-port 33434-33450;
+                }
+                then {
+                    policer management-1m;
+                    count accept-v6-traceroute-udp;
+                    accept;
+                }
+            }
+            term accept-v6-dns {
+                from {
+                    source-prefix-list {
+                        DNS-servers-v6;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v6;
+                    }
+                    next-header udp;
+                    source-port 53;
+                }
+                then {
+                    policer management-1m;
+                    count accept-v6-dns;
+                }
+            }
+            term accept-v6-ntp {
+                from {
+                    source-prefix-list {
+                        NTP-servers-v6;
+                        LOCALS-v6;
+                    }
+                    destination-prefix-list {
+                        LOCALS-v6;
+                    }
+                    next-header udp;
+                    destination-port ntp;
+                }
+                then {
+                    policer management-512k;
+                    count accept-v6-ntp;
+                    accept;
+                }
+            }
+            term discard-v6-tcp {
+                from {
+                    next-header tcp;
+                }
+                then {
+                    count discard-v6-tcp;
+                    log;
+                    discard;
+                }
+            }
+            term discard-v6-udp {
+                from {
+                    next-header udp;
+                }
+                then {
+                    count discard-v6-udp;
+                    log;
+                    discard;
+                }
+            }
+            term discard-v6-icmp {
+                from {
+                    destination-prefix-list {
+                        LOCALS-v6;
+                    }
+                    next-header icmp6;
+                }
+                then {
+                    count discard-v6-icmp;
+                    log;
+                    discard;
+                }
+            }
+            term discard-v6-unknown {
+                then {
+                    count discard-v6-unknown;
+                    log;
+                    discard;
+                }
+            }
+        }
+    }
+    policer additional-1m {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 625k;
+        }
+        then discard;
+    }
+    policer management-1m {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 625k;
+        }
+        then discard;
+    }
+    policer management-512k {
+        if-exceeding {
+            bandwidth-limit 512k;
+            burst-size-limit 25k;
+        }
+        then discard;
+    }
+    policer management-5m {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 625k;
+        }
+        then discard;
+    }
+}
+applications {
+    application esp protocol esp;
+    application tcp-port-443 {
+        protocol tcp;
+        destination-port 443;
+    }
+    application tcp-port-623 {
+        protocol tcp;
+        destination-port 623;
+    }
+    application tcp-port-636 {
+        protocol tcp;
+        destination-port 636;
+    }
+    application tcp-port-1194 {
+        protocol tcp;
+        destination-port 1194;
+    }
+    application tcp-port-2641 {
+        protocol tcp;
+        destination-port 2641;
+    }
+    application tcp-port-2651 {
+        protocol tcp;
+        destination-port 2651;
+    }
+    application tcp-port-2661 {
+        protocol tcp;
+        destination-port 2661;
+    }
+    application tcp-port-3389 {
+        protocol tcp;
+        destination-port 3389;
+    }
+    application tcp-port-5000 {
+        protocol tcp;
+        destination-port 5000;
+    }
+    application tcp-ports-5000-6000 {
+        protocol tcp;
+        destination-port 5000-6000;
+    }
+    application tcp-ports-5120-5123 {
+        protocol tcp;
+        destination-port 5120-5123;
+    }
+    application tcp-port-5224 {
+        protocol tcp;
+        destination-port 5224;
+    }
+    application tcp-port-5480 {
+        protocol tcp;
+        destination-port 5480;
+    }
+    application tcp-port-5986 {
+        protocol tcp;
+        destination-port 5986;
+    }
+    application tcp-ports-5900-5999 {
+        protocol tcp;
+        destination-port 5900-5999;
+    }
+    application tcp-ports-5900-5901 {
+        protocol tcp;
+        destination-port 5900-5901;
+    }
+    application tcp-ports-6000-6002 {
+        protocol tcp;
+        destination-port 6000-6002;
+    }
+    application tcp-ports-6080-6082 {
+        protocol tcp;
+        destination-port 6080-6082;
+    }
+    application tcp-port-6379 {
+        protocol tcp;
+        destination-port 6379;
+    }
+    application tcp-ports-7770-7800 {
+        protocol tcp;
+        destination-port 7770-7800;
+    }
+    application tcp-port-7989 {
+        protocol tcp;
+        destination-port 7989;
+    }
+    application tcp-ports-8000-8004 {
+        protocol tcp;
+        destination-port 8000-8004;
+    }
+    application tcp-port-8080 {
+        protocol tcp;
+        destination-port 8080;
+    }
+    application tcp-port-8088 {
+        protocol tcp;
+        destination-port 8088;
+    }
+    application tcp-port-8300 {
+        protocol tcp;
+        destination-port 8300;
+    }
+    application tcp-port-8301 {
+        protocol tcp;
+        destination-port 8301;
+    }
+    application tcp-port-8386 {
+        protocol tcp;
+        destination-port 8386;
+    }
+    application tcp-port-8443 {
+        protocol tcp;
+        destination-port 8443;
+    }
+    application tcp-port-8444 {
+        protocol tcp;
+        destination-port 8444;
+    }
+    application tcp-port-8500 {
+        protocol tcp;
+        destination-port 8500;
+    }
+    application tcp-port-8800 {
+        protocol tcp;
+        destination-port 8800;
+    }
+    application tcp-ports-8773-8777 {
+        protocol tcp;
+        destination-port 8773-8777;
+    }
+    application tcp-port-8774 {
+        protocol tcp;
+        destination-port 8774;
+    }
+    application tcp-port-8888 {
+        protocol tcp;
+        destination-port 8888;
+    }
+    application tcp-port-9000 {
+        protocol tcp;
+        destination-port 9000;
+    }
+    application tcp-ports-9090-9099 {
+        protocol tcp;
+        destination-port 9090-9099;
+    }
+    application tcp-port-9090 {
+        protocol tcp;
+        destination-port 9090;
+    }
+    application tcp-port-9092 {
+        protocol tcp;
+        destination-port 9092;
+    }
+    application tcp-port-9093 {
+        protocol tcp;
+        destination-port 9093;
+    }
+    application tcp-port-9193 {
+        protocol tcp;
+        destination-port 9193;
+    }
+    application tcp-port-9100 {
+        protocol tcp;
+        destination-port 9100;
+    }
+    application tcp-port-9191 {
+        protocol tcp;
+        destination-port 9191;
+    }
+    application tcp-port-9182 {
+        protocol tcp;
+        destination-port 9182;
+    }
+    application tcp-port-9292 {
+        protocol tcp;
+        destination-port 9292;
+    }
+    application tcp-port-9696 {
+        protocol tcp;
+        destination-port 9696;
+    }
+    application tcp-ports-10000-11000 {
+        protocol tcp;
+        destination-port 10000-11000;
+    }
+    application tcp-ports-10000-13000 {
+        protocol tcp;
+        destination-port 10000-13000;
+    }
+    application tcp-port-10051 {
+        protocol tcp;
+        destination-port 10051;
+    }
+    application tcp-port-10052 {
+        protocol tcp;
+        destination-port 10052;
+    }
+    application tcp-port-10090 {
+        protocol tcp;
+        destination-port 10090;
+    }
+    application tcp-port-18443 {
+        protocol tcp;
+        destination-port 18443;
+    }
+    application tcp-port-19443 {
+        protocol tcp;
+        destination-port 19443;
+    }
+    application tcp-port-35357 {
+        protocol tcp;
+        destination-port 35357;
+    }
+    application tcp-port-44445 {
+        protocol tcp;
+        destination-port 44445;
+    }
+    application tcp-port-55555 {
+        protocol tcp;
+        destination-port 55555;
+    }
+    application tcp-port-55556 {
+        protocol tcp;
+        destination-port 55556;
+    }
+    application udp-port-161 {
+        protocol udp;
+        destination-port 161;
+    }
+    application udp-port-162 {
+        protocol udp;
+        destination-port 162;
+    }
+    application udp-port-500 {
+        protocol udp;
+        destination-port 500;
+    }
+    application udp-port-623 {
+        protocol udp;
+        destination-port 623;
+    }
+    application udp-port-4500 {
+        protocol udp;
+        destination-port 4500;
+    }
+    application udp-port-1194 {
+        protocol udp;
+        destination-port 1194;
+    }
+    application udp-port-8301 {
+        protocol udp;
+        destination-port 8301;
+    }
+    application udp-ports-33434-33534 {
+        protocol udp;
+        destination-port 33434-33534;
+    }
+    application udp-port-323 {
+        protocol udp;
+        destination-port 323;
+    }
+    application tcp-port-88 {
+        protocol tcp;
+        destination-port 88;
+    }
+    application tcp-port-389 {
+        protocol tcp;
+        destination-port 389;
+    }
+    application tcp-port-464 {
+        protocol tcp;
+        destination-port 464;
+    }
+    application tcp-port-830 {
+        protocol tcp;
+        destination-port 830;
+    }
+    application tcp-port-873 {
+        protocol tcp;
+        destination-port 873;
+    }
+    application tcp-port-3323 {
+        protocol tcp;
+        destination-port 3323;
+    }
+    application tcp-port-4343 {
+        protocol tcp;
+        destination-port 4343;
+    }
+    application tcp-port-4505 {
+        protocol tcp;
+        destination-port 4505;
+    }
+    application tcp-port-4506 {
+        protocol tcp;
+        destination-port 4506;
+    }
+    application tcp-port-7389 {
+        protocol tcp;
+        destination-port 7389;
+    }
+    application tcp-ports-8000-9000 {
+        protocol tcp;
+        destination-port 8000-9000;
+    }
+    application tcp-port-8010 {
+        protocol tcp;
+        destination-port 8010;
+    }
+    application tcp-port-8081 {
+        protocol tcp;
+        destination-port 8081;
+    }
+    application tcp-port-8082 {
+        protocol tcp;
+        destination-port 8082;
+    }
+    application tcp-port-8090 {
+        protocol tcp;
+        destination-port 8090;
+    }
+    application tcp-port-8200 {
+        protocol tcp;
+        destination-port 8200;
+    }
+    application tcp-port-9095 {
+        protocol tcp;
+        destination-port 9095;
+    }
+    application tcp-port-32767 {
+        protocol tcp;
+        destination-port 32767;
+    }
+    application udp-port-88 {
+        protocol udp;
+        destination-port 88;
+    }
+    application udp-port-464 {
+        protocol udp;
+        destination-port 464;
+    }
+    application udp-port-2055 {
+        protocol udp;
+        destination-port 2055;
+    }
+    application udp-ports-4000-7000 {
+        protocol udp;
+        destination-port 4000-7000;
+    }
+    application udp-port-9995 {
+        protocol udp;
+        destination-port 9995;
+    }
+    application udp-port-10514 {
+        protocol udp;
+        destination-port 10514;
+    }
+    application tcp-port-3128 {
+        protocol tcp;
+        destination-port 3128;
+    }
+    application-set snmp {
+        application udp-port-161;
+        application udp-port-162;
+    }
+}
+protocols {
+    ospf {
+        area 0.0.0.0 {
+            interface st0.1 {
+                interface-type p2mp;
+                metric 15;
+                retransmit-interval 1;
+                dead-interval 40;
+                demand-circuit;
+                dynamic-neighbors;
+            }
+            interface reth1.14 {
+                passive;
+            }
+        }
+        area 0.0.0.247 {
+            interface reth0.66 {
+                passive;
+            }
+        }
+        traceoptions {
+            file ospf size 5m files 4 world-readable;
+            flag error;
+            flag event;
+            flag state;
+        }
+        graceful-restart {
+            restart-duration 300;
+            notify-duration 300;
+            no-strict-lsa-checking;
+        }
+        export PEER-A-RT-01-02_BGP_RCV_V4;
+    }
+    bgp {
+        group PEER-A-RT-01-02_V4 {
+            type external;
+            import PEER-A-RT-01-02_BGP_RCV_V4;
+            export PEER-A-RT-01-02_BGP_ADV_V4;
+            peer-as 35793;
+            local-as 4200042001;
+            neighbor 10.2.254.1 {
+                local-address 10.2.254.0;
+            }
+            neighbor 10.2.254.3 {
+                local-address 10.2.254.2;
+            }
+        }
+        traceoptions {
+            file bgp size 5m files 4 world-readable;
+            flag open;
+            flag normal;
+            flag state;
+        }
+        log-updown;
+        bgp-error-tolerance {
+            malformed-update-log-interval 10;
+            malformed-route-limit 5;
+        }
+    }
+    lldp {
+        interface xe-0/0/16;
+        interface xe-0/0/17;
+        interface xe-7/0/16;
+        interface xe-7/0/17;
+    }
+}
+routing-options {
+    router-id 10.1.42.1;
+    autonomous-system 4200042001;
+    graceful-restart;
+    static {
+        route 0.0.0.0/0 next-hop 192.0.2.188;
+    }
+}

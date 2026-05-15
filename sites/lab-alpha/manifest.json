@@ -1,0 +1,86 @@
+{
+  "site": "LAB-ALPHA",
+  "vendor": "mixed (Junos + EOS)",
+  "devices": [
+    {
+      "hostname": "alpha-fw-01a",
+      "file": "fw-01a.txt",
+      "platform": "junos",
+      "function": "firewall",
+      "function_code": "fw",
+      "redacted": 6,
+      "by_rule": {
+        "shadow-hash": 1,
+        "ssh-key": 2,
+        "snmp-community": 1,
+        "redacted-tokens": 2
+      },
+      "orig_bytes": 6674,
+      "sanitized_bytes": 5874
+    },
+    {
+      "hostname": "alpha-fw-01b",
+      "file": "fw-01b.txt",
+      "platform": "junos",
+      "function": "firewall",
+      "function_code": "fw",
+      "redacted": 6,
+      "by_rule": {
+        "shadow-hash": 1,
+        "ssh-key": 2,
+        "snmp-community": 1,
+        "redacted-tokens": 2
+      },
+      "orig_bytes": 6674,
+      "sanitized_bytes": 5874
+    },
+    {
+      "hostname": "alpha-rt-01",
+      "file": "rt-01.txt",
+      "platform": "junos",
+      "function": "router",
+      "function_code": "rt",
+      "redacted": 6,
+      "by_rule": {
+        "shadow-hash": 1,
+        "ssh-key": 2,
+        "snmp-community": 1,
+        "redacted-tokens": 2
+      },
+      "orig_bytes": 3503,
+      "sanitized_bytes": 2703
+    },
+    {
+      "hostname": "alpha-sw-01",
+      "file": "sw-01.txt",
+      "platform": "eos",
+      "function": "switch",
+      "function_code": "sw",
+      "redacted": 6,
+      "by_rule": {
+        "shadow-hash": 1,
+        "ssh-key": 2,
+        "snmp-community": 1,
+        "redacted-tokens": 2
+      },
+      "orig_bytes": 2986,
+      "sanitized_bytes": 2186
+    },
+    {
+      "hostname": "alpha-sw-02",
+      "file": "sw-02.txt",
+      "platform": "eos",
+      "function": "switch",
+      "function_code": "sw",
+      "redacted": 6,
+      "by_rule": {
+        "shadow-hash": 1,
+        "ssh-key": 2,
+        "snmp-community": 1,
+        "redacted-tokens": 2
+      },
+      "orig_bytes": 2986,
+      "sanitized_bytes": 2186
+    }
+  ]
+}
