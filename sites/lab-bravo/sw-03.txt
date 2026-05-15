@@ -1,0 +1,108 @@
+# Synthetic EX switch — fully fictional.
+system {
+    host-name bravo-sw-03;
+    domain-name example.com;
+    time-zone UTC;
+    root-authentication {
+        encrypted-password "$6$REDACTED$REDACTED";
+    }
+    login {
+        user netadmin {
+            uid 2000;
+            class super-user;
+            authentication {
+                ssh-rsa "ssh-rsa REDACTED admin@example.com";
+            }
+        }
+    }
+    services {
+        ssh {
+            root-login deny;
+        }
+    }
+    syslog {
+        host 10.10.0.50 any info;
+    }
+    ntp {
+        server 10.10.0.10;
+    }
+}
+interfaces {
+    ge-0/0/0 {
+        description "uplink to bravo-rt-01";
+        unit 0 {
+            family ethernet-switching {
+                interface-mode trunk;
+                vlan {
+                    members [ users servers iot ];
+                }
+            }
+        }
+    }
+    ge-0/0/1 {
+        description "uplink to bravo-rt-02";
+        unit 0 {
+            family ethernet-switching {
+                interface-mode trunk;
+                vlan {
+                    members [ users servers iot ];
+                }
+            }
+        }
+    }
+    ge-0/0/2 {
+        description "users access port";
+        unit 0 {
+            family ethernet-switching {
+                interface-mode access;
+                vlan {
+                    members users;
+                }
+            }
+        }
+    }
+    ge-0/0/3 {
+        description "servers access";
+        unit 0 {
+            family ethernet-switching {
+                interface-mode access;
+                vlan {
+                    members servers;
+                }
+            }
+        }
+    }
+    me0 {
+        unit 0 {
+            family inet {
+                address 10.20.0.43/24;
+            }
+        }
+    }
+}
+vlans {
+    users {
+        vlan-id 100;
+        l3-interface vlan.100;
+    }
+    servers {
+        vlan-id 200;
+        l3-interface vlan.200;
+    }
+    iot {
+        vlan-id 300;
+        # NOTE: no l3-interface — IoT VLAN intentionally left unrouted (demo gap)
+    }
+}
+protocols {
+    rstp;
+    # NOTE: no LLDP — analyzer should flag this on access switches
+}
+snmp {
+    community REDACTED {
+        authorization read-only;
+        clients {
+            10.10.0.0/24;
+        }
+    }
+}

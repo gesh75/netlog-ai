@@ -1,0 +1,269 @@
+# Synthetic SRX firewall config — fully fictional, for netlog-ai demo only.
+system {
+    host-name alpha-fw-01a;
+    domain-name example.com;
+    time-zone UTC;
+    root-authentication {
+        encrypted-password "$6$REDACTED$REDACTED";
+    }
+    login {
+        class read-only {
+            permissions [ view view-configuration ];
+        }
+        user netadmin {
+            uid 2000;
+            class super-user;
+            authentication {
+                ssh-rsa "ssh-rsa REDACTED admin@example.com";
+            }
+        }
+        user readonly {
+            uid 2001;
+            class read-only;
+            authentication {
+                ssh-ed25519 "ssh-ed25519 REDACTED audit@example.com";
+            }
+        }
+    }
+    services {
+        ssh {
+            root-login deny;
+            protocol-version v2;
+            connection-limit 10;
+        }
+        netconf {
+            ssh;
+        }
+    }
+    syslog {
+        host 10.10.0.50 {
+            any info;
+            firewall any;
+        }
+        file messages {
+            any notice;
+            authorization info;
+        }
+    }
+    ntp {
+        server 10.10.0.10 prefer;
+        server 10.10.0.11;
+    }
+    name-server {
+        10.10.0.10;
+        10.10.0.11;
+    }
+}
+chassis {
+    cluster {
+        reth-count 4;
+        redundancy-group 0 {
+            node 0 priority 200;
+            node 1 priority 100;
+        }
+        redundancy-group 1 {
+            node 0 priority 200;
+            node 1 priority 100;
+            interface-monitor {
+                reth0.0 weight 255;
+                reth1.0 weight 255;
+            }
+        }
+    }
+}
+interfaces {
+    fab0 {
+        fabric-options {
+            member-interfaces {
+                ge-0/0/0;
+            }
+        }
+    }
+    fab1 {
+        fabric-options {
+            member-interfaces {
+                ge-7/0/0;
+            }
+        }
+    }
+    reth0 {
+        description "WAN-A upstream";
+        redundant-ether-options {
+            redundancy-group 1;
+        }
+        unit 0 {
+            family inet {
+                address 198.51.100.6/30;
+            }
+        }
+    }
+    reth1 {
+        description "WAN-B upstream";
+        redundant-ether-options {
+            redundancy-group 1;
+        }
+        unit 0 {
+            family inet {
+                address 203.0.113.6/30;
+            }
+        }
+    }
+    reth2 {
+        description "LAN trust";
+        redundant-ether-options {
+            redundancy-group 1;
+        }
+        unit 0 {
+            family inet {
+                address 10.10.1.1/24;
+            }
+        }
+    }
+    reth3 {
+        description "LAN dmz";
+        redundant-ether-options {
+            redundancy-group 1;
+        }
+        unit 0 {
+            family inet {
+                address 10.10.2.1/24;
+            }
+        }
+    }
+    fxp0 {
+        unit 0 {
+            family inet {
+                address 10.10.0.21/24;
+            }
+        }
+    }
+}
+routing-options {
+    autonomous-system 65010;
+    router-id 198.51.100.6;
+}
+protocols {
+    bgp {
+        group upstream-a {
+            type external;
+            peer-as 65500;
+            local-as 65010;
+            export advertise-default;
+            neighbor 198.51.100.5 {
+                authentication-key "REDACTED";
+            }
+        }
+        group upstream-b {
+            type external;
+            peer-as 65501;
+            local-as 65010;
+            export advertise-default;
+            neighbor 203.0.113.10;
+        }
+    }
+    lldp {
+        interface all;
+    }
+}
+policy-options {
+    policy-statement advertise-default {
+        term default {
+            from {
+                route-filter 0.0.0.0/0 exact;
+            }
+            then accept;
+        }
+        term reject-rest {
+            then reject;
+        }
+    }
+}
+security {
+    zones {
+        security-zone untrust {
+            interfaces {
+                reth0.0;
+                reth1.0;
+            }
+            host-inbound-traffic {
+                system-services {
+                    ping;
+                }
+                protocols {
+                    bgp;
+                }
+            }
+        }
+        security-zone trust {
+            interfaces {
+                reth2.0;
+            }
+            host-inbound-traffic {
+                system-services {
+                    all;
+                }
+            }
+        }
+        security-zone dmz {
+            interfaces {
+                reth3.0;
+            }
+            host-inbound-traffic {
+                system-services {
+                    ping;
+                    ssh;
+                }
+            }
+        }
+    }
+    policies {
+        from-zone trust to-zone untrust {
+            policy permit-outbound {
+                match {
+                    source-address any;
+                    destination-address any;
+                    application any;
+                }
+                then {
+                    permit;
+                    log {
+                        session-init;
+                    }
+                }
+            }
+        }
+        from-zone untrust to-zone dmz {
+            policy permit-web {
+                match {
+                    source-address any;
+                    destination-address dmz-webservers;
+                    application [ junos-http junos-https ];
+                }
+                then {
+                    permit;
+                    log {
+                        session-init;
+                    }
+                }
+            }
+        }
+    }
+    address-book {
+        global {
+            address dmz-webservers 10.10.2.0/24;
+        }
+    }
+}
+snmp {
+    community REDACTED {
+        authorization read-only;
+        clients {
+            10.10.0.0/24;
+        }
+    }
+    trap-group netmon {
+        targets {
+            10.10.0.50;
+        }
+    }
+}
