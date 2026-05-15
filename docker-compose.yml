@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    container_name: ai-log-analyzer
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${ANALYZER_PORT:-6060}:6060"
+    volumes:
+      # Mount docker socket so the container can read FRR lab logs from the host
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6060/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

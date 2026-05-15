@@ -1,0 +1,140 @@
+# Synthetic MX router — fully fictional.
+system {
+    host-name bravo-rt-02;
+    domain-name example.com;
+    time-zone UTC;
+    root-authentication {
+        encrypted-password "$6$REDACTED$REDACTED";
+    }
+    login {
+        user netadmin {
+            uid 2000;
+            class super-user;
+            authentication {
+                ssh-rsa "ssh-rsa REDACTED admin@example.com";
+            }
+        }
+    }
+    services {
+        ssh {
+            root-login deny;
+        }
+        netconf {
+            ssh;
+        }
+    }
+    syslog {
+        host 10.10.0.50 any info;
+    }
+    ntp {
+        server 10.10.0.10;
+    }
+}
+interfaces {
+    et-0/0/0 {
+        description "spine uplink-a";
+        mtu 9216;
+        unit 0 {
+            family inet {
+                address 10.10.10.1/30;
+            }
+        }
+    }
+    et-0/0/1 {
+        description "spine uplink-b";
+        mtu 9216;
+        unit 0 {
+            family inet {
+                address 10.10.10.5/30;
+            }
+        }
+    }
+    ge-1/0/0 {
+        description "leaf-01 downlink";
+        mtu 9000;
+        unit 0 {
+            family inet {
+                address 10.10.20.1/30;
+            }
+        }
+    }
+    ge-1/0/1 {
+        description "leaf-02 downlink";
+        mtu 9000;
+        unit 0 {
+            family inet {
+                address 10.10.20.5/30;
+            }
+        }
+    }
+    lo0 {
+        unit 0 {
+            family inet {
+                address 10.20.255.2/32;
+            }
+        }
+    }
+    fxp0 {
+        unit 0 {
+            family inet {
+                address 10.20.0.32/24;
+            }
+        }
+    }
+}
+routing-options {
+    autonomous-system 65030;
+    router-id 10.20.255.2;
+}
+protocols {
+    ospf {
+        area 0.0.0.0 {
+            interface et-0/0/0.0;
+            interface et-0/0/0.0 {
+                hello-interval 5;
+                dead-interval 20;
+            }
+            interface et-0/0/1.0;
+            interface lo0.0 {
+                passive;
+            }
+        }
+    }
+    bgp {
+        group fabric-1 {
+            type internal;
+            local-address 10.20.255.2;
+            neighbor 10.20.255.1 {
+                description "to peer AS65030";
+            }
+        }
+        group fabric-2 {
+            type internal;
+            local-address 10.20.255.2;
+            neighbor 10.20.255.11 {
+                description "to peer AS65030";
+            }
+        }
+        group fabric-3 {
+            type internal;
+            local-address 10.20.255.2;
+            neighbor 10.20.255.12 {
+                description "to peer AS65030";
+            }
+        }
+    }
+    lldp {
+        interface all;
+    }
+    bfd {
+        # NOTE: BFD intentionally omitted on BGP groups — analyzer should flag this.
+    }
+}
+snmp {
+    community REDACTED {
+        authorization read-only;
+        clients {
+            10.10.0.0/24;
+        }
+    }
+}

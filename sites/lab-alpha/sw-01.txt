@@ -1,0 +1,103 @@
+! Synthetic Arista EOS config — fully fictional, for netlog-ai demo only.
+!
+hostname alpha-sw-01
+ip domain-name example.com
+ip name-server 10.10.0.10
+ip name-server 10.10.0.11
+clock timezone UTC
+!
+no ip routing vrf default
+ip routing
+!
+spanning-tree mode mstp
+spanning-tree mst configuration
+   name LAB
+   revision 1
+!
+aaa authentication login default local
+aaa authorization exec default local
+!
+username netadmin privilege 15 role network-admin nopassword
+username netadmin ssh-key ssh-rsa REDACTED admin@example.com
+username readonly privilege 1 role network-operator nopassword
+username readonly ssh-key ssh-ed25519 REDACTED audit@example.com
+!
+management ssh
+   no shutdown
+!
+management api http-commands
+   no shutdown
+!
+ntp server 10.10.0.10 prefer
+ntp server 10.10.0.11
+!
+snmp-server community REDACTED ro 10.10.0.0/24
+snmp-server location lab-alpha
+snmp-server host 10.10.0.50 version 2c REDACTED
+!
+logging host 10.10.0.50
+logging level all informational
+!
+vlan 100
+   name users
+!
+vlan 200
+   name servers
+!
+vlan 300
+   name iot
+!
+interface Management1
+   ip address 10.10.0.41/24
+!
+interface Ethernet1
+   description uplink to upstream router
+   no switchport
+   mtu 9214
+   ip address 10.10.30.1/30
+!
+interface Ethernet2
+   description leaf user access
+   switchport mode access
+   switchport access vlan 100
+   spanning-tree portfast
+!
+interface Ethernet3
+   description leaf server access
+   switchport mode access
+   switchport access vlan 200
+!
+!
+vlan 4094
+   name MLAG
+   trunk group MLAGPEER
+!
+interface Vlan4094
+   description MLAG SVI
+   ip address 10.10.250.1/30
+!
+interface Port-Channel999
+   description MLAG-PEER-LINK
+   switchport trunk group MLAGPEER
+   switchport mode trunk
+!
+mlag configuration
+   domain-id LAB-MLAG
+   local-interface Vlan4094
+   peer-address 10.10.250.2
+   peer-link Port-Channel999
+!
+router bgp 65020
+   router-id 10.10.0.41
+   no bgp default ipv4-unicast
+   neighbor 10.10.30.2 remote-as 65010
+   neighbor 10.10.30.2 description upstream-router
+   !
+   ! NOTE: no BFD configured — analyzer should flag this
+   !
+   address-family ipv4
+      neighbor 10.10.30.2 activate
+!
+! NOTE: no LLDP block — analyzer should flag missing LLDP
+!
+end

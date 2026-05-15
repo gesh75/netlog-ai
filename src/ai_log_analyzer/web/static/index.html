@@ -1,0 +1,1430 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Tints the mobile browser chrome / address bar to match the app's dark theme -->
+<meta name="theme-color" content="#0a0e15" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#0a0e15">
+<meta name="description" content="AI-powered network log analyzer with cross-device correlation, BGP/OSPF health scoring, and LLM-assisted incident playbooks.">
+<!-- Local-only tool: keep out of any accidental search-engine crawl if the port is exposed -->
+<meta name="robots" content="noindex, nofollow">
+<!-- D3 CDN preconnect — opens TCP+TLS 100–200ms earlier so the deferred D3
+     script downloads faster on first paint. `crossorigin` matches the script's
+     CORS mode (D3 is served with permissive CORS). -->
+<link rel="preconnect" href="https://d3js.org" crossorigin>
+<link rel="dns-prefetch" href="https://d3js.org">
+<!-- PWA: when added to iOS / Android home screen, launch full-screen with status bar tinted to match the dark theme -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Log Analyzer">
+<meta name="application-name" content="AI Log Analyzer">
+<!-- Inline SVG favicon — matches the network-node brand logo in the header,
+     no extra HTTP request, scales crisply at every size -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%2358a6ff'/><stop offset='100%25' stop-color='%2300d4ff'/></linearGradient></defs><rect width='24' height='24' rx='5' fill='%230d1117'/><g stroke='url(%23g)' stroke-width='1.8' fill='url(%23g)'><circle cx='12' cy='5' r='1.8'/><circle cx='5' cy='19' r='1.8'/><circle cx='19' cy='19' r='1.8'/><circle cx='12' cy='12' r='2.2'/></g><g stroke='url(%23g)' stroke-width='1.6' fill='none' stroke-linecap='round'><line x1='12' y1='6.8' x2='12' y2='9.8'/><line x1='10.5' y1='13.5' x2='6' y2='18'/><line x1='13.5' y1='13.5' x2='18' y2='18'/></g></svg>">
+<title>AI Log Analyzer</title>
+<style>
+  /* ── Theme ───────────────────────────────────────────────────────────── */
+  :root {
+    /* Tells the UA to render scrollbars, native form controls, autofill
+     * backgrounds, and other UI chrome in dark mode — prevents the white
+     * flash of mismatched browser controls on Chrome/Safari. */
+    color-scheme: dark;
+    --bg: #0a0e15;
+    --bg-2: #0d1117;
+    --panel: #131821;
+    --panel-2: #1a1f2e;
+    --panel-3: #1c2230;
+    --border: #2a313d;
+    --border-hi: #3d4654;
+    --fg: #e6edf3;
+    --fg-dim: #c9d1d9;
+    --muted: #8b949e;
+    --muted-2: #6e7681;
+    --accent: #58a6ff;
+    --accent-2: #00d4ff;
+    --accent-glow: 0 0 0 1px rgba(0, 212, 255, 0.3),
+                    0 4px 14px rgba(0, 212, 255, 0.15);
+    /* Severity (semantic) */
+    --crit: #ff4444;
+    --high: #ff8c00;
+    --med:  #ffd700;
+    --low:  #00bcd4;
+    --info: #8b9ab1;
+    --ok:   #3fb950;
+    --warn: #d29922;
+  }
+
+  * { box-sizing: border-box; }
+
+  /* ── Skip-to-main link (a11y) ─────────────────────────────────────────
+   * Off-screen by default; appears as a cyan pill at top-left when focused
+   * via Tab. Lets keyboard / screen-reader users jump past the sidebar
+   * directly to the main content area. */
+  .skip-link {
+    position: absolute; top: -100px; left: 12px; z-index: 10000;
+    background: var(--accent-2); color: var(--bg);
+    padding: 8px 14px; border-radius: 6px;
+    font-size: 13px; font-weight: 700;
+    text-decoration: none;
+    box-shadow: 0 4px 14px rgba(0, 212, 255, 0.4);
+    transition: top 0.18s ease;
+  }
+  .skip-link:focus { top: 12px; outline: 2px solid var(--fg); outline-offset: 2px; }
+  /* NOTE: do NOT set html/body height:100% — that constrains body to viewport
+   *       and breaks `position: sticky` on the header (header un-sticks once
+   *       you scroll past viewport-height). Let the document size naturally. */
+  body {
+    margin: 0; min-height: 100vh;
+    font: 14px/1.5 -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif;
+    background:
+      radial-gradient(circle at 0% 0%, rgba(0, 212, 255, 0.04) 0%, transparent 40%),
+      radial-gradient(circle at 100% 100%, rgba(88, 166, 255, 0.04) 0%, transparent 40%),
+      var(--bg);
+    background-attachment: fixed;   /* gradient stays put as page scrolls */
+    color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  header {
+    padding: 10px 24px;
+    background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(10px);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-logo {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(0, 212, 255, 0.35);
+    position: relative;
+  }
+  .brand-logo svg { width: 20px; height: 20px; stroke: white; fill: none;
+                    stroke-width: 2; }
+  .brand-title { font-size: 16px; font-weight: 700; letter-spacing: 0.2px;
+                 color: var(--fg); }
+  /* Version chip — intentionally muted so it doesn't compete with active status chips */
+  .brand-version {
+    font-size: 10px; color: var(--muted); margin-left: 4px;
+    background: transparent; border: 1px solid var(--border-hi);
+    border-radius: 10px; padding: 1px 8px; font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .header-spacer { flex: 1; }
+  /* Soft "Status:" label before the chip cluster */
+  .status-label {
+    font-size: 10px; color: var(--muted-2); text-transform: uppercase;
+    letter-spacing: 0.6px; font-weight: 700;
+    padding-right: 6px; border-right: 1px solid var(--border);
+    margin-right: 2px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; padding: 4px 10px; border-radius: 12px;
+    background: var(--bg-2); border: 1px solid var(--border); color: var(--muted);
+    font-weight: 500;
+  }
+  .chip .pulse {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--muted-2); flex-shrink: 0;
+  }
+  .chip.ok    { color: var(--ok);   border-color: rgba(63,185,80,0.4);  background: rgba(63,185,80,0.06); }
+  .chip.ok   .pulse { background: var(--ok);   animation: statusPulse 2s ease-in-out infinite; }
+  .chip.warn  { color: var(--warn); border-color: rgba(210,153,34,0.4); background: rgba(210,153,34,0.06); }
+  .chip.warn .pulse { background: var(--warn); animation: statusPulse 2s ease-in-out infinite; }
+  .chip.crit  { color: var(--crit); border-color: rgba(255,68,68,0.4);  background: rgba(255,68,68,0.06); }
+  .chip.crit .pulse { background: var(--crit); animation: statusPulse 1s ease-in-out infinite; }
+  @keyframes statusPulse {
+    0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+    50%      { box-shadow: 0 0 0 4px transparent; opacity: 0.7; }
+  }
+
+  /* ── Layout ──────────────────────────────────────────────────────────── */
+  /* Grid with explicit min-height: 0 on BOTH tracks so neither track can
+   * impose a height ceiling on the other. Without this, the sticky aside's
+   * computed height was capping the grid row height and clipping the section
+   * past ~7000px of dynamic content. */
+  main {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    grid-template-rows: minmax(0, auto);
+    gap: 20px;
+    padding: 20px 24px;
+    max-width: 1700px; margin: 0 auto;
+    align-items: start;
+  }
+  main > section {
+    min-width: 0; min-height: 0;          /* prevent grid blowout / clipping */
+    isolation: isolate;                    /* new stacking context — paint independence from sticky aside */
+    contain: layout;                       /* layout isolation only; do NOT add `paint` (would clip) */
+  }
+  main > aside  {
+    position: sticky;                     /* sidebar follows scroll */
+    top: 78px;                            /* clears header */
+    align-self: start;
+    /* Sidebar can scroll internally if taller than the viewport, but never
+       constrains its own children — sections grow freely. */
+    max-height: calc(100vh - 98px);
+    min-height: 0;                        /* allow grid row to be taller */
+    overflow-y: auto;
+    overscroll-behavior: contain;         /* don't chain to page scroll */
+    padding-right: 6px;
+  }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr; }
+    main > aside { position: static; max-height: none; overflow: visible; }
+  }
+  /* Custom scrollbar (sidebar + tall panels) — replaces default ugly bar.
+     The sidebar scrollbar is intentionally always-visible (not just on hover)
+     so users can tell the area is scrollable. */
+  main > aside { scrollbar-width: thin; scrollbar-color: var(--border-hi) transparent; }
+  main > aside::-webkit-scrollbar,
+  .scroll-cap::-webkit-scrollbar,
+  .chip-picker::-webkit-scrollbar { width: 8px; }
+  main > aside::-webkit-scrollbar-track,
+  .scroll-cap::-webkit-scrollbar-track,
+  .chip-picker::-webkit-scrollbar-track { background: transparent; }
+  main > aside::-webkit-scrollbar-thumb,
+  .scroll-cap::-webkit-scrollbar-thumb,
+  .chip-picker::-webkit-scrollbar-thumb {
+    background: var(--border-hi); border-radius: 4px;
+  }
+  main > aside::-webkit-scrollbar-thumb:hover,
+  .scroll-cap::-webkit-scrollbar-thumb:hover,
+  .chip-picker::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  /* ── Panels ──────────────────────────────────────────────────────────── */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset;
+    /* `contain: layout` makes each panel its own layout/paint boundary so a
+     * very tall section (8k+ px of content) doesn't fight the compositor with
+     * the sticky aside next to it. Off-screen panels also stay culled. */
+    contain: layout;
+    /* Off-screen culling — browser skips rendering panels far above/below the
+     * viewport. Default 500px is the baseline; tuned per-panel below for
+     * better scrollbar accuracy and less layout shift on reveal. */
+    content-visibility: auto;
+    contain-intrinsic-size: 0 500px;
+  }
+  /* Per-panel tuned estimates — match the actual rendered height for each
+   * panel type so the scrollbar stays accurate and off-screen→on-screen
+   * transitions don't cause visible jumps. */
+  #idle-state            { contain-intrinsic-size: 0 280px; }
+  #health-panel          { contain-intrinsic-size: 0 320px; }
+  #summary-panel         { contain-intrinsic-size: 0 260px; }
+  #actions-panel         { contain-intrinsic-size: 0 380px; }
+  #events-panel          { contain-intrinsic-size: 0 540px; }
+  #optimize-panel        { contain-intrinsic-size: 0 800px; }
+  #site-panel            { contain-intrinsic-size: 0 720px; }
+  #topo-panel            { contain-intrinsic-size: 0 620px; }
+  #compliance-panel      { contain-intrinsic-size: 0 600px; }
+  #copilot-panel         { contain-intrinsic-size: 0 360px; }
+  #pm-panel              { contain-intrinsic-size: 0 480px; }
+  #site-wide-panel       { contain-intrinsic-size: 0 760px; }
+  .panel:last-child { margin-bottom: 0; }
+  h2 { margin: 0 0 12px; font-size: 12px; text-transform: uppercase;
+       letter-spacing: 0.6px; color: var(--muted); font-weight: 600;
+       display: flex; align-items: center; gap: 8px; }
+  h2 .h2-count { background: var(--bg-2); color: var(--fg-dim);
+                 font-size: 11px; padding: 1px 8px; border-radius: 10px;
+                 border: 1px solid var(--border); }
+  h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+       color: var(--muted); margin: 16px 0 8px; font-weight: 600; }
+
+  /* ── Chip picker (replaces raw <select multiple>) ─────────────────────── */
+  .chip-picker {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px; max-height: 140px; overflow-y: auto;
+    display: flex; flex-wrap: wrap; gap: 4px;
+  }
+  .chip-pick {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--panel-3); color: var(--fg-dim);
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 3px 9px; font-size: 11px; cursor: pointer;
+    transition: all 0.12s; user-select: none;
+    font-family: ui-monospace, "SF Mono", monospace;
+  }
+  .chip-pick:hover { border-color: var(--accent-2); color: var(--fg); }
+  .chip-pick.selected {
+    background: rgba(0, 212, 255, 0.14); border-color: var(--accent-2);
+    color: var(--accent-2); font-weight: 600;
+    box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.25);
+  }
+  .chip-pick.selected::before {
+    content: "✓"; font-size: 10px; margin-right: 2px;
+  }
+  .chip-picker-meta {
+    font-size: 10px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.4px; margin-top: 4px;
+  }
+  .chip-pick-actions {
+    display: flex; gap: 6px; margin-bottom: 6px;
+  }
+  .chip-pick-actions button {
+    flex: 0 0 auto; width: auto; margin: 0; padding: 3px 8px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+    background: transparent; color: var(--muted); border: 1px solid var(--border);
+  }
+  .chip-pick-actions button:hover { color: var(--accent-2); border-color: var(--accent-2); }
+
+  /* ── Sidebar group labels (between button rows on SITE tab) ─────────── */
+  .group-label {
+    font-size: 9px; color: var(--muted-2); text-transform: uppercase;
+    letter-spacing: 0.8px; font-weight: 700;
+    margin: 14px 0 6px; padding-bottom: 4px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .group-label:first-child { margin-top: 4px; }
+
+  /* ── Context breadcrumb ──────────────────────────────────────────────── */
+  .context-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px; margin-bottom: 14px;
+    background: linear-gradient(90deg, rgba(0,212,255,0.06) 0%, transparent 50%);
+    border: 1px solid var(--border); border-left: 3px solid var(--accent-2);
+    border-radius: 6px; font-size: 12px;
+    min-width: 0; max-width: 100%;
+  }
+  .context-bar .context-label {
+    font-size: 10px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.5px; font-weight: 600; flex-shrink: 0;
+  }
+  .context-bar .context-value {
+    font-family: ui-monospace, "SF Mono", monospace;
+    color: var(--accent-2); font-weight: 600;
+    /* Truncate long context strings (10 containers, 300 events, etc.) — full
+     * text is preserved in the `title` attribute for tooltip access. */
+    flex: 1 1 auto; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .context-bar .context-sep { color: var(--muted-2); flex-shrink: 0; }
+
+  /* ── LLM off → dim provider select ───────────────────────────────────── */
+  .llm-disabled { opacity: 0.55; }
+  .llm-disabled select { text-decoration: line-through; }
+
+  /* ── Form controls ───────────────────────────────────────────────────── */
+  label { display: block; margin: 10px 0 4px; font-size: 11px; color: var(--muted);
+          font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; }
+  select, input, textarea {
+    width: 100%; padding: 7px 10px; background: var(--bg-2); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; font: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  select:focus, input:focus, textarea:focus {
+    outline: none; border-color: var(--accent-2);
+    box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.12);
+  }
+  textarea { min-height: 70px; font-family: ui-monospace, "SF Mono", monospace;
+             font-size: 12px; }
+
+  /* ── Buttons ─────────────────────────────────────────────────────────── */
+  button {
+    cursor: pointer;
+    background: var(--accent); color: var(--bg-2); font-weight: 600;
+    border: none; padding: 9px 14px; margin-top: 12px;
+    border-radius: 6px; font: inherit; font-weight: 600;
+    transition: all 0.15s; width: 100%;
+  }
+  button:hover { background: var(--accent-2); transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* ── Keyboard focus ring (a11y) ─────────────────────────────────────── */
+  /* Visible only for keyboard navigation (`:focus-visible`), not for mouse
+   * clicks (`:focus`). Provides a high-contrast cyan ring on every interactive
+   * element. Custom outline keeps the existing button border-radius. */
+  :focus { outline: none; }
+  *:focus-visible {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  button:focus-visible,
+  .side-tab:focus-visible,
+  .chip-pick:focus-visible,
+  details > summary:focus-visible {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(0, 212, 255, 0.18);
+  }
+  input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: none;  /* keep the existing inset cyan glow from the base rule */
+  }
+  button.primary {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    box-shadow: var(--accent-glow);
+  }
+  button.primary:hover { filter: brightness(1.1); }
+  button.secondary {
+    background: var(--panel-3); color: var(--fg); border: 1px solid var(--border);
+  }
+  button.secondary:hover { background: var(--panel-2); border-color: var(--accent-2); }
+  button.tiny { padding: 4px 10px; margin-top: 0; width: auto; font-size: 11px; }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .btn-row button { flex: 1; min-width: 60px; margin-top: 0; padding: 7px 8px;
+                    font-size: 12px; }
+
+  /* ── Sidebar: tabs + collapsible groups ──────────────────────────────── */
+  .side-tabs {
+    display: flex; gap: 2px; background: var(--bg-2); border-radius: 8px;
+    padding: 3px; border: 1px solid var(--border); margin-bottom: 14px;
+  }
+  .side-tab {
+    flex: 1; padding: 7px 8px; font-size: 11px; text-align: center;
+    background: transparent; color: var(--muted); border: none; border-radius: 5px;
+    cursor: pointer; transition: all 0.15s; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-top: 0;
+  }
+  .side-tab:hover { color: var(--fg); background: rgba(0, 212, 255, 0.04); }
+  .side-tab.active {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    color: var(--bg-2);
+    box-shadow: 0 1px 4px rgba(0, 212, 255, 0.3);
+  }
+
+  .side-group { display: none; }
+  .side-group.active { display: block; }
+
+  .side-section {
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    /* `overflow: clip` is the modern equivalent of overflow: hidden that does
+     * NOT break `position: sticky` on descendants. Required for the sticky
+     * Run+Reload row at the bottom of the SOURCE & RUN body to work. */
+    overflow: clip;
+    background: var(--bg-2);
+  }
+  .side-section > summary {
+    cursor: pointer;
+    padding: 10px 12px;
+    background: var(--panel-3);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--fg);
+    list-style: none;
+    display: flex; align-items: center; gap: 8px;
+    user-select: none;
+    transition: background 0.15s;
+  }
+  .side-section > summary:hover { background: var(--panel-2); }
+  .side-section > summary::-webkit-details-marker { display: none; }
+  .side-section > summary::after {
+    content: "▼"; font-size: 9px; color: var(--accent-2);
+    margin-left: auto; transition: transform 0.18s ease;
+    display: inline-block; width: 14px; text-align: center;
+    background: rgba(0, 212, 255, 0.08); border-radius: 3px;
+    padding: 2px 0; line-height: 1;
+  }
+  .side-section:not([open]) > summary::after { transform: rotate(-90deg); }
+  .side-section-body { padding: 12px; background: var(--panel); }
+
+  /* Keyboard focus that lands on a button/input near the edges of the aside
+   * scroll container won't be auto-scrolled into view by default. scroll-margin
+   * adds a buffer so .scrollIntoView() (called automatically on focus) lands
+   * the element comfortably inside the viewport rather than at the very edge. */
+  aside button, aside input, aside textarea, aside select, aside summary {
+    scroll-margin-top: 12px;
+    scroll-margin-bottom: 12px;
+  }
+
+  /* Sticky Run+Reload row — pinned to the bottom of the aside scroll container
+   * so it's reachable on short viewports without the user having to scroll
+   * the sidebar. Background extends to cover content scrolling beneath it. */
+  .sticky-run-row {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    background: var(--panel);
+    padding-top: 10px;
+    margin-top: 12px;
+    /* Soft fade above the sticky row to signal there's content above */
+    background-image: linear-gradient(
+      to top,
+      var(--panel) 0%,
+      var(--panel) 70%,
+      rgba(19, 24, 33, 0) 100%
+    );
+    background-size: 100% 28px;
+    background-repeat: no-repeat;
+    background-position: top;
+    padding-top: 22px;
+    margin-top: 0;
+  }
+
+  /* Sidebar bottom-of-scroll fade — visual hint that more content lives below.
+   * Hidden when the sidebar is scrolled all the way down (toggled in JS). */
+  main > aside { position: sticky; }   /* re-asserted in case of cascading conflicts */
+  main > aside::after {
+    content: "";
+    position: sticky;
+    display: block;
+    bottom: -1px; left: 0; right: 0;
+    height: 24px;
+    margin-top: -24px;
+    pointer-events: none;
+    background: linear-gradient(to top, var(--bg) 0%, rgba(10, 14, 21, 0) 100%);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  main > aside.has-overflow::after { opacity: 1; }
+
+  /* ── KPI dashboard ───────────────────────────────────────────────────── */
+  .kpi-grid {
+    display: grid; gap: 10px;
+    /* Always 4 cards on one row — they shrink with viewport via minmax(0,1fr).
+       Below 1100px we fall to single-column layout via the main grid media query. */
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-bottom: 18px;
+  }
+  /* Cramped 2x2 fallback for narrow content areas (e.g. tablet landscape) */
+  @media (max-width: 760px) {
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .kpi {
+    position: relative; overflow: hidden;
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px 14px 18px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset;
+  }
+  .kpi::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--accent-2);
+  }
+  .kpi.ok::before   { background: var(--ok); }
+  .kpi.crit::before { background: var(--crit); }
+  .kpi.high::before { background: var(--high); }
+  .kpi.med::before  { background: var(--med); }
+  .kpi-label { font-size: 10px; color: var(--muted); text-transform: uppercase;
+               letter-spacing: 0.6px; font-weight: 600;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi-value { font-size: 28px; font-weight: 800; line-height: 1.1;
+               margin-top: 6px; letter-spacing: -0.5px;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 4px;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Narrower KPI value for the time card (it shows 02:30 not a 3-digit score) */
+  #kpi-time-val { font-size: 22px; }
+  /* Shrink KPI padding at narrow widths */
+  @media (max-width: 1000px) {
+    .kpi { padding: 12px 14px 12px 16px; }
+    .kpi-value { font-size: 24px; }
+  }
+
+  /* ── Health gauge (SVG circular) ─────────────────────────────────────── */
+  .health-wrap { display: grid; grid-template-columns: 220px 1fr; gap: 24px;
+                 align-items: stretch; }
+  @media (max-width: 600px) { .health-wrap { grid-template-columns: 1fr; } }
+  .health-left { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+  .health-gauge { position: relative; width: 220px; height: 220px; }
+
+  /* Mini score-history sparkline below the gauge */
+  .health-sparkline {
+    width: 220px; height: 56px; position: relative;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .health-sparkline svg { width: 100%; height: 100%; display: block; }
+  .health-sparkline-label {
+    position: absolute; top: 4px; left: 8px;
+    font-size: 9px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .health-sparkline-empty {
+    text-align: center; font-size: 11px; color: var(--muted-2);
+    padding-top: 14px;
+  }
+  .health-gauge svg { transform: rotate(-90deg); width: 100%; height: 100%; }
+  .health-gauge .bg-arc { fill: none; stroke: #21262d; stroke-width: 12; }
+  .health-gauge .fg-arc { fill: none; stroke: var(--ok); stroke-width: 12;
+                          stroke-linecap: round; transition: all 0.6s ease;
+                          filter: drop-shadow(0 0 6px rgba(63,185,80,0.3)); }
+  .health-gauge .gauge-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .score-num { font-size: 44px; font-weight: 800; line-height: 1; letter-spacing: -1.5px; }
+  .grade-A { color: var(--ok); }
+  .grade-A ~ .fg-arc, .grade-A.fg-arc { stroke: var(--ok); }
+  .grade-B { color: #79c0ff; }
+  .grade-C { color: var(--med); }
+  .grade-D { color: #ff7b72; }
+  .grade-F { color: var(--crit); }
+
+  .health-stats { display: flex; flex-direction: column; gap: 8px; }
+  .health-stat {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: 6px; position: relative;
+  }
+  .health-stat::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+    border-radius: 1px;
+  }
+  .health-stat.crit::before { background: var(--crit); }
+  .health-stat.high::before { background: var(--high); }
+  .health-stat.med::before  { background: var(--med); }
+  .health-stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase;
+                       letter-spacing: 0.4px; }
+  .health-stat-val { font-size: 18px; font-weight: 700; }
+  .health-stat.crit .health-stat-val { color: var(--crit); }
+  .health-stat.high .health-stat-val { color: var(--high); }
+  .health-stat.med .health-stat-val  { color: var(--med); }
+  /* Zero-count health cards fade so attention focuses on the non-zero counts. */
+  .health-stat.zero { opacity: 0.45; background: transparent; }
+  .health-stat.zero .health-stat-val { color: var(--muted-2); font-weight: 500; }
+  .health-stat.zero::before { background: var(--muted-2); }
+
+  /* ── Tables ──────────────────────────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left; padding: 10px 12px; background: var(--bg-2); color: var(--muted);
+    font-weight: 600; border-bottom: 1px solid var(--border); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.6px; position: sticky; top: 0;
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:nth-child(even) td { background: rgba(255,255,255,0.012); }
+  tr.action { cursor: pointer; transition: background 0.1s; position: relative; }
+  tr.action:hover td { background: rgba(0, 212, 255, 0.04); }
+  tr.action td:last-child::after {
+    content: " ›"; color: var(--muted-2); margin-left: 6px;
+    transition: color 0.15s;
+  }
+  tr.action:hover td:last-child::after { color: var(--accent-2); }
+
+  /* ── Severity-tinted event rows ──────────────────────────────────────── */
+  tr.sev-row-critical td { background: rgba(255, 68, 68, 0.07) !important;
+                            box-shadow: inset 3px 0 0 var(--crit); }
+  tr.sev-row-high     td { background: rgba(255, 140, 0, 0.05) !important;
+                            box-shadow: inset 3px 0 0 var(--high); }
+  tr.sev-row-medium   td { background: rgba(255, 215, 0, 0.04) !important;
+                            box-shadow: inset 3px 0 0 var(--med); }
+  tr.sev-row-low      td { background: rgba(0, 188, 212, 0.03) !important;
+                            box-shadow: inset 3px 0 0 var(--low); }
+
+  /* ── Severity badges ─────────────────────────────────────────────────── */
+  .sev { display: inline-block; padding: 2px 9px; border-radius: 12px;
+         font-size: 10px; font-weight: 700; text-transform: uppercase;
+         letter-spacing: 0.4px; }
+  .sev-critical { background: rgba(255,68,68,0.15); color: var(--crit);
+                  border: 1px solid rgba(255,68,68,0.3); }
+  .sev-high     { background: rgba(255,140,0,0.15); color: var(--high);
+                  border: 1px solid rgba(255,140,0,0.3); }
+  .sev-medium   { background: rgba(255,215,0,0.12); color: var(--med);
+                  border: 1px solid rgba(255,215,0,0.3); }
+  .sev-low      { background: rgba(0,188,212,0.12); color: var(--low);
+                  border: 1px solid rgba(0,188,212,0.3); }
+  .sev-info     { background: rgba(139,148,158,0.12); color: var(--info);
+                  border: 1px solid rgba(139,148,158,0.25); }
+
+  /* ── Code block + copy button ────────────────────────────────────────── */
+  .code-block {
+    position: relative;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 6px 0;
+    overflow: hidden;
+  }
+  .code-block pre {
+    margin: 0; padding: 10px 12px; padding-right: 50px;
+    font-family: ui-monospace, "SF Mono", monospace; font-size: 12px;
+    line-height: 1.55; color: var(--fg-dim);
+    background: transparent; border: none;
+    white-space: pre-wrap; word-break: break-all;
+    overflow-x: auto;
+  }
+  .code-copy-btn {
+    position: absolute; top: 6px; right: 6px;
+    width: auto; padding: 3px 8px; margin: 0;
+    font-size: 10px; background: var(--panel-3); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+    opacity: 0.7; transition: all 0.15s;
+  }
+  .code-block:hover .code-copy-btn { opacity: 1; }
+  .code-copy-btn:hover { background: var(--accent-2); color: var(--bg-2);
+                          border-color: var(--accent-2); transform: none; }
+  .code-copy-btn.copied { background: var(--ok); color: white; border-color: var(--ok); }
+  .code-block-lang {
+    position: absolute; bottom: 4px; right: 8px;
+    font-size: 9px; color: var(--muted-2); text-transform: uppercase;
+    letter-spacing: 0.5px; pointer-events: none;
+  }
+  /* CLI syntax highlighting tokens */
+  .cli-kw   { color: #ff7b72; font-weight: 600; }      /* show, set, no, configure, etc. */
+  .cli-cmd  { color: var(--accent-2); }                 /* router, neighbor, interface, etc. */
+  .cli-num  { color: #b392f0; }                         /* numbers, ASNs */
+  .cli-ip   { color: #ffa657; }                         /* 10.0.0.1, prefixes */
+  .cli-str  { color: #a5d6ff; }                         /* "quoted" strings */
+  .cli-cmt  { color: var(--muted-2); font-style: italic; }
+  .cli-flag { color: #79c0ff; }                         /* -c, --foo */
+
+  /* ── Monitoring gaps — visually distinct cards ─────────────────────── */
+  .monitoring-gap {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 12px; margin: 6px 0;
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-left: 3px solid var(--med); border-radius: 6px;
+    font-size: 13px; line-height: 1.5;
+  }
+  .monitoring-gap::before {
+    content: "📡"; font-size: 14px; flex-shrink: 0; line-height: 1.4;
+  }
+  ul.monitoring-gaps-list {
+    list-style: none; padding: 0; margin: 0;
+  }
+
+  /* ── Phased deep panel ───────────────────────────────────────────────── */
+  .deep { padding: 16px; background: var(--bg-2);
+          border-left: 2px solid var(--accent-2); font-size: 13px; }
+  .deep h3 { font-size: 11px; text-transform: uppercase; color: var(--muted);
+             margin: 16px 0 6px; letter-spacing: 0.5px; }
+  .deep h3:first-child { margin-top: 0; }
+  .deep pre, .deep code { font-family: ui-monospace, "SF Mono", monospace;
+                          background: var(--panel); padding: 4px 8px; border-radius: 4px;
+                          font-size: 12px; color: var(--accent-2); }
+  .deep pre { padding: 10px; overflow-x: auto; display: block; margin: 4px 0;
+              border: 1px solid var(--border); white-space: pre-wrap; }
+  .phase { margin: 12px 0; padding: 10px 12px; background: var(--panel);
+           border: 1px solid var(--border); border-radius: 6px; }
+  .phase-head { display: flex; align-items: center; gap: 10px; cursor: pointer;
+                user-select: none; }
+  .phase-name { font-size: 11px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: 0.5px; padding: 3px 10px; border-radius: 12px; }
+  .phase-Diagnose  { background: rgba(121,192,255,0.18); color: #79c0ff;
+                     border: 1px solid rgba(121,192,255,0.3); }
+  .phase-Mitigate  { background: rgba(210,153,34,0.18); color: var(--med);
+                     border: 1px solid rgba(210,153,34,0.3); }
+  .phase-Remediate { background: rgba(248,81,73,0.18); color: var(--crit);
+                     border: 1px solid rgba(248,81,73,0.3); }
+  .phase-Verify    { background: rgba(63,185,80,0.18); color: var(--ok);
+                     border: 1px solid rgba(63,185,80,0.3); }
+  .phase-Optimize  { background: rgba(255,123,114,0.18); color: #ff7b72;
+                     border: 1px solid rgba(255,123,114,0.3); }
+  .phase-goal { color: var(--muted); font-size: 12px; }
+  .phase-body { margin-top: 8px; }
+  .action-card { margin: 6px 0; padding: 8px 10px; background: var(--bg-2);
+                 border: 1px solid var(--border); border-radius: 6px; }
+  .action-cli { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .action-cli code { flex: 1; }
+  .action-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .action-meta span.expected { color: var(--ok); }
+  .action-output { margin-top: 8px; padding: 8px; background: var(--bg);
+                   border: 1px solid var(--border); border-radius: 4px;
+                   font-family: ui-monospace, monospace; font-size: 11px;
+                   max-height: 240px; overflow: auto; white-space: pre-wrap;
+                   color: var(--fg-dim); }
+  .action-output.err { border-color: var(--crit); color: var(--crit); }
+
+  /* ── Optimize findings ───────────────────────────────────────────────── */
+  .finding { margin: 10px 0; padding: 12px 14px; background: var(--bg-2);
+             border: 1px solid var(--border); border-radius: 6px; }
+  .finding h4 { margin: 0 0 4px; font-size: 13px; }
+  .finding-evidence { font-size: 11px; color: var(--muted); margin: 4px 0;
+                      font-family: ui-monospace, monospace; }
+  .ai-badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 10px;
+              background: linear-gradient(135deg, #1f6feb 0%, #00d4ff 100%);
+              color: white; margin-left: 6px; font-weight: 600; }
+  .kb-badge { background: #6e7681; }
+  .row-msg { color: var(--muted); font-size: 12px; }
+  #status { font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 16px;
+            padding: 6px 10px; background: var(--bg-2); border-radius: 4px;
+            border-left: 2px solid var(--accent-2); display: none; }
+  #status.show { display: block; }
+  .hidden { display: none !important; }
+
+  /* ── Copilot chat shell ──────────────────────────────────────────────── */
+  .chat-shell { background: var(--bg-2); border: 1px solid var(--border);
+                border-radius: 8px; margin-top: 12px; max-height: 320px;
+                overflow-y: auto; padding: 10px; }
+  .chat-shell:empty { display: none; }
+  .chat-msg { padding: 8px 10px; border-radius: 6px; margin-bottom: 8px;
+              font-size: 13px; line-height: 1.5; }
+  .chat-msg .role { font-size: 9px; text-transform: uppercase;
+                    color: var(--muted); margin-bottom: 3px; letter-spacing: 0.5px;
+                    font-weight: 600; }
+  .chat-msg.user { background: rgba(0, 212, 255, 0.06);
+                   border-left: 2px solid var(--accent-2); }
+  .chat-msg.ai { background: var(--panel); border-left: 2px solid var(--accent); }
+  .chat-msg pre { margin: 0; white-space: pre-wrap; font: inherit; }
+
+  /* ── Empty state (topology placeholder) ──────────────────────────────── */
+  .empty-state {
+    padding: 50px 24px; text-align: center; color: var(--muted);
+    border: 1px dashed var(--border); border-radius: 8px;
+  }
+  .empty-state-icon { width: 70px; height: 70px; opacity: 0.35; margin: 0 auto 12px; }
+  .empty-state-title { color: var(--fg-dim); font-size: 14px; font-weight: 600;
+                       margin-bottom: 6px; }
+  .empty-state-sub { font-size: 12px; }
+
+  /* ── Loading skeleton ────────────────────────────────────────────────── */
+  @keyframes shimmer {
+    0%   { background-position: -200px 0; }
+    100% { background-position: 200px 0; }
+  }
+  .skeleton { background: linear-gradient(90deg, var(--panel-2) 0%, var(--panel-3) 50%,
+              var(--panel-2) 100%); background-size: 400px 100%;
+              animation: shimmer 1.4s infinite; border-radius: 4px; height: 14px; }
+
+  /* ── Topology legend (above SVG map) ───────────────────────────────── */
+  .topo-legend {
+    display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+    padding: 6px 10px; margin: 0 0 8px;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+    font-size: 11px; color: var(--muted);
+  }
+  .topo-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+  .topo-swatch {
+    width: 10px; height: 10px; border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.4); flex-shrink: 0;
+  }
+  .topo-legend-sep { color: var(--border-hi); padding: 0 4px; }
+
+  /* ── Topology animation ─────────────────────────────────────────────── */
+  @keyframes pulseCritical {
+    0%   { r: 16; filter: drop-shadow(0 0 0 rgba(248,81,73,0)); }
+    50%  { r: 22; filter: drop-shadow(0 0 12px rgba(248,81,73,0.9)); }
+    100% { r: 16; filter: drop-shadow(0 0 0 rgba(248,81,73,0)); }
+  }
+  @keyframes pulseHigh {
+    0%   { r: 16; filter: drop-shadow(0 0 0 rgba(255,123,114,0)); }
+    50%  { r: 20; filter: drop-shadow(0 0 8px rgba(255,123,114,0.7)); }
+    100% { r: 16; filter: drop-shadow(0 0 0 rgba(255,123,114,0)); }
+  }
+  .node-critical { animation: pulseCritical 1.4s ease-in-out infinite; }
+  .node-high     { animation: pulseHigh     2.0s ease-in-out infinite; }
+  .topo-link  { stroke: #4a5160; stroke-opacity: 0.6; stroke-width: 1.5;
+                transition: stroke 0.3s; }
+  .topo-link:hover { stroke: var(--accent-2); stroke-opacity: 1; }
+  .topo-label { font: 11px ui-monospace, monospace; fill: #c9d1d9; pointer-events: none; }
+  .topo-role  { font: 9px ui-monospace, monospace; fill: var(--muted); pointer-events: none; }
+
+  /* ── Running indicator on Run button ────────────────────────────────── */
+  button.running {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 50%, var(--accent) 100%);
+    background-size: 200% 100%;
+    animation: btnRunning 1.5s linear infinite;
+  }
+  @keyframes btnRunning {
+    0%   { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+
+  /* ── Scroll caps for very tall content panels ───────────────────────── */
+  /* Optimize panel can render 4000+ px of findings on big devices; cap its
+   * findings region so the rest of the page stays reachable. */
+  .panel-scroll-cap {
+    max-height: 620px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-2);
+    padding: 8px 10px;
+    overscroll-behavior: contain;
+  }
+  /* Events table cap — large analyses can produce hundreds of rows; the body
+   * already had a wrapper but we standardize and add sticky header z-index. */
+  .events-scroll-cap {
+    max-height: 480px; overflow-y: auto;
+    border-radius: 6px; border: 1px solid var(--border);
+    overscroll-behavior: contain;
+  }
+  .events-scroll-cap thead th { z-index: 2; }
+
+  /* Header for a scroll-capped block — gives users a hint they can scroll. */
+  .scroll-cap-hint {
+    font-size: 10px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 4px 0;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .scroll-cap-hint::after { content: "↕"; opacity: 0.6; margin-left: auto; }
+
+  /* ── Toast notifications ────────────────────────────────────────────── */
+  .toast-stack {
+    position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+    display: flex; flex-direction: column; gap: 8px;
+    max-width: 360px; pointer-events: none;
+  }
+  .toast {
+    pointer-events: auto;
+    background: var(--panel-2); border: 1px solid var(--border-hi);
+    border-left: 3px solid var(--accent-2); border-radius: 8px;
+    padding: 10px 14px; font-size: 13px; color: var(--fg);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    animation: toastIn 0.22s ease-out;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .toast.success { border-left-color: var(--ok); }
+  .toast.error   { border-left-color: var(--crit); }
+  .toast.info    { border-left-color: var(--accent-2); }
+  .toast-icon { font-size: 16px; line-height: 1.2; flex-shrink: 0; }
+  .toast-body { flex: 1; line-height: 1.4; word-wrap: break-word; }
+  .toast-close {
+    width: auto; margin: 0; padding: 0 4px; font-size: 14px;
+    background: transparent; color: var(--muted-2); border: none;
+    cursor: pointer; line-height: 1;
+  }
+  .toast-close:hover { color: var(--fg); background: transparent; transform: none; }
+  .toast.leaving { animation: toastOut 0.18s ease-in forwards; }
+  @keyframes toastIn  { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes toastOut { from { transform: translateX(0);  opacity: 1; } to { transform: translateX(20px); opacity: 0; } }
+
+  /* ── Inline progress bar (panel-level, indeterminate) ───────────────── */
+  .progress-bar {
+    height: 3px; background: var(--bg-2); border-radius: 2px;
+    overflow: hidden; position: relative; margin: 6px 0 10px;
+  }
+  .progress-bar::after {
+    content: ""; position: absolute; top: 0; left: 0; height: 100%;
+    width: 30%; background: linear-gradient(90deg,
+      transparent 0%, var(--accent-2) 50%, transparent 100%);
+    animation: progressSlide 1.4s ease-in-out infinite;
+  }
+  @keyframes progressSlide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(450%); }
+  }
+  [aria-busy="true"] { cursor: progress; }
+
+  /* ── Smooth source-type form transitions ─────────────────────────────── */
+  #frr-controls, #raw-controls, #file-controls {
+    transition: opacity 0.18s ease, max-height 0.25s ease;
+    overflow: hidden;
+  }
+  #frr-controls.hidden, #raw-controls.hidden, #file-controls.hidden {
+    max-height: 0; opacity: 0; margin: 0; padding: 0;
+  }
+
+  /* ── Reduced-motion fallback (accessibility) ─────────────────────────── */
+  @media (prefers-reduced-motion: reduce) {
+    .chip .pulse,
+    .chip.ok .pulse, .chip.warn .pulse, .chip.crit .pulse,
+    .node-critical, .node-high,
+    button.running,
+    .skeleton,
+    .progress-bar::after,
+    .toast, .toast.leaving {
+      animation: none !important;
+    }
+    *, *::before, *::after {
+      transition-duration: 0.001ms !important;
+    }
+  }
+
+  /* ── Print stylesheet ──────────────────────────────────────────────────
+   * Hides the sidebar + interactive chrome, expands the right column, and
+   * forces light-on-white rendering so printed reports look readable. */
+  @media print {
+    body {
+      background: white !important; color: black !important;
+      -webkit-print-color-adjust: economy; print-color-adjust: economy;
+    }
+    header, aside, #toast-stack, .kbd-hint,
+    .chip-pick-actions, .scroll-cap-hint,
+    button, .code-copy-btn, .progress-bar {
+      display: none !important;
+    }
+    main {
+      display: block !important;
+      grid-template-columns: 1fr !important;
+      padding: 0 !important; max-width: none !important;
+    }
+    main > section { contain: none !important; }
+    .panel {
+      background: white !important; color: black !important;
+      border: 1px solid #ccc !important;
+      box-shadow: none !important;
+      page-break-inside: avoid;
+      break-inside: avoid;
+      content-visibility: visible !important; /* render every panel for print */
+    }
+    .panel-scroll-cap, .events-scroll-cap {
+      max-height: none !important; overflow: visible !important;
+      border: none !important; background: white !important;
+    }
+    table, .health-stat, .code-block, pre {
+      background: white !important; color: black !important;
+      border: 1px solid #ccc !important;
+    }
+    .sev, .ai-badge { border: 1px solid #888 !important; }
+    .topo-link  { stroke: #888 !important; }
+    .topo-label { fill: black !important; }
+    a, .context-bar .context-value { color: #06c !important; }
+  }
+
+  /* ── Keyboard shortcut chips (semantic <kbd> elements) ─────────────── */
+  /* Used both as the tab kbd-hint and inline shortcut indicators next to
+   * buttons (Ctrl/Cmd+Enter, etc.). Resets the UA <kbd> default styles. */
+  kbd, .kbd-hint {
+    display: inline-block; font-size: 9px; color: var(--muted-2);
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: 3px; padding: 1px 4px;
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-weight: 600;
+    vertical-align: middle;
+    line-height: 1.3;
+  }
+  .kbd-hint { margin-left: 4px; }
+  .side-tab.active .kbd-hint {
+    color: rgba(10,14,21,0.7); background: rgba(10,14,21,0.18); border-color: transparent;
+  }
+  /* Inline shortcut row — e.g. shown under Run Analysis / Copilot textarea */
+  .kbd-row {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; color: var(--muted-2);
+    margin-top: 6px; flex-wrap: wrap;
+  }
+  .kbd-row kbd { font-size: 9px; padding: 1px 5px; }
+  .kbd-plus { opacity: 0.5; }
+</style>
+</head>
+<body>
+<!-- Keyboard / screen-reader users press Tab once on page load to expose this -->
+<a href="#main-content" class="skip-link">Skip to main content</a>
+<header>
+  <div class="brand">
+    <div class="brand-logo">
+      <!-- Stylized network-node icon -->
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="4"  r="2"/>
+        <circle cx="4"  cy="20" r="2"/>
+        <circle cx="20" cy="20" r="2"/>
+        <circle cx="12" cy="12" r="2.5"/>
+        <line x1="12" y1="6"  x2="12" y2="10"/>
+        <line x1="11" y1="13" x2="5"  y2="19"/>
+        <line x1="13" y1="13" x2="19" y2="19"/>
+      </svg>
+    </div>
+    <div>
+      <span class="brand-title">AI Log Analyzer</span>
+      <span class="brand-version">v0.2</span>
+    </div>
+  </div>
+  <div class="header-spacer"></div>
+  <span class="status-label" aria-hidden="true">Status</span>
+  <span class="chip" id="llm-badge" role="status" aria-live="polite" aria-label="LLM status"><span class="pulse"></span><span>LLM: …</span></span>
+  <span class="chip" id="prov-badge" role="status" aria-live="polite" aria-label="LLM provider"><span>Provider: …</span></span>
+  <span class="chip" id="ntool-badge" role="status" aria-live="polite" aria-label="Network tool connectivity"><span class="pulse"></span><span>NetTool: …</span></span>
+</header>
+
+<!-- Toast notification stack — populated by app.js -->
+<div id="toast-stack" class="toast-stack" role="region" aria-live="polite" aria-label="Notifications"></div>
+
+<main id="main-content" tabindex="-1">
+  <aside>
+    <!-- Tab navigation -->
+    <div class="side-tabs" role="tablist" aria-label="Analyzer sections">
+      <button class="side-tab active" data-tab="logs"   role="tab" aria-selected="true"  aria-controls="tabpanel-logs"   id="tab-logs"   aria-label="Log analysis tab (press 1)"          title="Log analysis (1)">📊 Logs<kbd class="kbd-hint" aria-hidden="true">1</kbd></button>
+      <button class="side-tab"        data-tab="device" role="tab" aria-selected="false" aria-controls="tabpanel-device" id="tab-device" aria-label="Device optimization tab (press 2)"   title="Device optimization (2)">⚙️ Device<kbd class="kbd-hint" aria-hidden="true">2</kbd></button>
+      <button class="side-tab"        data-tab="site"   role="tab" aria-selected="false" aria-controls="tabpanel-site"   id="tab-site"   aria-label="Site intelligence tab (press 3)"     title="Site intelligence (3)">🌐 Site<kbd class="kbd-hint" aria-hidden="true">3</kbd></button>
+    </div>
+
+    <!-- ─── Tab 1: Log Analysis ─── -->
+    <div class="side-group active" data-tab="logs" id="tabpanel-logs" role="tabpanel" aria-labelledby="tab-logs">
+      <!-- LLM Provider moved to the TOP so it's reachable on short viewports -->
+      <details class="side-section" open>
+        <summary>LLM Provider</summary>
+        <div class="side-section-body">
+          <label>Provider</label>
+          <select id="provider">
+            <option value="ollama"      title="Ollama — local Gemma 3 or Qwen 2.5 models">Ollama (local)</option>
+            <option value="local"       title="Docker Model Runner — local LLM via Docker">Docker Model Runner</option>
+            <option value="claude"      title="Anthropic Claude with local fallback if unreachable">Claude + fallback</option>
+            <option value="claude-only" title="Anthropic Claude only — no fallback">Claude Only</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:8px;text-transform:none;">
+            <input id="use-llm" type="checkbox" checked style="width:auto;margin:0;">
+            <span style="font-size:12px;">Use LLM for deep analysis</span>
+          </label>
+          <div id="status"></div>
+        </div>
+      </details>
+
+      <details class="side-section" open>
+        <summary>Source &amp; Run</summary>
+        <div class="side-section-body">
+          <label>Source</label>
+          <select id="source">
+            <option value="frr">FRR Lab Containers</option>
+            <option value="raw">Paste Raw Logs</option>
+            <option value="file">File Path</option>
+          </select>
+          <div id="frr-controls">
+            <label>Containers</label>
+            <div class="chip-pick-actions">
+              <button type="button" id="chips-all"  aria-label="Select all containers"   title="Select all containers">All</button>
+              <button type="button" id="chips-none" aria-label="Deselect all containers" title="Deselect all containers">None</button>
+              <span class="chip-picker-meta" id="chips-count" style="margin-left:auto;align-self:center;">none selected</span>
+            </div>
+            <div id="chip-picker" class="chip-picker"></div>
+            <!-- Hidden native select — read by analysis code -->
+            <select id="containers" multiple size="6" style="display:none;"></select>
+            <label for="tail">Tail lines per container</label>
+            <input id="tail" type="number" value="500" min="50" max="5000"
+                   inputmode="numeric" pattern="[0-9]*"
+                   aria-describedby="tail-help"
+                   title="Number of recent log lines to pull from each container (50–5000)">
+            <span id="tail-help" class="row-msg" style="display:block;font-size:10px;margin-top:2px;">50–5000 lines</span>
+          </div>
+          <div id="raw-controls" class="hidden" aria-hidden="true" inert>
+            <label for="raw-host">Hostname (optional)</label>
+            <input id="raw-host" placeholder="my-router-01"
+                   autocomplete="off" spellcheck="false" autocapitalize="off">
+            <label>Paste log lines</label>
+            <textarea id="raw-text" placeholder="Mar  3 12:00:01 router1 rpd[1234]: bgp peer 10.0.0.1 down ..."></textarea>
+          </div>
+          <div id="file-controls" class="hidden" aria-hidden="true" inert>
+            <label for="file-path">Absolute path on server</label>
+            <input id="file-path" placeholder="/var/log/syslog"
+                   autocomplete="off" spellcheck="false" autocapitalize="off">
+          </div>
+          <!-- Run + Reload side-by-side: Run is primary CTA, Reload is an icon-style secondary.
+               The sticky-run-row class pins this row to the bottom of the sidebar's scroll
+               container so it remains visible on short viewports (≤ ~760px tall). -->
+          <div class="sticky-run-row" style="display:flex;gap:6px;align-items:stretch;">
+            <button id="run-btn" class="primary" aria-label="Run log analysis (Ctrl/Cmd+Enter)" title="Run log analysis (Ctrl/Cmd+Enter)"
+                    style="flex:1;margin-top:0;">▶ Run Analysis</button>
+            <button class="secondary" id="reload-containers" aria-label="Reload lab containers list" title="Reload lab containers"
+                    style="width:auto;margin-top:0;padding:9px 12px;font-size:13px;flex:0 0 auto;">↻</button>
+          </div>
+          <div class="kbd-row" aria-hidden="true">
+            <kbd>⌘</kbd><span class="kbd-plus">+</span><kbd>↵</kbd>
+            <span style="margin-left:4px;">or</span>
+            <kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>↵</kbd>
+            <span>to run</span>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- ─── Tab 2: Device Optimization ─── -->
+    <div class="side-group" data-tab="device" id="tabpanel-device" role="tabpanel" aria-labelledby="tab-device" hidden>
+      <details class="side-section" open>
+        <summary>Optimize Device</summary>
+        <div class="side-section-body">
+          <label for="opt-host">Target hostname (lab device)</label>
+          <input id="opt-host" placeholder="de-fra-core-01"
+                 autocomplete="off" spellcheck="false" autocapitalize="off">
+          <label>Platform</label>
+          <select id="opt-platform">
+            <option value="frr">FRR</option>
+            <option value="junos">Junos</option>
+            <option value="eos">Arista EOS</option>
+          </select>
+          <button id="opt-btn" class="secondary">⚙️ Analyze + Suggest Patches</button>
+        </div>
+      </details>
+
+      <details class="side-section">
+        <summary>Real-Config Samples</summary>
+        <div class="side-section-body">
+          <p class="row-msg" style="margin:0 0 8px;">Sanitized production configs — secrets stripped before any LLM call.</p>
+          <select id="sample-picker"><option value="">— select a sample —</option></select>
+          <div id="sample-meta" style="font-size:11px;color:var(--muted);margin-top:6px;"></div>
+          <button id="sample-opt-btn" class="secondary">⚙️ Optimize Selected Sample</button>
+        </div>
+      </details>
+    </div>
+
+    <!-- ─── Tab 3: Site Intelligence ─── -->
+    <div class="side-group" data-tab="site" id="tabpanel-site" role="tabpanel" aria-labelledby="tab-site" hidden>
+      <details class="side-section" open>
+        <summary>Site Bundles</summary>
+        <div class="side-section-body">
+          <p class="row-msg" style="margin:0 0 8px;">Whole-site analysis across all devices in a bundle.</p>
+          <select id="site-picker"><option value="">— select a site —</option></select>
+          <div id="site-meta" style="font-size:11px;color:var(--muted);margin-top:6px;"></div>
+
+          <div class="group-label">Actions</div>
+          <!-- Primary CTA is "Analyze Whole Site" (most common action); Site-Wide Opt is secondary -->
+          <button id="site-opt-btn"  class="primary"   aria-label="Analyze entire site for cross-device issues">🌐 Analyze Whole Site</button>
+          <button id="site-wide-btn" class="secondary" aria-label="Run strategic site-wide optimization" style="margin-top:6px;">🎯 Site-Wide Optimization</button>
+
+          <div class="group-label">Analysis</div>
+          <div class="btn-row">
+            <button id="topo-btn"    class="secondary tiny" aria-label="Show topology map" style="padding:7px 8px;width:auto;flex:1;">🗺️ Topology</button>
+            <button id="comply-btn"  class="secondary tiny" aria-label="Run compliance check" style="padding:7px 8px;width:auto;flex:1;">✅ Compliance</button>
+          </div>
+
+          <div class="group-label" title="Network documentation generated from the config bundle (topology, BGP/OSPF, lifecycle)">Site Documentation</div>
+          <div class="btn-row">
+            <button id="sitedoc-md-btn"   class="secondary tiny" aria-label="Download site documentation as Markdown"   title="Site docs · Markdown" style="padding:6px 8px;width:auto;flex:1;">📝 MD</button>
+            <button id="sitedoc-html-btn" class="secondary tiny" aria-label="Download site documentation as HTML"       title="Site docs · HTML"     style="padding:6px 8px;width:auto;flex:1;">🌐 HTML</button>
+            <button id="sitedoc-pdf-btn"  class="secondary tiny" aria-label="Download site documentation as PDF"        title="Site docs · PDF"      style="padding:6px 8px;width:auto;flex:1;">📑 PDF</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="side-section">
+        <summary>🤖 AI Copilot</summary>
+        <div class="side-section-body">
+          <p class="row-msg" style="margin:0 0 8px;">Ask anything about the selected site's config.</p>
+          <textarea id="copilot-q" placeholder="e.g. Is BFD configured on every BGP peer? Where is LLDP missing?" aria-label="Copilot question — press Ctrl/Cmd+Enter to send"></textarea>
+          <button id="copilot-btn" class="secondary" aria-label="Ask AI Copilot (Ctrl/Cmd+Enter from textarea)" title="Ask Copilot (Ctrl/Cmd+Enter)">💬 Ask Copilot</button>
+          <div class="kbd-row" aria-hidden="true">
+            <kbd>⌘</kbd><span class="kbd-plus">+</span><kbd>↵</kbd>
+            <span>to send from the textarea</span>
+          </div>
+        </div>
+      </details>
+
+      <details class="side-section">
+        <summary>🔎 Post-Mortem Search</summary>
+        <div class="side-section-body">
+          <p class="row-msg" style="margin:0 0 8px;">Find a pattern across every device in the site.</p>
+          <input id="pm-pattern" placeholder='e.g. "no lldp run" or 10.0.0.1' aria-label="Search pattern — press Enter to search"
+                 autocomplete="off" spellcheck="false" autocapitalize="off">
+          <button id="pm-btn" class="secondary" aria-label="Search across all devices in selected site" title="Search fleet (Enter)">🔍 Search Fleet</button>
+          <div class="kbd-row" aria-hidden="true">
+            <kbd>↵</kbd>
+            <span>to search from the input</span>
+          </div>
+        </div>
+      </details>
+
+      <details class="side-section">
+        <summary>📄 Export Analysis Results</summary>
+        <div class="side-section-body">
+          <p class="row-msg" style="margin:0 0 8px;">Different from <em>Site Documentation</em>: this exports the last <strong>analysis result</strong> (findings, gaps, score) from the Site tab.</p>
+          <div class="btn-row">
+            <button id="rep-md-btn"   class="secondary tiny" style="padding:7px 8px;width:auto;flex:1;" title="Markdown">📝 MD</button>
+            <button id="rep-html-btn" class="secondary tiny" style="padding:7px 8px;width:auto;flex:1;" title="HTML">🌐 HTML</button>
+            <button id="rep-csv-btn"  class="secondary tiny" style="padding:7px 8px;width:auto;flex:1;" title="CSV">📊 CSV</button>
+            <button id="rep-pdf-btn"  class="secondary tiny" style="padding:7px 8px;width:auto;flex:1;" title="PDF">📑 PDF</button>
+          </div>
+        </div>
+      </details>
+    </div>
+  </aside>
+
+  <section>
+    <!-- ─── Context breadcrumb (visible when there's an active context) ─── -->
+    <div class="context-bar" id="context-bar" style="display:none;">
+      <span class="context-label">Context</span>
+      <span class="context-sep">·</span>
+      <span id="context-text" class="context-value">—</span>
+    </div>
+
+    <!-- ─── KPI dashboard row (visible only after first analysis) ─── -->
+    <div class="kpi-grid" id="kpi-grid" style="display:none;">
+      <div class="kpi ok" id="kpi-health">
+        <div class="kpi-label">Health</div>
+        <div class="kpi-value" id="kpi-health-val">—</div>
+        <div class="kpi-sub" id="kpi-health-sub">No analysis yet</div>
+      </div>
+      <div class="kpi crit" id="kpi-alerts">
+        <div class="kpi-label">Active Alerts</div>
+        <div class="kpi-value" id="kpi-alerts-val">—</div>
+        <div class="kpi-sub" id="kpi-alerts-sub">critical + high</div>
+      </div>
+      <div class="kpi" id="kpi-devices">
+        <div class="kpi-label">Devices</div>
+        <div class="kpi-value" id="kpi-devices-val">—</div>
+        <div class="kpi-sub">monitored</div>
+      </div>
+      <div class="kpi" id="kpi-time">
+        <div class="kpi-label">Last Analysis</div>
+        <div class="kpi-value" id="kpi-time-val" style="font-size:18px;">—</div>
+        <div class="kpi-sub" id="kpi-time-sub">UTC</div>
+      </div>
+    </div>
+
+    <!-- ─── Health card with circular gauge ─── -->
+    <div class="panel" id="health-panel" style="display:none;">
+      <h2>Health Overview</h2>
+      <div class="health-wrap">
+        <div class="health-left">
+          <div class="health-gauge">
+            <svg viewBox="0 0 220 220">
+              <circle class="bg-arc" cx="110" cy="110" r="92"/>
+              <circle class="fg-arc" id="gauge-arc" cx="110" cy="110" r="92"
+                      stroke-dasharray="578.05" stroke-dashoffset="578.05"/>
+            </svg>
+            <div class="gauge-center">
+              <div class="score-num" id="score">—</div>
+              <div id="grade-label" style="color: var(--muted); font-size:12px;
+                   text-transform:uppercase; letter-spacing:0.4px; margin-top:6px;">—</div>
+            </div>
+          </div>
+          <div class="health-sparkline">
+            <div class="health-sparkline-label">Score trend (last 10)</div>
+            <div id="spark-empty" class="health-sparkline-empty">— no history yet —</div>
+            <svg id="spark-svg" viewBox="0 0 200 36" preserveAspectRatio="none" style="display:none;"></svg>
+          </div>
+        </div>
+        <div class="health-stats">
+          <div class="health-stat crit" id="hs-crit">
+            <span class="health-stat-label">Critical</span>
+            <span class="health-stat-val" id="stat-crit">0</span>
+          </div>
+          <div class="health-stat high" id="hs-high">
+            <span class="health-stat-label">High</span>
+            <span class="health-stat-val" id="stat-high">0</span>
+          </div>
+          <div class="health-stat med" id="hs-med">
+            <span class="health-stat-label">Medium</span>
+            <span class="health-stat-val" id="stat-med">0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="summary-panel" style="display:none;">
+      <h2>Executive Summary <span id="summary-engine" class="ai-badge"></span></h2>
+      <ul class="summary" id="summary-list"></ul>
+    </div>
+
+    <div class="panel" id="actions-panel" style="display:none;">
+      <h2>Action Items <span class="h2-count" id="action-count"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Click any row to expand the 5-phase incident playbook.</p>
+      <table id="actions-table">
+        <thead>
+          <tr><th>Severity</th><th>Description</th><th>Count</th><th>Devices</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="panel" id="optimize-panel" style="display:none;">
+      <h2>⚙️ Config Optimization <span id="opt-engine" class="ai-badge"></span></h2>
+      <div id="opt-summary" style="color:var(--muted); margin-bottom:8px;"></div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;flex-wrap:wrap;">
+        <span class="scroll-cap-hint" style="flex:1;">Findings (scroll within block)</span>
+        <button id="opt-copy-all-btn" class="tiny secondary" aria-label="Copy all patches to clipboard"
+                style="width:auto;padding:4px 10px;margin:0;font-size:10px;">📋 Copy All Patches</button>
+      </div>
+      <div id="opt-findings" class="panel-scroll-cap"></div>
+      <h3>Monitoring Gaps</h3>
+      <ul id="opt-monitoring"></ul>
+    </div>
+
+    <div class="panel" id="site-panel" style="display:none;">
+      <h2>🌐 Site-Level Analysis <span id="site-engine" class="ai-badge"></span></h2>
+      <div id="site-summary" style="color:var(--muted); margin-bottom:8px;"></div>
+      <div id="site-topology" style="margin-bottom:12px;"></div>
+      <h3>Cross-Device Findings</h3>
+      <div id="site-findings"></div>
+      <h3>Site-Wide Monitoring Gaps</h3>
+      <ul id="site-monitoring"></ul>
+    </div>
+
+    <div class="panel" id="topo-panel" style="display:none;">
+      <h2>🗺️ Topology Map</h2>
+      <p class="row-msg" style="margin:0 0 8px;">Animated D3 force-directed layout — <strong>drag nodes</strong> to rearrange, <strong>scroll</strong> to zoom, <strong>hover</strong> for device details.</p>
+      <!-- Legend — semantic colors mirror the rest of the app -->
+      <div class="topo-legend" role="list" aria-label="Topology legend">
+        <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#bc8cff;"></span>Firewall</span>
+        <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#58a6ff;"></span>Router</span>
+        <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#3fb950;"></span>Switch</span>
+        <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#8b949e;"></span>Other</span>
+        <span class="topo-legend-sep">·</span>
+        <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#f85149;"></span>Critical finding</span>
+        <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#ff7b72;"></span>High finding</span>
+        <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#d29922;"></span>Medium finding</span>
+      </div>
+      <svg id="topo-svg" width="100%" height="500"
+           style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;"></svg>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button id="export-mermaid" class="tiny secondary" aria-label="Copy Mermaid diagram to clipboard">📋 Copy Mermaid</button>
+        <button id="export-dot"     class="tiny secondary" aria-label="Copy Graphviz DOT diagram to clipboard">📋 Copy Graphviz DOT</button>
+      </div>
+    </div>
+
+    <div class="panel" id="compliance-panel" style="display:none;">
+      <h2>✅ Compliance Check Report</h2>
+      <div id="comp-summary" style="color:var(--muted); margin-bottom:8px;"></div>
+      <div id="comp-rules"></div>
+    </div>
+
+    <div class="panel" id="copilot-panel" style="display:none;">
+      <h2>🤖 AI Copilot <span id="copilot-engine" class="ai-badge"></span></h2>
+      <div class="chat-shell">
+        <div class="chat-msg ai">
+          <div class="role">Copilot</div>
+          <pre id="copilot-answer"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="pm-panel" style="display:none;">
+      <h2>🔎 Post-Mortem Search Results</h2>
+      <div id="pm-summary" style="color:var(--muted); margin-bottom:8px;"></div>
+      <div id="pm-results"></div>
+    </div>
+
+    <div class="panel" id="site-wide-panel" style="display:none;">
+      <h2>🎯 Site-Wide Strategic Optimization <span id="site-wide-engine" class="ai-badge"></span></h2>
+      <div id="site-wide-summary" style="color:var(--muted); margin-bottom:8px;"></div>
+      <div id="site-wide-score-row" style="display:flex;gap:20px;margin-bottom:12px;align-items:center;flex-wrap:wrap;"></div>
+      <h3>Strategic Gaps</h3>
+      <div id="site-wide-gaps"></div>
+      <h3>Best Practices Already Applied</h3>
+      <ul id="site-wide-bp-applied"></ul>
+      <h3>Phased Roadmap</h3>
+      <div id="site-wide-roadmap"></div>
+    </div>
+
+    <div class="panel" id="events-panel" style="display:none;">
+      <h2>Recent Classified Events <span class="h2-count" id="events-count"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Rows are tinted + accented by severity for fast scanning. Scroll within the table to see more.</p>
+      <div class="scroll-cap-hint">Showing in a scroll-capped view</div>
+      <div class="events-scroll-cap">
+        <table id="events-table">
+          <thead>
+            <tr><th>Sev</th><th>Time</th><th>Host</th><th>Cat</th><th>Description</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Idle state for when nothing has been analyzed yet -->
+    <div class="panel" id="idle-state">
+      <h2>👋 Welcome</h2>
+      <p style="color: var(--fg-dim); margin:0 0 12px;">
+        Pick a source in the sidebar and run an analysis to populate this dashboard.
+      </p>
+      <div class="empty-state">
+        <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 7v5l3 2"/>
+        </svg>
+        <div class="empty-state-title">No analysis loaded yet</div>
+        <div class="empty-state-sub">Try <strong>📊 Logs → Run Analysis</strong> for the FRR lab, or pick a site bundle under <strong>🌐 Site</strong>.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- `defer` keeps execution order (D3 before app.js) while letting the parser
+     work uninterrupted. Both scripts run after DOMContentLoaded, which the
+     app's init handler already expects. -->
+<script src="https://d3js.org/d3.v7.min.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>
