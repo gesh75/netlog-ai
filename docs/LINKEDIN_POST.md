@@ -1,64 +1,63 @@
 # LinkedIn Post — netlog-ai launch
 
-## Recommended post copy (≈ 1300 chars, headline-driven)
+## Recommended post copy (final — body has NO outbound link; URL goes in comment #1)
 
-> Just open-sourced **netlog-ai** — an AI-powered network log analyzer that runs entirely on your laptop. 🛠️
+> Most "AI for networking" tools are a chatbot bolted onto a Cisco-only dashboard. I wanted something different, so I built **netlog-ai** and open-sourced it under MIT.
 >
-> Paste any vendor's syslog (Junos, Arista EOS, FRR) and in under a second you get:
-> ✅ classified events across 50+ regex patterns
-> ✅ deduplicated, severity-ranked action items
-> ✅ a weighted health score 0–100 with A/B/C/D/F grade
+> ⚡ It runs entirely on your laptop. Paste syslog from Junos, Arista EOS, or FRR and in under a second you get classified events across 50+ regex patterns, deduplicated severity-ranked action items, and a weighted 0–100 health score with a letter grade.
 >
-> Point it at a single device config — the LLM (local Docker Model Runner OR Anthropic Claude) writes a config audit with **copy-pastable patches, rollback steps, and verify CLI**.
+> 🛠️ Point it at a single device config and the LLM (your choice: local Docker Model Runner or Anthropic Claude) returns a real audit — copy-pastable patches, rollback steps, verify CLI. Load a multi-device bundle and it infers topology from configs alone, surfaces cross-device gaps in BGP, OSPF, MTU, BFD, and LLDP, and lets you ask grounded questions about the fabric.
 >
-> Load a multi-device site bundle — it infers topology from configs alone, finds cross-device gaps (BGP, OSPF, MTU, missing BFD, LLDP), and lets you ask the LLM grounded questions about the fabric.
+> Design choices that mattered to me:
 >
-> What I'm proud of:
-> 🔒 **Sanitize-before-LLM** — passwords, public IPs, SSH keys all redacted before any outbound call
-> 🚀 **No telemetry, no SaaS** — your configs never leave the host
-> 🎯 **Multi-vendor by design** — not Cisco-only with a chatbot retrofit
-> ♿ **WCAG-AA accessible** — full keyboard nav, ARIA, prefers-reduced-motion, dark color-scheme
-> 🧪 **139 tests passing** across 8 review rounds (focus rings, content-visibility culling, PWA-ready)
+> 🔒 **Sanitize before LLM** — passwords, public IPs, SSH keys all redacted before any outbound call.
+> 🚀 **No telemetry, no SaaS** — configs never leave the host.
+> 🎯 **Multi-vendor from day one** — Junos, Arista, and FRR are all first-class. Not a chatbot retrofit.
+> ♿ **WCAG-AA accessible** — axe-core verified across every UI state. Full keyboard nav, ARIA, reduced-motion, dark color-scheme.
+> 🧪 **139 tests passing** across 8 review rounds — classifier, sanitizer, topology inference, LLM providers, site analysis.
 >
-> 2-minute demo below ⬇️
-> Repo: github.com/gesh75/netlog-ai (MIT)
+> 📦 Bundled with two synthetic demo sites (11 devices total, mixed Junos + Arista EOS) so every feature runs end-to-end the moment you clone.
 >
-> Built solo over a few weeks of nights and weekends. Networking + AI is finally a productive marriage when the AI part actually outputs something you can paste into a CLI.
+> Built solo over a few weeks of nights and weekends. AI starts earning its keep in networking when it outputs something you can paste straight into a CLI — not when it explains what your config probably does.
 >
-> #networkengineering #networkautomation #devops #opensource #ai #llm #python #flask #junos #arista #bgp #ospf #infrastructure
+> 🎬 2-minute silent demo below.
+>
+> #NetworkEngineering #NetworkAutomation #OpenSource #LLM #Python #Junos #Arista #BGP #SASE
 
 ---
 
-## Shorter variant (≈ 600 chars, hook-driven)
+## First comment (paste IMMEDIATELY after publishing the post)
 
-> I built **netlog-ai** — a local AI dashboard that turns network syslog into ranked, copy-pastable fixes.
+> Repo (clean public release, no internal references):
+> 👉 https://github.com/gesh75/netlog-ai
 >
-> • Multi-vendor (Junos / EOS / FRR)
-> • Local LLM or Claude — your choice
-> • Sanitize-before-LLM (configs never leave your laptop in cleartext)
-> • Site-wide topology inferred from configs alone
-> • 139 tests, MIT, no telemetry
->
-> 2 minutes of demo below.
->
-> 👉 github.com/gesh75/netlog-ai
->
-> #networkautomation #ai #opensource #infrastructure
+> MIT licensed. Star ⭐ if useful — and let me know what's missing for your environment.
+
+---
+
+## Why this version (vs the first draft)
+
+- **Contrarian opener** ("Most AI for networking tools are a chatbot bolted onto a Cisco-only dashboard…") replaces "Just open-sourced…". Gives readers a reason to keep reading.
+- **No `Repo:` line in the body** → matches your previous post's 7.3k-impression pattern. The URL lives only in comment #1.
+- **WCAG-AA claim is now empirically verified** with `@axe-core/playwright` against every UI state (idle, LOGS populated, DEVICE populated, SITE populated, topology) — **0 critical, 0 serious violations** under wcag2a/wcag2aa/wcag21a/wcag21aa rule sets. Receipts in commit history.
+- **5 carefully chosen accent emojis** (⚡🛠️🔒🚀🎯♿🧪📦🎬) — visual rhythm without becoming cartoonish.
+- **Closing jab at hallucination** ("…not when it explains what your config probably does") — credible to senior engineers.
+- **Hashtags trimmed** to the ones that actually surface tech/infra discovery on LinkedIn.
 
 ---
 
 ## Posting checklist
 
-1. **Upload the video first** — LinkedIn ranks native video higher than link previews
-2. **Use `docs/demo.mp4`** (LinkedIn prefers H.264 MP4 over WebM)
-3. **Aspect ratio:** 16:9 (1920×1080) — works on desktop AND mobile (LinkedIn auto-crops for mobile feed)
-4. **Cover image:** use `docs/demo-poster.png` as the thumbnail
-5. **Pin one comment** with the repo link to maximize click-through
+1. **Upload `docs/demo.mp4`** as native LinkedIn video (NOT a YouTube/Vimeo link — native ranks higher)
+2. **Paste the post body** from above
+3. **Click Post**
+4. **Immediately drop the comment text** from the section above — this is the click-target for the URL
+5. **Engage in the first hour** — reply to every comment, that locks in the algorithm boost
 6. **Best times to post (B2B/tech audience):** Tue–Thu 8–10am or 5–6pm in your timezone
-7. **Engage in the first hour** — reply to every comment, that locks in the algorithm boost
-8. **Don't include external links in the post body** — LinkedIn de-prioritizes posts with links. Put the repo URL in a comment instead.
 
-## Storyboard (what's actually on screen)
+---
+
+## Storyboard (what's actually on screen in `demo.mp4`)
 
 | Time | Scene | What viewers see | Caption |
 |------|-------|------------------|---------|
@@ -71,7 +70,9 @@
 
 **Total runtime: 1:47 (107 seconds)** — comfortably under the 2-minute target.
 
-## Asset files in this directory
+---
+
+## Asset files
 
 | File | Size | Use |
 |------|------|-----|
@@ -80,9 +81,11 @@
 | `demo-720p.webm` | 3.8 MB | Lightweight embed (1280×720 VP9) |
 | `demo-poster.png` | 348 KB | LinkedIn thumbnail + README hero |
 
+---
+
 ## Optional voice-over
 
-If you want to record your own voiceover for the silent video, the captions ARE the script — read them at the timestamps in the storyboard above and use a tool like Descript or QuickTime + iMovie to layer the audio.
+If you record a voiceover for the silent video, the captions ARE the script — read them at the timestamps in the storyboard above and use Descript or QuickTime + iMovie to layer the audio.
 
 Sample VO script (≈ 175 words, fits 110s at 95 wpm):
 
@@ -97,3 +100,22 @@ Sample VO script (≈ 175 words, fits 110s at 95 wpm):
 > Ask the copilot any question — context-grounded answers, and the LLM never sees raw secrets. Everything's sanitized first.
 >
 > One hundred thirty-nine tests, MIT licensed, runs entirely on your laptop. Github dot com slash gesh seventy-five slash netlog dash AI."
+
+---
+
+## A11y verification receipts
+
+Run `node /tmp/netlog-ai-demo/audit-a11y.cjs` against `http://localhost:6060/`. The audit walks 5 UI states and runs axe-core with WCAG 2.0 A + AA + WCAG 2.1 A + AA rule sets. Current result:
+
+```
+state-1-idle:               critical=0  serious=0  moderate=0  minor=0
+state-2-logs-populated:     critical=0  serious=0  moderate=0  minor=0
+state-3-device-populated:   critical=0  serious=0  moderate=0  minor=0
+state-4-site-populated:     critical=0  serious=0  moderate=0  minor=0
+state-5-topology:           critical=0  serious=0  moderate=0  minor=0
+
+Total AA blockers: 0
+✅ PASS
+```
+
+The fixes that got us there (commit history): bumped `.kbd-row` + `kbd` colors above 4.5:1, fixed missing `<select>` accessible names (added `aria-label` + `<label for=...>` pairs), restored proper contrast on `.group-label` / `.health-stat.zero` / `.code-copy-btn` / `.code-block-lang` (replaced parent-opacity dimming with explicit AA-compliant child colors).
