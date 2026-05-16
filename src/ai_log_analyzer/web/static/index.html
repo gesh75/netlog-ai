@@ -286,7 +286,7 @@
 
   /* ── Sidebar group labels (between button rows on SITE tab) ─────────── */
   .group-label {
-    font-size: 9px; color: var(--muted-2); text-transform: uppercase;
+    font-size: 9px; color: var(--muted); text-transform: uppercase;
     letter-spacing: 0.8px; font-weight: 700;
     margin: 14px 0 6px; padding-bottom: 4px;
     border-bottom: 1px dashed var(--border);
@@ -593,10 +593,12 @@
   .health-stat.crit .health-stat-val { color: var(--crit); }
   .health-stat.high .health-stat-val { color: var(--high); }
   .health-stat.med .health-stat-val  { color: var(--med); }
-  /* Zero-count health cards fade so attention focuses on the non-zero counts. */
-  .health-stat.zero { opacity: 0.45; background: transparent; }
-  .health-stat.zero .health-stat-val { color: var(--muted-2); font-weight: 500; }
-  .health-stat.zero::before { background: var(--muted-2); }
+  /* Zero-count health cards visually de-emphasized via explicit child
+   * colors (not parent opacity — that drops contrast under AA). */
+  .health-stat.zero { background: transparent; border-color: var(--border); }
+  .health-stat.zero .health-stat-label { color: var(--muted); }       /* 5.2:1 */
+  .health-stat.zero .health-stat-val   { color: var(--muted); font-weight: 500; }
+  .health-stat.zero::before { background: var(--border-hi); }
 
   /* ── Tables ──────────────────────────────────────────────────────────── */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -660,18 +662,19 @@
   .code-copy-btn {
     position: absolute; top: 6px; right: 6px;
     width: auto; padding: 3px 8px; margin: 0;
-    font-size: 10px; background: var(--panel-3); color: var(--muted);
-    border: 1px solid var(--border); border-radius: 4px;
+    font-size: 10px; background: var(--panel-3); color: var(--fg-dim);
+    border: 1px solid var(--border-hi); border-radius: 4px;
     text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
-    opacity: 0.7; transition: all 0.15s;
+    transition: all 0.15s;
   }
-  .code-block:hover .code-copy-btn { opacity: 1; }
+  /* Hover state slightly brightens — no opacity (would drop AA contrast). */
+  .code-block:hover .code-copy-btn { color: var(--fg); border-color: var(--accent-2); }
   .code-copy-btn:hover { background: var(--accent-2); color: var(--bg-2);
                           border-color: var(--accent-2); transform: none; }
   .code-copy-btn.copied { background: var(--ok); color: white; border-color: var(--ok); }
   .code-block-lang {
     position: absolute; bottom: 4px; right: 8px;
-    font-size: 9px; color: var(--muted-2); text-transform: uppercase;
+    font-size: 9px; color: var(--muted); text-transform: uppercase;
     letter-spacing: 0.5px; pointer-events: none;
   }
   /* CLI syntax highlighting tokens */
@@ -751,7 +754,7 @@
               color: white; margin-left: 6px; font-weight: 600; }
   .kb-badge { background: #6e7681; }
   .row-msg { color: var(--muted); font-size: 12px; }
-  #status { font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 16px;
+  #status { font-size: 12px; color: var(--fg-dim); margin-top: 10px; min-height: 16px;
             padding: 6px 10px; background: var(--bg-2); border-radius: 4px;
             border-left: 2px solid var(--accent-2); display: none; }
   #status.show { display: block; }
@@ -979,28 +982,32 @@
 
   /* ── Keyboard shortcut chips (semantic <kbd> elements) ─────────────── */
   /* Used both as the tab kbd-hint and inline shortcut indicators next to
-   * buttons (Ctrl/Cmd+Enter, etc.). Resets the UA <kbd> default styles. */
+   * buttons (Ctrl/Cmd+Enter, etc.). Resets the UA <kbd> default styles.
+   * Colors meet WCAG-AA 4.5:1 contrast against both --panel and --bg-2. */
   kbd, .kbd-hint {
-    display: inline-block; font-size: 9px; color: var(--muted-2);
-    background: var(--bg-2); border: 1px solid var(--border);
-    border-radius: 3px; padding: 1px 4px;
+    display: inline-block; font-size: 10px; color: var(--fg-dim);
+    background: var(--bg-2); border: 1px solid var(--border-hi);
+    border-radius: 3px; padding: 1px 5px;
     font-family: ui-monospace, "SF Mono", monospace;
     font-weight: 600;
     vertical-align: middle;
     line-height: 1.3;
   }
-  .kbd-hint { margin-left: 4px; }
+  .kbd-hint { margin-left: 4px; font-size: 9px; }
   .side-tab.active .kbd-hint {
-    color: rgba(10,14,21,0.7); background: rgba(10,14,21,0.18); border-color: transparent;
+    color: rgba(10,14,21,0.85); background: rgba(10,14,21,0.18); border-color: transparent;
   }
-  /* Inline shortcut row — e.g. shown under Run Analysis / Copilot textarea */
+  /* Inline shortcut row — e.g. shown under Run Analysis / Copilot textarea.
+   * Non-kbd label text uses --muted (5.2:1 contrast on --panel) for AA. */
   .kbd-row {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 10px; color: var(--muted-2);
+    font-size: 11px; color: var(--muted);
     margin-top: 6px; flex-wrap: wrap;
   }
-  .kbd-row kbd { font-size: 9px; padding: 1px 5px; }
-  .kbd-plus { opacity: 0.5; }
+  .kbd-row kbd { font-size: 10px; padding: 1px 5px; }
+  /* The "+" between keys — AA-compliant muted color, not opacity-faded.
+   * opacity: 0.5 on top of --muted-2 dropped effective contrast under 3:1. */
+  .kbd-plus { color: var(--muted-2); font-weight: 700; }
 </style>
 </head>
 <body>
@@ -1050,8 +1057,8 @@
       <details class="side-section" open>
         <summary>LLM Provider</summary>
         <div class="side-section-body">
-          <label>Provider</label>
-          <select id="provider">
+          <label for="provider">Provider</label>
+          <select id="provider" aria-label="LLM provider">
             <option value="ollama"      title="Ollama — local Gemma 3 or Qwen 2.5 models">Ollama (local)</option>
             <option value="local"       title="Docker Model Runner — local LLM via Docker">Docker Model Runner</option>
             <option value="claude"      title="Anthropic Claude with local fallback if unreachable">Claude + fallback</option>
@@ -1068,8 +1075,8 @@
       <details class="side-section" open>
         <summary>Source &amp; Run</summary>
         <div class="side-section-body">
-          <label>Source</label>
-          <select id="source">
+          <label for="source">Source</label>
+          <select id="source" aria-label="Log source">
             <option value="frr">FRR Lab Containers</option>
             <option value="raw">Paste Raw Logs</option>
             <option value="file">File Path</option>
@@ -1083,7 +1090,7 @@
             </div>
             <div id="chip-picker" class="chip-picker"></div>
             <!-- Hidden native select — read by analysis code -->
-            <select id="containers" multiple size="6" style="display:none;"></select>
+            <select id="containers" multiple size="6" aria-label="Selected lab containers" style="display:none;"></select>
             <label for="tail">Tail lines per container</label>
             <input id="tail" type="number" value="500" min="50" max="5000"
                    inputmode="numeric" pattern="[0-9]*"
@@ -1130,8 +1137,8 @@
           <label for="opt-host">Target hostname (lab device)</label>
           <input id="opt-host" placeholder="de-fra-core-01"
                  autocomplete="off" spellcheck="false" autocapitalize="off">
-          <label>Platform</label>
-          <select id="opt-platform">
+          <label for="opt-platform">Platform</label>
+          <select id="opt-platform" aria-label="Device platform">
             <option value="frr">FRR</option>
             <option value="junos">Junos</option>
             <option value="eos">Arista EOS</option>
@@ -1144,7 +1151,7 @@
         <summary>Real-Config Samples</summary>
         <div class="side-section-body">
           <p class="row-msg" style="margin:0 0 8px;">Sanitized production configs — secrets stripped before any LLM call.</p>
-          <select id="sample-picker"><option value="">— select a sample —</option></select>
+          <select id="sample-picker" aria-label="Real-config sample picker"><option value="">— select a sample —</option></select>
           <div id="sample-meta" style="font-size:11px;color:var(--muted);margin-top:6px;"></div>
           <button id="sample-opt-btn" class="secondary">⚙️ Optimize Selected Sample</button>
         </div>
@@ -1157,7 +1164,7 @@
         <summary>Site Bundles</summary>
         <div class="side-section-body">
           <p class="row-msg" style="margin:0 0 8px;">Whole-site analysis across all devices in a bundle.</p>
-          <select id="site-picker"><option value="">— select a site —</option></select>
+          <select id="site-picker" aria-label="Site bundle picker"><option value="">— select a site —</option></select>
           <div id="site-meta" style="font-size:11px;color:var(--muted);margin-top:6px;"></div>
 
           <div class="group-label">Actions</div>
