@@ -89,8 +89,12 @@
   }
 
   /* ── Header ──────────────────────────────────────────────────────────── */
+  /* Padding-inline math: keep 24px on narrow screens, but on screens wider
+   * than the `main` max-width (1700px) push the inner content into the same
+   * centered column. Otherwise on 4K monitors the brand sits at the far left
+   * while `main` floats centered, creating a visually broken layout. */
   header {
-    padding: 10px 24px;
+    padding: 10px max(24px, calc((100% - 1700px) / 2 + 24px));
     background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
     border-bottom: 1px solid var(--border);
     display: flex;
