@@ -19,10 +19,38 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
+## What's new — connectors + MCP server
+
+netlog-ai now ships a **pluggable connector layer** so it doesn't just analyze
+pasted logs — it pulls from any common log source (full guide:
+[docs/CONNECTORS.md](docs/CONNECTORS.md)).
+
+| Connector  | Source              | One-line setup |
+|------------|---------------------|----------------|
+| `kibana`   | Elasticsearch / Kibana | `NETLOG_SOURCE_kibana_URL=… NETLOG_SOURCE_kibana_API_TOKEN=…` |
+| `splunk`   | Splunk REST search  | `NETLOG_SOURCE_splunk_URL=… NETLOG_SOURCE_splunk_API_TOKEN=…` |
+| `loki`     | Grafana Loki        | `NETLOG_SOURCE_loki_URL=… NETLOG_SOURCE_loki_API_TOKEN=…` |
+| `syslog`   | UDP/TCP listener    | Zero-config — point any device at port 5514 |
+| `librenms` | LibreNMS REST       | `NETLOG_SOURCE_librenms_URL=… NETLOG_SOURCE_librenms_API_TOKEN=…` |
+
+And the analyzer engine is now **agent-callable** via a built-in MCP server:
+
+```bash
+pip install 'netlog-ai[mcp]'
+netlog-ai mcp        # stdio transport — wire into Claude Code, Cursor, Continue
+```
+
+Tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
+`analyze_logs`, `get_top_offenders`, `list_sites`, `analyze_site`, plus
+healthcheck + connector inventory. See [docs/CONNECTORS.md](docs/CONNECTORS.md)
+for the full reference.
+
 ## Features
 
 | | |
 |---|---|
+| 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
+| 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly as agent tools |
 | 🔎 **Classify** | 50+ regex patterns across Junos, EOS, FRR, IOS, RFC-3164/5424 |
 | 🧭 **Prioritize** | Deduped action items, ranked by severity × count, recovery events excluded |
 | 🧠 **Deep analyze** | Top-N items get an LLM-written root-cause + risk + remediation playbook |
