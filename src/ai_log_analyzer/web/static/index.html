@@ -759,6 +759,19 @@
               color: white; margin-left: 6px; font-weight: 600; }
   .kb-badge { background: #6e7681; }
   .row-msg { color: var(--muted); font-size: 12px; }
+  /* Source-origin pill next to hostname in the classified-events table.
+   * Tells the user this event came from a SecureCRT terminal recording,
+   * FRR docker logs, an HTTP firehose, etc. Muted by default so it doesn't
+   * fight with severity colors. */
+  .src-badge { display: inline-block; font-size: 9px; font-weight: 700;
+               letter-spacing: 0.4px; padding: 1px 6px; border-radius: 8px;
+               margin-left: 6px; text-transform: uppercase;
+               background: rgba(0, 212, 255, 0.10); color: var(--accent-2);
+               border: 1px solid rgba(0, 212, 255, 0.30); vertical-align: middle; }
+  .src-badge.scrt  { background: rgba(140, 80, 220, 0.12); color: #b691f0;
+                     border-color: rgba(140, 80, 220, 0.35); }
+  .src-badge.frr   { background: rgba(63, 185, 80, 0.10);  color: #6cd47e;
+                     border-color: rgba(63, 185, 80, 0.30); }
   #status { font-size: 12px; color: var(--fg-dim); margin-top: 10px; min-height: 16px;
             padding: 6px 10px; background: var(--bg-2); border-radius: 4px;
             border-left: 2px solid var(--accent-2); display: none; }
@@ -1112,8 +1125,15 @@
           </div>
           <div id="file-controls" class="hidden" aria-hidden="true" inert>
             <label for="file-path">Absolute path on server</label>
-            <input id="file-path" placeholder="/var/log/syslog"
-                   autocomplete="off" spellcheck="false" autocapitalize="off">
+            <input id="file-path" placeholder="/var/log/syslog or /path/to/SCRT Logs/2026-02"
+                   autocomplete="off" spellcheck="false" autocapitalize="off"
+                   list="recent-paths-list">
+            <datalist id="recent-paths-list"></datalist>
+            <div class="hint" style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45;">
+              Accepts a single <strong>file</strong> or a <strong>directory</strong>
+              (recursively scans <code style="background:var(--bg-2);padding:0 4px;border-radius:3px;">*.log</code>).
+              SecureCRT recordings (<code style="background:var(--bg-2);padding:0 4px;border-radius:3px;">HH:MM:SS.ss §…</code>) are auto-detected.
+            </div>
           </div>
           <!-- Run + Reload side-by-side: Run is primary CTA, Reload is an icon-style secondary.
                The sticky-run-row class pins this row to the bottom of the sidebar's scroll
