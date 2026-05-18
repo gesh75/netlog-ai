@@ -155,6 +155,25 @@ def create_app() -> Flask:
     ]
     CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
 
+    # ── Cache headers for static HTML/JS/CSS ──────────────────────────────
+    # The UI is a single-page Flask app — we ship layout/JS fixes by editing
+    # index.html and app.js directly. Browsers cache these by default, which
+    # means users see a stale UI until they hard-refresh. Force revalidation
+    # on every request for the text assets; binary assets (images, video) are
+    # still cached normally.
+    @app.after_request
+    def _add_no_cache_for_text_assets(response):
+        path = (request.path or "").lower()
+        if (path == "/"
+                or path.endswith(".html")
+                or path.endswith(".js")
+                or path.endswith(".css")
+                or path.endswith(".json")):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     # ── UI ────────────────────────────────────────────────────────────────
     @app.route("/")
     def index():
