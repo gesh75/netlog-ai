@@ -34,6 +34,8 @@ from ai_log_analyzer.classifier import LogEvent  # noqa: E402
 from ai_log_analyzer import (compliance as comp_engine, copilot, diff as diff_mod,  # noqa: E402
                               postmortem, reports, runbook, site_doc,
                               site_optimize, topology as topo_mod)
+from ai_log_analyzer.sources import SourceConfig, SourceError, registry  # noqa: E402
+from ai_log_analyzer.sources.manager import manager as source_manager  # noqa: E402
 
 STATIC_DIR = Path(__file__).parent / "static"
 SAMPLES_DIR = Path(__file__).resolve().parents[3] / "samples"
@@ -679,6 +681,115 @@ def create_app() -> Flask:
         result["platform"] = platform
         result["config_length"] = len(running_config)
         return jsonify(result)
+
+    # ── External log sources (Kibana, Splunk, Loki, syslog, LibreNMS, ...) ────
+    @app.route("/api/sources", methods=["GET"])
+    def api_sources_list():
+        """List configured sources + the connector kinds the registry knows."""
+        return jsonify({
+            "sources": source_manager.describe(),
+            "known_kinds": source_manager.known_kinds(),
+        })
+
+    @app.route("/api/sources", methods=["POST"])
+    @require_api_token
+    def api_sources_add():
+        """Register a new source. Body: {id, type, url, api_token?, username?,
+        password?, auth_methods?, extra?, verify_tls?, timeout_seconds?}."""
+        body = request.get_json(silent=True) or {}
+        src_id = (body.get("id") or "").strip()
+        stype = (body.get("type") or "").strip()
+        url = (body.get("url") or "").strip()
+        if not src_id or not stype or not url:
+            return jsonify({"ok": False, "error": "id, type, url are required"}), 400
+        if not registry.is_registered(stype):
+            return jsonify({"ok": False, "error": f"unknown type {stype!r}",
+                            "known": source_manager.known_kinds()}), 400
+        try:
+            auth_methods = tuple(body.get("auth_methods") or ())
+            cfg = SourceConfig(
+                id=src_id,
+                type=stype,
+                url=url,
+                auth_methods=auth_methods,
+                api_token=body.get("api_token", ""),
+                username=body.get("username", ""),
+                password=body.get("password", ""),
+                cookies=dict(body.get("cookies") or {}),
+                extra={str(k): str(v) for k, v in (body.get("extra") or {}).items()},
+                verify_tls=_parse_bool(body.get("verify_tls", True), default=True),
+                timeout_seconds=float(body.get("timeout_seconds", 30.0)),
+            )
+            source_manager.add(cfg)
+        except SourceError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except (TypeError, ValueError) as exc:
+            return jsonify({"ok": False, "error": f"bad config: {exc}"}), 400
+        return jsonify({"ok": True, "id": src_id})
+
+    @app.route("/api/sources/<source_id>", methods=["DELETE"])
+    @require_api_token
+    def api_sources_remove(source_id: str):
+        removed = source_manager.remove(source_id)
+        return jsonify({"ok": removed})
+
+    @app.route("/api/sources/<source_id>/test", methods=["POST"])
+    def api_sources_test(source_id: str):
+        return jsonify(source_manager.healthcheck(source_id))
+
+    @app.route("/api/sources/<source_id>/fetch", methods=["POST"])
+    def api_sources_fetch(source_id: str):
+        """Pull a batch of events from a registered source. Body:
+        {since_seconds, limit, host_filter}."""
+        body = request.get_json(silent=True) or {}
+        try:
+            events = source_manager.fetch(
+                source_id,
+                since_seconds=int(body.get("since_seconds", 3600)),
+                limit=int(body.get("limit", 1000)),
+                host_filter=str(body.get("host_filter", "")),
+            )
+        except SourceError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify({
+            "ok": True,
+            "count": len(events),
+            "events": [
+                {
+                    "timestamp": e.timestamp, "hostname": e.hostname,
+                    "appname": e.appname, "severity_raw": e.severity_raw,
+                    "message": e.message,
+                }
+                for e in events
+            ],
+        })
+
+    @app.route("/api/sources/<source_id>/analyze", methods=["POST"])
+    @require_api_token
+    def api_sources_analyze(source_id: str):
+        """Fetch + run the full analyzer (classifier → dedup → optional LLM)."""
+        body = request.get_json(silent=True) or {}
+        try:
+            events = source_manager.fetch(
+                source_id,
+                since_seconds=int(body.get("since_seconds", 3600)),
+                limit=int(body.get("limit", 5000)),
+                host_filter=str(body.get("host_filter", "")),
+            )
+        except SourceError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        if not events:
+            return jsonify({"ok": True, "count": 0, "result": None,
+                            "message": "no events in window"})
+        result = analyze(events, use_llm=_parse_bool(body.get("use_llm", True), default=True))
+        return jsonify({"ok": True, "count": len(events), "result": result.to_dict()})
+
+    # Auto-load env-configured sources on app boot (idempotent).
+    try:
+        source_manager.load_from_env()
+    except Exception:  # noqa: BLE001
+        # Never let a misconfigured source crash the app.
+        pass
 
     return app
 

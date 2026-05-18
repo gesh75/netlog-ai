@@ -42,6 +42,23 @@ def cmd_containers(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    """Start the MCP server (stdio by default) so Claude Code / Cursor / Continue
+    can call netlog-ai tools directly."""
+    try:
+        from ai_log_analyzer.mcp_server import run_mcp_server
+    except ImportError as exc:
+        print(f"error: MCP server not available — {exc}", file=sys.stderr)
+        print("Install with: pip install mcp", file=sys.stderr)
+        return 2
+    try:
+        run_mcp_server(transport=args.transport)
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="ai-log-analyzer", description="AI-powered network log analyzer")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -59,6 +76,11 @@ def main() -> None:
 
     cp = sub.add_parser("containers", help="List running FRR lab containers")
     cp.set_defaults(func=cmd_containers)
+
+    mp = sub.add_parser("mcp", help="Run as an MCP server (for Claude Code / Cursor / Continue)")
+    mp.add_argument("--transport", default="stdio", choices=["stdio", "streamable-http"],
+                    help="MCP transport (default: stdio)")
+    mp.set_defaults(func=cmd_mcp)
 
     args = p.parse_args()
     sys.exit(args.func(args))
