@@ -171,3 +171,84 @@ def test_scrt_strips_leading_bom():
     assert len(events) == 1
     assert events[0].timestamp == "20:24:05.05"
     assert "Start recording session" in events[0].message
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Directory scanning
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_parse_directory_aggregates_multiple_files(tmp_path):
+    """Walks the directory recursively, parses every *.log, yields all events.
+    Hostname must be extracted per-file from the SCRT filename so devices
+    group correctly in the aggregate."""
+    from ai_log_analyzer.adapters.file import parse_directory
+
+    (tmp_path / "ach1-fw-20a (10.1.15.1) -- 2026-02-10_11-32.log").write_text(
+        "20:30:01.01 §bgp peer 10.0.0.1 down (hold timer expired)\n", encoding="utf-8",
+    )
+    (tmp_path / "lhr3-fw-01a (10.1.22.1) -- 2026-02-10_15-59.log").write_text(
+        "Mar 17 12:00:01 lhr3-fw-01a alarmd: LICENSE_EXPIRED feature bgp(47) expired\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "noise.txt").write_text("not a log file\n", encoding="utf-8")
+
+    events = list(parse_directory(tmp_path))
+    assert len(events) == 2
+    hosts = sorted({e.hostname for e in events})
+    assert hosts == ["ach1-fw-20a", "lhr3-fw-01a"]
+
+
+@pytest.mark.unit
+def test_parse_directory_recursive_walks_subdirs(tmp_path):
+    from ai_log_analyzer.adapters.file import parse_directory
+
+    sub = tmp_path / "2026-02-10"
+    sub.mkdir()
+    (sub / "auh1-fw-20a (10.1.59.1) -- 2026-02-10_11-32.log").write_text(
+        "20:30:01.01 §bgp peer 10.0.0.1 down\n", encoding="utf-8",
+    )
+    events = list(parse_directory(tmp_path, recursive=True))
+    assert len(events) == 1
+    assert events[0].hostname == "auh1-fw-20a"
+
+
+@pytest.mark.unit
+def test_parse_directory_non_recursive_skips_subdirs(tmp_path):
+    from ai_log_analyzer.adapters.file import parse_directory
+
+    sub = tmp_path / "subdir"
+    sub.mkdir()
+    (sub / "child.log").write_text("20:30:01.01 §should not be picked up\n",
+                                    encoding="utf-8")
+    (tmp_path / "top.log").write_text("20:30:01.01 §top-level event\n",
+                                       encoding="utf-8")
+    events = list(parse_directory(tmp_path, recursive=False))
+    assert len(events) == 1
+    assert "top-level" in events[0].message
+
+
+@pytest.mark.unit
+def test_parse_directory_raises_on_nondir(tmp_path):
+    from ai_log_analyzer.adapters.file import parse_directory
+
+    f = tmp_path / "not-a-dir.log"
+    f.write_text("ignored\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="is not a directory"):
+        list(parse_directory(f))
+
+
+@pytest.mark.unit
+def test_count_directory_files_matches_glob(tmp_path):
+    from ai_log_analyzer.adapters.file import count_directory_files
+
+    (tmp_path / "a.log").write_text("x", encoding="utf-8")
+    (tmp_path / "b.log").write_text("x", encoding="utf-8")
+    (tmp_path / "ignored.txt").write_text("x", encoding="utf-8")
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "c.log").write_text("x", encoding="utf-8")
+
+    assert count_directory_files(tmp_path, pattern="*.log", recursive=False) == 2
+    assert count_directory_files(tmp_path, pattern="*.log", recursive=True) == 3
+    assert count_directory_files(tmp_path / "does-not-exist") == 0
