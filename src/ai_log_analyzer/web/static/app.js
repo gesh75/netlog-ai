@@ -472,9 +472,25 @@ async function loadContainers() {
 
 function showSourceControls() {
   const src = $("source").value;
-  $("frr-controls").classList.toggle("hidden", src !== "frr");
-  $("raw-controls").classList.toggle("hidden", src !== "raw");
-  $("file-controls").classList.toggle("hidden", src !== "file");
+  // Each control panel ships with hidden + aria-hidden + inert so screen readers
+  // and keyboard nav skip them while collapsed. All three must be toggled in
+  // sync — otherwise the input stays uneditable when revealed.
+  const panels = [
+    { id: "frr-controls",  active: src === "frr"  },
+    { id: "raw-controls",  active: src === "raw"  },
+    { id: "file-controls", active: src === "file" },
+  ];
+  for (const { id, active } of panels) {
+    const el = $(id);
+    if (!el) continue;
+    el.classList.toggle("hidden", !active);
+    el.toggleAttribute("inert", !active);
+    if (active) {
+      el.removeAttribute("aria-hidden");
+    } else {
+      el.setAttribute("aria-hidden", "true");
+    }
+  }
 }
 
 // ── Run analysis ─────────────────────────────────────────────────────────────
