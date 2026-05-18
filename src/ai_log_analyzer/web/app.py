@@ -581,10 +581,29 @@ def create_app() -> Flask:
 
         elif source == "file":
             path = body.get("path", "")
-            if not path or not Path(path).is_file():
-                return jsonify({"error": f"File not found: {path}"}), 404
-            from ai_log_analyzer.adapters.file import parse_file
-            events = list(parse_file(path))
+            p = Path(path) if path else None
+            if not p or not p.exists():
+                return jsonify({"error": f"Path not found: {path}"}), 404
+            from ai_log_analyzer.adapters.file import (
+                parse_file, parse_directory, count_directory_files,
+            )
+            if p.is_dir():
+                # Directory scan. Walk recursively for *.log files (overridable
+                # via body.pattern). Cap at 500 files for safety.
+                pattern = body.get("pattern", "*.log")
+                recursive = _parse_bool(body.get("recursive", True), default=True)
+                file_count = count_directory_files(p, pattern=pattern,
+                                                    recursive=recursive)
+                if file_count == 0:
+                    return jsonify({
+                        "error": f"No files matching {pattern!r} in {path}",
+                    }), 404
+                events = list(parse_directory(p, pattern=pattern,
+                                              recursive=recursive))
+            elif p.is_file():
+                events = list(parse_file(p))
+            else:
+                return jsonify({"error": f"Path is neither file nor dir: {path}"}), 400
 
         else:
             return jsonify({"error": f"Unknown source: {source}"}), 400

@@ -123,6 +123,45 @@ function codeBlock(text, { lang = "" } = {}) {
 }
 
 
+// ── Recent file paths (localStorage-backed, exposed via <datalist>) ───────
+
+const _RECENT_PATHS_KEY = "ai_log_analyzer:recent_paths";
+const _RECENT_PATHS_MAX = 8;
+
+function loadRecentPaths() {
+  try {
+    const raw = localStorage.getItem(_RECENT_PATHS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushRecentPath(path) {
+  if (!path) return;
+  try {
+    let list = loadRecentPaths();
+    // De-dupe — move existing entry to the front instead of duplicating.
+    list = list.filter((p) => p !== path);
+    list.unshift(path);
+    if (list.length > _RECENT_PATHS_MAX) list = list.slice(0, _RECENT_PATHS_MAX);
+    localStorage.setItem(_RECENT_PATHS_KEY, JSON.stringify(list));
+    refreshRecentPathsDatalist(list);
+  } catch {
+    /* localStorage unavailable — silent no-op */
+  }
+}
+
+function refreshRecentPathsDatalist(list) {
+  const dl = $("recent-paths-list");
+  if (!dl) return;
+  while (dl.firstChild) dl.removeChild(dl.firstChild);
+  (list || loadRecentPaths()).forEach((p) => {
+    // `value` is not in el()'s top-level options — must go through attrs.
+    dl.appendChild(el("option", { attrs: { value: p } }));
+  });
+}
+
 // ── Score-history sparkline (localStorage-backed) ──────────────────────────
 
 const _SCORE_HISTORY_KEY = "ai_log_analyzer:score_history";
@@ -520,6 +559,11 @@ async function runAnalysis() {
   try {
     const result = await fetchJSON("/api/analyze", { method: "POST", body: JSON.stringify(body) });
     render(result);
+    // Persist the successful file path into the recent-paths history so the
+    // user can autocomplete it next time via the datalist dropdown.
+    if (source === "file" && body.path) {
+      pushRecentPath(body.path);
+    }
     const summary = `${result.classified_events.length} events analyzed (${result.llm_powered ? "LLM" : "KB"})`;
     setStatus(`Done — ${summary}`);
     toast(`Analysis complete — ${summary}`, "success");
@@ -547,6 +591,20 @@ async function changeProvider() {
 
 function sevBadge(severity) {
   return el("span", { className: `sev sev-${severity}`, text: severity });
+}
+
+/** Tiny origin pill next to a hostname — tells the user where the event
+ *  came from (SecureCRT recording, FRR docker logs, etc). Returns null for
+ *  generic syslog so the table stays uncluttered. */
+function sourceBadge(appname) {
+  const a = (appname || "").toLowerCase();
+  if (a === "scrt-session") {
+    return el("span", { className: "src-badge scrt", text: "SCRT" });
+  }
+  if (a === "frr" || a === "watchfrr" || a === "bgpd" || a === "ospfd" || a === "zebra") {
+    return el("span", { className: "src-badge frr", text: "FRR" });
+  }
+  return null;
 }
 
 // ── Main render ──────────────────────────────────────────────────────────────
@@ -703,11 +761,17 @@ function render(r) {
           el("span", { className: "row-msg", text: sample }),
         )
       : el("td", { text: desc });
+    // Source-origin badge (SCRT recording, FRR docker, etc.) — shown next to
+    // the hostname so it's grouped with the device, not the description.
+    const srcBadge = sourceBadge(e.appname);
+    const hostCell = srcBadge
+      ? el("td", {}, document.createTextNode(e.hostname || ""), srcBadge)
+      : el("td", { text: e.hostname || "" });
     // Severity-tinted row for scannability
     const tr = el("tr", { className: `sev-row-${e.severity || "info"}` },
       el("td", {}, sevBadge(e.severity)),
       el("td", {}, el("span", { className: "row-msg", text: e.timestamp || "" })),
-      el("td", { text: e.hostname || "" }),
+      hostCell,
       el("td", {}, el("span", { className: "row-msg", text: e.category })),
       descCell,
     );
@@ -1812,6 +1876,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadContainers();
   refreshLLMStatus();
   refreshNetToolStatus();
+  refreshRecentPathsDatalist();   // hydrate File Path autocomplete from localStorage
 
   // Sidebar overflow detection — toggles the bottom-fade scroll hint when the
   // sidebar has content below the visible area (typically on short viewports).

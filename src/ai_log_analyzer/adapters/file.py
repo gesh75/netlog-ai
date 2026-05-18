@@ -72,6 +72,42 @@ def parse_file(path: str | Path, default_host: str = "") -> Iterable[LogEvent]:
                 yield ev
 
 
+def parse_directory(path: str | Path, pattern: str = "*.log",
+                    recursive: bool = True, max_files: int = 500) -> Iterable[LogEvent]:
+    """Parse every file in a directory matching `pattern` and yield all events
+    in chronological-ish order (by filename sort, then by file order).
+
+    Each file is parsed via `parse_file`, which means each file's events get
+    their hostname extracted from the filename (so SCRT logs across many
+    sessions on the same device naturally group together).
+
+    `max_files` is a safety cap to prevent accidental analysis of a 100K-file
+    directory. Set to 0 to disable.
+    """
+    p = Path(path)
+    if not p.is_dir():
+        raise ValueError(f"{p} is not a directory")
+    if recursive:
+        files = sorted(f for f in p.rglob(pattern) if f.is_file())
+    else:
+        files = sorted(f for f in p.glob(pattern) if f.is_file())
+    if max_files and len(files) > max_files:
+        files = files[:max_files]
+    for f in files:
+        yield from parse_file(f)
+
+
+def count_directory_files(path: str | Path, pattern: str = "*.log",
+                          recursive: bool = True) -> int:
+    """Cheap precheck — how many matching files would parse_directory ingest?"""
+    p = Path(path)
+    if not p.is_dir():
+        return 0
+    if recursive:
+        return sum(1 for f in p.rglob(pattern) if f.is_file())
+    return sum(1 for f in p.glob(pattern) if f.is_file())
+
+
 def _parse_line(line: str, default_host: str) -> LogEvent | None:
     # Strip BOM and any leading/trailing whitespace.
     line = line.lstrip("﻿").strip()
