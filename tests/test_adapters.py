@@ -85,3 +85,89 @@ def test_file_parse_freeform_fallback():
 def test_file_parse_skips_blank_lines():
     events = list(parse_lines(["", "  ", "\n"]))
     assert events == []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SecureCRT terminal-recording parser
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_scrt_basic_line_parsed():
+    """HH:MM:SS.ss § <text> is the SecureCRT recording format."""
+    events = list(parse_lines(
+        ["20:24:08.08 §Enter passphrase for PKCS#11: "],
+        default_host="ach1-fw-20a",
+    ))
+    assert len(events) == 1
+    assert events[0].timestamp == "20:24:08.08"
+    assert events[0].appname == "scrt-session"
+    assert events[0].hostname == "ach1-fw-20a"
+    assert "PKCS#11" in events[0].message
+
+
+@pytest.mark.unit
+def test_scrt_classifier_still_fires_on_captured_output():
+    """If a user pasted `show bgp summary` output into a terminal session,
+    the SCRT parser strips the timestamp/§ and the classifier sees the inner
+    text — so BGP-down events in captured terminal output are still detected."""
+    from ai_log_analyzer.analyzer import analyze
+    lines = [
+        "20:30:01.01 §admin@ach1-fw-20a> show log messages | last 200",
+        "20:30:02.02 §Feb 25 18:29:01 ach1-fw-20a rpd: bgp peer 10.0.0.1 down (hold timer expired)",
+        "20:30:02.02 §Feb 25 18:29:02 ach1-fw-20a alarmd: LICENSE_EXPIRED feature bgp(47) expired",
+        "20:30:02.02 §Feb 25 18:29:03 ach1-fw-20a kernel: fpc0 Unit 0: ASIC parity error",
+    ]
+    events = list(parse_lines(lines, default_host="ach1-fw-20a"))
+    assert len(events) == 4
+    # Run through the analyzer (KB only — no LLM needed)
+    result = analyze(events, use_llm=False)
+    payload = result.to_dict() if hasattr(result, "to_dict") else result
+    items = payload.get("action_items") or []
+    severities = {ai.get("severity") for ai in items}
+    # We should pick up at least the critical (ASIC parity) and high
+    # (BGP down, license expiry) findings even though they were captured
+    # inside a SecureCRT session recording.
+    assert "critical" in severities
+    assert "high" in severities
+
+
+@pytest.mark.unit
+def test_scrt_empty_section_skipped():
+    """Lines that are just a timestamp + § with no payload are ignored."""
+    events = list(parse_lines(
+        ["20:24:11.11 §", "20:24:12.12 §  "],
+        default_host="x",
+    ))
+    assert events == []
+
+
+@pytest.mark.unit
+def test_parse_file_extracts_hostname_from_scrt_filename(tmp_path):
+    """The SecureCRT filename pattern is `host (ip) -- date_time.log` — we
+    should use just `host` so the dashboard groups events correctly."""
+    from ai_log_analyzer.adapters.file import parse_file
+
+    log = tmp_path / "ach1-fw-20a (10.1.15.1) -- 2026-02-25_18-29.log"
+    log.write_text(
+        "﻿20:30:01.01 §Start recording ach1-fw-20a\n"
+        "20:30:02.02 §bgp peer 10.0.0.1 down (hold timer expired)\n",
+        encoding="utf-8",
+    )
+    events = list(parse_file(log))
+    assert len(events) == 2
+    # Filename hostname stripping
+    assert all(e.hostname == "ach1-fw-20a" for e in events)
+    # BOM at the start of the file must not corrupt the first line
+    assert "Start recording" in events[0].message
+
+
+@pytest.mark.unit
+def test_scrt_strips_leading_bom():
+    """SecureCRT writes files as UTF-8 BOM. The first line must still parse."""
+    events = list(parse_lines(
+        ["﻿20:24:05.05 §Start recording session"],
+        default_host="device1",
+    ))
+    assert len(events) == 1
+    assert events[0].timestamp == "20:24:05.05"
+    assert "Start recording session" in events[0].message
