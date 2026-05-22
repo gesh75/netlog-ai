@@ -1,0 +1,420 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="src" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0e7490" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="adp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#065f46" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#10b981" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#92400e" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="brain" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6b21a8" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="out" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#9d174d" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0.15"/>
+    </linearGradient>
+
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#bg)"/>
+
+  <!-- Subtle grid -->
+  <g stroke="#1f2937" stroke-width="0.5" opacity="0.4">
+    <path d="M0 80 L1280 80 M0 160 L1280 160 M0 240 L1280 240 M0 320 L1280 320 M0 400 L1280 400 M0 480 L1280 480 M0 560 L1280 560 M0 640 L1280 640"/>
+  </g>
+
+  <!-- Title -->
+  <text x="640" y="50" text-anchor="middle" font-size="26" font-weight="700" fill="#f0f6fc">netlog-ai · Architecture</text>
+  <text x="640" y="74" text-anchor="middle" font-size="13" fill="#8b949e">Network logs in. Ranked actions out. — local-first, multi-vendor, sanitize-before-LLM</text>
+
+  <!-- Column headers -->
+  <g font-size="11" font-weight="700" letter-spacing="2" text-anchor="middle">
+    <text x="140" y="120" fill="#22d3ee">SOURCES</text>
+    <text x="380" y="120" fill="#10b981">ADAPTERS</text>
+    <text x="640" y="120" fill="#f59e0b">PIPELINE</text>
+    <text x="900" y="120" fill="#a855f7">INTELLIGENCE</text>
+    <text x="1140" y="120" fill="#ec4899">OUTPUTS</text>
+  </g>
+
+  <!-- ========== SOURCES column ========== -->
+  <g>
+    <rect x="40" y="140" width="200" height="440" rx="14" fill="url(#src)" stroke="#22d3ee" stroke-opacity="0.4"/>
+    <g font-size="13" fill="#e6edf3">
+      <g transform="translate(60,170)">
+        <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#22d3ee" stroke-opacity="0.5"/>
+        <text x="14" y="19" font-size="11" fill="#22d3ee" font-weight="700">KIBANA / ES</text>
+        <text x="14" y="34" font-size="10" fill="#8b949e">Elasticsearch _search</text>
+      </g>
+      <g transform="translate(60,220)">
+        <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#22d3ee" stroke-opacity="0.5"/>
+        <text x="14" y="19" font-size="11" fill="#22d3ee" font-weight="700">SPLUNK</text>
+        <text x="14" y="34" font-size="10" fill="#8b949e">REST search/jobs</text>
+      </g>
+      <g transform="translate(60,270)">
+        <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#22d3ee" stroke-opacity="0.5"/>
+        <text x="14" y="19" font-size="11" fill="#22d3ee" font-weight="700">LOKI</text>
+        <text x="14" y="34" font-size="10" fill="#8b949e">LogQL query_range</text>
+      </g>
+      <g transform="translate(60,320)">
+        <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#22d3ee" stroke-opacity="0.5"/>
+        <text x="14" y="19" font-size="11" fill="#22d3ee" font-weight="700">SYSLOG UDP/TCP</text>
+        <text x="14" y="34" font-size="10" fill="#8b949e">:5514 listener</text>
+      </g>
+      <g transform="translate(60,370)">
+        <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#22d3ee" stroke-opacity="0.5"/>
+        <text x="14" y="19" font-size="11" fill="#22d3ee" font-weight="700">LIBRENMS</text>
+        <text x="14" y="34" font-size="10" fill="#8b949e">/api/v0/logs</text>
+      </g>
+      <g transform="translate(60,420)">
+        <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#22d3ee" stroke-opacity="0.5"/>
+        <text x="14" y="19" font-size="11" fill="#22d3ee" font-weight="700">FRR DOCKER</text>
+        <text x="14" y="34" font-size="10" fill="#8b949e">docker logs &lt;ctn&gt;</text>
+      </g>
+      <g transform="translate(60,470)">
+        <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#22d3ee" stroke-opacity="0.5"/>
+        <text x="14" y="19" font-size="11" fill="#22d3ee" font-weight="700">FILE / PASTE</text>
+        <text x="14" y="34" font-size="10" fill="#8b949e">.log .txt stdin</text>
+      </g>
+      <g transform="translate(60,520)">
+        <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#22d3ee" stroke-opacity="0.5"/>
+        <text x="14" y="19" font-size="11" fill="#22d3ee" font-weight="700">DCN NET TOOL</text>
+        <text x="14" y="34" font-size="10" fill="#8b949e">SSH /api/run bridge</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ========== ADAPTERS column ========== -->
+  <g>
+    <rect x="280" y="140" width="200" height="440" rx="14" fill="url(#adp)" stroke="#10b981" stroke-opacity="0.4"/>
+    <g transform="translate(300,210)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#10b981" stroke-opacity="0.6"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#10b981" font-weight="700">SourceManager</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">register · fetch · search</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">env-driven config</text>
+    </g>
+    <g transform="translate(300,290)">
+      <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#10b981" stroke-opacity="0.5"/>
+      <text x="80" y="19" text-anchor="middle" font-size="11" fill="#10b981" font-weight="700">file.py</text>
+      <text x="80" y="34" text-anchor="middle" font-size="10" fill="#8b949e">RFC 3164/5424 · Junos</text>
+    </g>
+    <g transform="translate(300,340)">
+      <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#10b981" stroke-opacity="0.5"/>
+      <text x="80" y="19" text-anchor="middle" font-size="11" fill="#10b981" font-weight="700">frr.py</text>
+      <text x="80" y="34" text-anchor="middle" font-size="10" fill="#8b949e">docker log stream</text>
+    </g>
+    <g transform="translate(300,390)">
+      <rect width="160" height="42" rx="8" fill="#0d1117" stroke="#10b981" stroke-opacity="0.5"/>
+      <text x="80" y="19" text-anchor="middle" font-size="11" fill="#10b981" font-weight="700">network_tool.py</text>
+      <text x="80" y="34" text-anchor="middle" font-size="10" fill="#8b949e">DCN tool bridge</text>
+    </g>
+    <g transform="translate(300,450)">
+      <rect width="160" height="100" rx="10" fill="#0d1117" stroke="#10b981" stroke-opacity="0.6"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#10b981" font-weight="700">LogEvent stream</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">ts · host · facility</text>
+      <text x="80" y="55" text-anchor="middle" font-size="10" fill="#8b949e">severity · process · msg</text>
+      <text x="80" y="78" text-anchor="middle" font-size="10" fill="#f59e0b">Iterable[LogEvent]</text>
+      <text x="80" y="92" text-anchor="middle" font-size="9" fill="#6b7280">(generator — O(1) memory)</text>
+    </g>
+  </g>
+
+  <!-- ========== PIPELINE column ========== -->
+  <g>
+    <rect x="540" y="140" width="200" height="440" rx="14" fill="url(#core)" stroke="#f59e0b" stroke-opacity="0.4"/>
+    <g transform="translate(560,170)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#f59e0b" stroke-opacity="0.7" filter="url(#glow)"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#f59e0b" font-weight="700">🛡 Sanitize</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">$6$ · $9$ · SSH keys</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">SNMP · RADIUS · public IPs</text>
+    </g>
+    <g transform="translate(560,250)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#f59e0b" stroke-opacity="0.7" filter="url(#glow)"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#f59e0b" font-weight="700">🔎 Classify</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">50+ regex patterns</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">Junos · EOS · FRR · IOS</text>
+    </g>
+    <g transform="translate(560,330)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#f59e0b" stroke-opacity="0.7" filter="url(#glow)"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#f59e0b" font-weight="700">🧭 Prioritize</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">dedupe (sev × count)</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">recovery events excluded</text>
+    </g>
+    <g transform="translate(560,410)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#f59e0b" stroke-opacity="0.7" filter="url(#glow)"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#f59e0b" font-weight="700">🧠 Deep Analyze</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">top-N → RCA + remedy</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">rollback + verify CLI</text>
+    </g>
+    <g transform="translate(560,490)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#f59e0b" stroke-opacity="0.7" filter="url(#glow)"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#f59e0b" font-weight="700">📈 Health Score</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">weighted 0–100</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">A / B / C / D / F + trend</text>
+    </g>
+  </g>
+
+  <!-- ========== INTELLIGENCE column ========== -->
+  <g>
+    <rect x="800" y="140" width="200" height="440" rx="14" fill="url(#brain)" stroke="#a855f7" stroke-opacity="0.4"/>
+    <g transform="translate(820,170)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#a855f7" stroke-opacity="0.7"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#a855f7" font-weight="700">🧱 KB (rules)</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">deterministic fallback</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">no API key required</text>
+    </g>
+    <g transform="translate(820,250)">
+      <rect width="160" height="78" rx="10" fill="#0d1117" stroke="#a855f7" stroke-opacity="0.8" filter="url(#glow)"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#a855f7" font-weight="700">🤖 LLM</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">Docker Model Runner</text>
+      <text x="80" y="54" text-anchor="middle" font-size="10" fill="#8b949e">Qwen / Llama (local)</text>
+      <text x="80" y="68" text-anchor="middle" font-size="10" fill="#8b949e">— or — Anthropic Claude</text>
+    </g>
+    <g transform="translate(820,348)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#a855f7" stroke-opacity="0.7"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#a855f7" font-weight="700">🗺 Topology</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">BGP · MLAG · subnet</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">multi-signal inference</text>
+    </g>
+    <g transform="translate(820,428)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#a855f7" stroke-opacity="0.7"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#a855f7" font-weight="700">🔍 Copilot</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">site-grounded Q&amp;A</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">post-mortem grep</text>
+    </g>
+    <g transform="translate(820,508)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#a855f7" stroke-opacity="0.7"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#a855f7" font-weight="700">🧪 Site Optimize</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">cross-device gap finder</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">maturity score</text>
+    </g>
+  </g>
+
+  <!-- ========== OUTPUTS column ========== -->
+  <g>
+    <rect x="1040" y="140" width="200" height="440" rx="14" fill="url(#out)" stroke="#ec4899" stroke-opacity="0.4"/>
+    <g transform="translate(1060,170)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#ec4899" stroke-opacity="0.7"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#ec4899" font-weight="700">🌐 Web UI :6060</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">Flask + vanilla JS</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">dark, PWA, keyboard</text>
+    </g>
+    <g transform="translate(1060,250)">
+      <rect width="160" height="78" rx="10" fill="#0d1117" stroke="#ec4899" stroke-opacity="0.8" filter="url(#glow)"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#ec4899" font-weight="700">🧩 MCP server</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">stdio transport</text>
+      <text x="80" y="54" text-anchor="middle" font-size="10" fill="#8b949e">Claude Code · Cursor</text>
+      <text x="80" y="68" text-anchor="middle" font-size="10" fill="#8b949e">Continue · Cline</text>
+    </g>
+    <g transform="translate(1060,348)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#ec4899" stroke-opacity="0.7"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#ec4899" font-weight="700">📄 Reports</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">MD · HTML · CSV · PDF</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">site docs (3 formats)</text>
+    </g>
+    <g transform="translate(1060,428)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#ec4899" stroke-opacity="0.7"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#ec4899" font-weight="700">🖼 Topology SVG</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">D3 force-directed</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">Mermaid + Graphviz</text>
+    </g>
+    <g transform="translate(1060,508)">
+      <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#ec4899" stroke-opacity="0.7"/>
+      <text x="80" y="22" text-anchor="middle" font-size="12" fill="#ec4899" font-weight="700">🎯 Action Items</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">copy-pastable CLI</text>
+      <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">+ rollback + verify</text>
+    </g>
+  </g>
+
+  <!-- ========== Connector lines ========== -->
+  <g stroke="#475569" stroke-width="1.5" fill="none" opacity="0.55" marker-end="url(#arrow)">
+    <!-- Sources → Adapters -->
+    <path d="M240 191 L300 240"/>
+    <path d="M240 241 L300 240"/>
+    <path d="M240 291 L300 240"/>
+    <path d="M240 341 L300 240"/>
+    <path d="M240 391 L300 240"/>
+    <path d="M240 441 L300 240"/>
+    <path d="M240 491 L300 240"/>
+    <path d="M240 541 L300 240"/>
+    <!-- Adapters (LogEvent stream) → Pipeline (Sanitize) -->
+    <path d="M460 500 C 510 500, 510 200, 560 200"/>
+    <!-- Pipeline vertical flow -->
+    <path d="M640 230 L640 250"/>
+    <path d="M640 310 L640 330"/>
+    <path d="M640 390 L640 410"/>
+    <path d="M640 470 L640 490"/>
+    <!-- Pipeline (Deep Analyze) ↔ KB / LLM -->
+    <path d="M720 440 L820 200"/>
+    <path d="M720 440 L820 285"/>
+    <path d="M820 380 L720 440"/>
+    <path d="M820 460 L720 440"/>
+    <path d="M820 540 L720 440"/>
+    <!-- Intelligence → Outputs -->
+    <path d="M980 200 L1060 200"/>
+    <path d="M980 285 L1060 285"/>
+    <path d="M980 380 L1060 380"/>
+    <path d="M980 460 L1060 460"/>
+    <path d="M980 540 L1060 540"/>
+    <!-- Pipeline → Outputs (action items & health) -->
+    <path d="M720 520 C 880 580, 950 560, 1060 540"/>
+    <path d="M720 520 C 880 540, 950 380, 1060 380"/>
+  </g>
+
+  <!-- ========== Animated data packets (SMIL) ========== -->
+  <!-- Sources fan-in: 8 packets fading into adapter manager -->
+  <g fill="#22d3ee" filter="url(#glow)">
+    <circle r="3.5">
+      <animateMotion dur="2.4s" repeatCount="indefinite" path="M240 191 L300 240"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.4s" begin="0.3s" repeatCount="indefinite" path="M240 241 L300 240"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="0.3s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.4s" begin="0.6s" repeatCount="indefinite" path="M240 291 L300 240"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="0.6s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.4s" begin="0.9s" repeatCount="indefinite" path="M240 341 L300 240"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="0.9s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.4s" begin="1.2s" repeatCount="indefinite" path="M240 391 L300 240"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="1.2s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.4s" begin="1.5s" repeatCount="indefinite" path="M240 441 L300 240"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="1.5s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.4s" begin="1.8s" repeatCount="indefinite" path="M240 491 L300 240"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="1.8s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.4s" begin="2.1s" repeatCount="indefinite" path="M240 541 L300 240"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="2.1s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- Adapter → Sanitize (a longer arc) -->
+  <g fill="#10b981" filter="url(#glow)">
+    <circle r="4">
+      <animateMotion dur="1.8s" repeatCount="indefinite" path="M460 500 C 510 500, 510 200, 560 200"/>
+    </circle>
+    <circle r="4">
+      <animateMotion dur="1.8s" begin="0.6s" repeatCount="indefinite" path="M460 500 C 510 500, 510 200, 560 200"/>
+    </circle>
+    <circle r="4">
+      <animateMotion dur="1.8s" begin="1.2s" repeatCount="indefinite" path="M460 500 C 510 500, 510 200, 560 200"/>
+    </circle>
+  </g>
+
+  <!-- Pipeline vertical flow (4 segments) -->
+  <g fill="#f59e0b" filter="url(#glow)">
+    <circle r="3.5">
+      <animateMotion dur="1.0s" repeatCount="indefinite" path="M640 230 L640 250"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="1.0s" begin="0.25s" repeatCount="indefinite" path="M640 310 L640 330"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="1.0s" begin="0.5s" repeatCount="indefinite" path="M640 390 L640 410"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="1.0s" begin="0.75s" repeatCount="indefinite" path="M640 470 L640 490"/>
+    </circle>
+  </g>
+
+  <!-- Deep Analyze → LLM/KB (bi-directional shimmer) -->
+  <g fill="#a855f7" filter="url(#glow)">
+    <circle r="3.5">
+      <animateMotion dur="1.6s" repeatCount="indefinite" path="M720 440 L820 200"/>
+    </circle>
+    <circle r="4">
+      <animateMotion dur="1.6s" begin="0.4s" repeatCount="indefinite" path="M720 440 L820 285"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="1.6s" begin="0.8s" repeatCount="indefinite" path="M820 285 L720 440"/>
+    </circle>
+  </g>
+
+  <!-- Intelligence → Outputs -->
+  <g fill="#ec4899" filter="url(#glow)">
+    <circle r="3.5">
+      <animateMotion dur="1.4s" repeatCount="indefinite" path="M980 200 L1060 200"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="1.4s" begin="0.2s" repeatCount="indefinite" path="M980 285 L1060 285"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="1.4s" begin="0.4s" repeatCount="indefinite" path="M980 380 L1060 380"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="1.4s" begin="0.6s" repeatCount="indefinite" path="M980 460 L1060 460"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="1.4s" begin="0.8s" repeatCount="indefinite" path="M980 540 L1060 540"/>
+    </circle>
+  </g>
+
+  <!-- Pipeline tail → Outputs (action items & health long arcs) -->
+  <g fill="#ec4899" filter="url(#glow)">
+    <circle r="3.5">
+      <animateMotion dur="2.2s" repeatCount="indefinite" path="M720 520 C 880 580, 950 560, 1060 540"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.2s" begin="0.7s" repeatCount="indefinite" path="M720 520 C 880 580, 950 560, 1060 540"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.2s" begin="1.4s" repeatCount="indefinite" path="M720 520 C 880 580, 950 560, 1060 540"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.2s" repeatCount="indefinite" path="M720 520 C 880 540, 950 380, 1060 380"/>
+    </circle>
+    <circle r="3.5">
+      <animateMotion dur="2.2s" begin="1.1s" repeatCount="indefinite" path="M720 520 C 880 540, 950 380, 1060 380"/>
+    </circle>
+  </g>
+
+  <!-- ========== Sanitize-first banner ========== -->
+  <g transform="translate(40,608)">
+    <rect width="1200" height="84" rx="12" fill="#0d1117" stroke="#30363d"/>
+    <text x="24" y="32" font-size="13" font-weight="700" fill="#f59e0b" letter-spacing="2">🛡  SANITIZE-FIRST GUARANTEE</text>
+    <text x="24" y="56" font-size="11" fill="#8b949e">Every byte that reaches the LLM (local or cloud) is pre-scrubbed: $6$/$9$ hashes · SSH keys · SNMP communities · RADIUS secrets · public IPv4/IPv6 → redacted.</text>
+    <text x="24" y="72" font-size="11" fill="#8b949e">Local-first by default. No API keys needed. No telemetry. Your configs and logs never leave the host unless you explicitly enable Claude.</text>
+
+    <g transform="translate(880,18)">
+      <rect width="290" height="50" rx="8" fill="#161b22" stroke="#30363d"/>
+      <text x="14" y="20" font-size="10" font-weight="700" fill="#22d3ee" letter-spacing="1">RUN MODES</text>
+      <text x="14" y="36" font-size="10" fill="#8b949e">netlog-ai serve · netlog-ai mcp · netlog-ai analyze</text>
+    </g>
+  </g>
+
+  <!-- Legend dot pulse animation -->
+  <g transform="translate(640,700)" text-anchor="middle">
+    <text font-size="10" fill="#6b7280">github.com/gesh75/netlog-ai · MIT · 139 tests passing</text>
+  </g>
+</svg>

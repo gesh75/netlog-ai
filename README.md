@@ -142,6 +142,15 @@ Each bundle includes intentional configuration gaps (missing BFD, no LLDP on som
 
 ## Architecture
 
+<p align="center">
+  <img src="docs/architecture.svg" alt="netlog-ai animated architecture diagram — Sources → Adapters → Pipeline → Intelligence → Outputs" width="100%">
+</p>
+
+> **Flow:** any source (Kibana, Splunk, Loki, syslog, LibreNMS, FRR, file) → `SourceManager` adapter → **sanitize → classify → prioritize → deep-analyze → score** → outputs (Web UI, MCP server, reports, topology, copy-pastable CLI). Every byte that touches the LLM is scrubbed first.
+
+<details>
+<summary>ASCII fallback (for terminals / RSS readers)</summary>
+
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │                  Browser (vanilla JS, no build)                     │
@@ -159,6 +168,8 @@ Each bundle includes intentional configuration gaps (missing BFD, no LLDP on som
 │  Stdin/raw                                                          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+</details>
 
 ### Module layout
 
