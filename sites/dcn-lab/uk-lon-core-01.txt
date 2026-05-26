@@ -1,0 +1,55 @@
+frr version 9.1
+frr defaults traditional
+hostname uk-lon-core-01
+log syslog informational
+
+interface lo
+ ip address 10.255.0.3/32
+
+interface eth0
+ ip ospf area 0
+ ip ospf hello-interval 5
+ ip ospf dead-interval 20
+
+router ospf
+ ospf router-id 10.255.0.3
+ passive-interface lo
+
+router bgp 65003
+ bgp router-id 10.200.0.13
+ bgp log-neighbor-changes
+ no bgp ebgp-requires-policy
+ neighbor 10.200.0.11 remote-as 65001
+ neighbor 10.200.0.11 description de-fra-core-01
+ neighbor 10.200.0.11 timers 10 30
+ neighbor 10.200.0.14 remote-as 65004
+ neighbor 10.200.0.14 description nl-ams-core-01
+ neighbor 10.200.0.14 timers 10 30
+ neighbor 10.200.0.15 remote-as 65005
+ neighbor 10.200.0.15 description us-nyc-core-01
+ neighbor 10.200.0.15 timers 10 30
+ neighbor 10.200.0.22 remote-as 65007
+ neighbor 10.200.0.22 description uk-lon-edge-01
+ neighbor 10.200.0.22 timers 10 30
+ neighbor 10.200.0.31 remote-as 65010
+ neighbor 10.200.0.31 description uk-lon-dist-01
+ neighbor 10.200.0.31 timers 10 30
+ !
+ address-family ipv4 unicast
+  network 10.20.1.0/24
+  network 10.255.0.3/32
+  neighbor 10.200.0.11 activate
+  neighbor 10.200.0.11 soft-reconfiguration inbound
+  neighbor 10.200.0.14 activate
+  neighbor 10.200.0.14 soft-reconfiguration inbound
+  neighbor 10.200.0.15 activate
+  neighbor 10.200.0.15 soft-reconfiguration inbound
+  neighbor 10.200.0.22 activate
+  neighbor 10.200.0.22 soft-reconfiguration inbound
+  neighbor 10.200.0.31 activate
+  neighbor 10.200.0.31 soft-reconfiguration inbound
+ exit-address-family
+
+ip route 10.20.1.0/24 Null0
+
+line vty

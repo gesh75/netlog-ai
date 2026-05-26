@@ -82,5 +82,6 @@
       "orig_bytes": 2986,
       "sanitized_bytes": 2186
     }
-  ]
+  ],
+  "default_link_speed": "10G"
 }

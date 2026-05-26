@@ -56,7 +56,7 @@ for the full reference.
 | 🧠 **Deep analyze** | Top-N items get an LLM-written root-cause + risk + remediation playbook |
 | 🛡️ **Sanitize-first** | Every config/log payload is scrubbed (`$6$`, `$9$`, SSH keys, SNMP, RADIUS, public IPs) before LLM call |
 | 📈 **Health score** | Weighted formula → 0–100 + A/B/C/D/F + sparkline trend |
-| 🗺️ **Topology** | D3 force-directed map, inferred from configs (BGP peers, MLAG, interface descriptions, subnet co-membership) |
+| 🗺️ **Topology (multi-layer)** | Cytoscape.js + ELK layered renderer — PHYSICAL · BGP · OSPF · VXLAN as separate views over the same fabric, attributes (AS / RID / VTEP) on nodes, speed/area on edges |
 | 🤖 **Copilot** | Ask free-form questions, grounded in the selected site's configs |
 | 🔍 **Post-mortem search** | Grep a pattern across every device in a site in one shot |
 | 📄 **Report export** | Markdown / HTML / CSV / PDF + site documentation in 3 formats |
@@ -131,14 +131,46 @@ Auto-detected via TCP `:12434` first, then Unix sockets (`~/Library/Containers/c
 
 ## Bundled demo sites
 
-Two **fully synthetic** site bundles ship in `sites/` so you can exercise every feature out of the box. These are not derived from any real network — they're hand-built configs designed to demonstrate the analyzer's full feature set.
+Four **fully synthetic** site bundles ship in `sites/` so you can exercise every feature out of the box. These are not derived from any real network — they're hand-built configs designed to demonstrate the analyzer's full feature set.
 
 | Site | Devices | Vendors | What it shows |
 |------|---------|---------|----|
 | `lab-alpha` | 5 (2 SRX HA pair + 1 MX router + 2 EOS switches) | Junos + EOS | Cross-vendor edge, chassis-cluster, MLAG |
 | `lab-bravo` | 6 (1 SRX firewall + 2 MX spines + 3 EX leaves) | Junos | Spine/leaf fabric, iBGP full mesh |
+| `clab-clos-evpn` | 9 (3 spines + 6 leaves) | **Nokia SRL + Arista cEOS + FRR** | Mixed-vendor Clos EVPN-VXLAN fabric, L2/L3 VNIs, route reflectors |
+| `dcn-lab` | 10 (5 cores + 3 edges + 2 dists) | FRR | Multi-POP backbone (DE-FRA · UK-LON · NL-AMS · US-NYC), eBGP + OSPF area 0 |
 
 Each bundle includes intentional configuration gaps (missing BFD, no LLDP on some access switches, IoT VLAN without an L3 interface) so the analyzer's deep-analysis pipeline produces concrete, actionable findings.
+
+## Multi-layer topology
+
+The topology view stacks four protocol overlays over the same fabric — each with the data that's actually relevant to that protocol. Drag a node to pin it; positions persist across layer toggles (BGP, OSPF, VXLAN all follow the L1/L3 layout). Reset Layout reruns ELK from scratch. Full reference: [docs/TOPOLOGY.md](docs/TOPOLOGY.md).
+
+- **PHYSICAL** — node label: `hostname`; edge: `Et1` · `eth3` · `et1/3` at each end, link speed (e.g. `10G`, `100G`) at midpoint parallel to the line; IPs revealed via the **Show IPs** toggle. Solid blue.
+- **BGP** — node label: `hostname · AS65001`; edge: `EBGP` / `IBGP` tag only (AS already on each node). Purple; eBGP solid w/ arrow, iBGP dashed.
+- **OSPF** — node label: `hostname · RID 10.0.0.1`; edge: `area 0` (per-adjacency). Green dashed.
+- **VXLAN** — node label: `hostname · VTEP 10.255.1.4`; edge: `VNI 10010,10020,10030` (only where VNIs differ). Coral dashed.
+
+When a layer has no edges anywhere on the site (e.g. OSPF on a pure-BGP fabric), the view shows the devices as a list with an explicit empty-state banner instead of silently falling back.
+
+### Speed inference
+
+Link speed is resolved in this order:
+
+1. **Explicit config directive** — EOS/IOS `speed 100g`, SRL `port-speed 100G`, Junos `gigether-options speed 100g`.
+2. **Interface-name convention** — `HundredGigE*` → 100G, `TenGig*` / `xe-*` → 10G, `GigabitEthernet*` / `ge-*` → 1G, `et-*` → 40G, `mge-*` → 100G. Skipped for ambiguous names like `Ethernet1` / `eth1`.
+3. **Site default** — `manifest.json` may declare `"default_link_speed": "10G"` (used by all four bundled sites for the docker veth links).
+
+The link rate displayed is `min(src_speed, dst_speed)` — mismatches are surfaced so you can act on them.
+
+### Multi-vendor parsing coverage
+
+The topology engine ingests configs from every shipped sample:
+
+- **Junos** — `set interfaces ... family inet address ...`, `gigether-options speed`, OSPF area, chassis-cluster, BGP `local-as` / `peer-as`.
+- **Arista EOS** — `interface EthernetN { ip address ... speed ... }`, `router bgp`, `vxlan source-interface`, OSPF process.
+- **Nokia SRL** — `interface ethernet-1/X { subinterface 0 { ipv4 { address ... } } }`, `system0` loopback as implicit VTEP when `afi-safi evpn` is signaled.
+- **FRR** — Quagga-style block syntax, `interface lo` as implicit VTEP when `advertise-all-vni` is present, `vrf X { vni Y }` for L3 VNIs.
 
 ## Architecture
 

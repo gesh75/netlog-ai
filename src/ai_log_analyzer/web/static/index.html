@@ -14,6 +14,8 @@
      CORS mode (D3 is served with permissive CORS). -->
 <link rel="preconnect" href="https://d3js.org" crossorigin>
 <link rel="dns-prefetch" href="https://d3js.org">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <!-- PWA: when added to iOS / Android home screen, launch full-screen with status bar tinted to match the dark theme -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -826,6 +828,37 @@
   }
   .topo-legend-sep { color: var(--border-hi); padding: 0 4px; }
 
+  /* ── Topology layer chips (multi-layer selector) ───────────────────── */
+  .topo-layer-row {
+    display: flex; flex-flow: row wrap; gap: 6px; align-items: center;
+    padding: 6px 10px; margin: 0 0 8px;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .topo-layer-row > button { width: auto !important; flex: 0 0 auto; }
+  .topo-chip {
+    /* width:auto + flex:0 0 auto overrides the panel-level `button { width:100% }`
+       rule so chips stay pill-sized and lay out inline. */
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border-hi); border-radius: 999px;
+    padding: 4px 12px; font: 11px/1 ui-monospace, monospace; cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    width: auto !important; flex: 0 0 auto; display: inline-flex; align-items: center;
+  }
+  .topo-chip:hover { color: var(--fg); border-color: var(--accent-2); }
+  .topo-chip:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .topo-chip.active {
+    background: var(--accent); color: #0d1117; border-color: var(--accent);
+    font-weight: 600;
+  }
+  .topo-chip-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--muted); font: 11px ui-monospace, monospace;
+    padding: 4px 10px; margin-left: auto;
+  }
+  .topo-chip-toggle input { accent-color: var(--accent); }
+  #topo-cy { width: 100%; }
+  #topo-cy canvas { display: block; outline: none; }
+
   /* ── Topology animation ─────────────────────────────────────────────── */
   @keyframes pulseCritical {
     0%   { r: 16; filter: drop-shadow(0 0 0 rgba(248,81,73,0)); }
@@ -1095,7 +1128,7 @@
         <div class="side-section-body">
           <label for="source">Source</label>
           <select id="source" aria-label="Log source">
-            <option value="frr">FRR Lab Containers</option>
+            <option value="frr">FRR / clab Lab Containers</option>
             <option value="raw">Paste Raw Logs</option>
             <option value="file">File Path</option>
           </select>
@@ -1167,6 +1200,7 @@
             <option value="frr">FRR</option>
             <option value="junos">Junos</option>
             <option value="eos">Arista EOS</option>
+            <option value="srl">Nokia SR Linux</option>
           </select>
           <button id="opt-btn" class="secondary">⚙️ Analyze + Suggest Patches</button>
         </div>
@@ -1367,7 +1401,26 @@
 
     <div class="panel" id="topo-panel" style="display:none;">
       <h2>🗺️ Topology Map</h2>
-      <p class="row-msg" style="margin:0 0 8px;">Animated D3 force-directed layout — <strong>drag nodes</strong> to rearrange, <strong>scroll</strong> to zoom, <strong>hover</strong> for device details.</p>
+      <p class="row-msg" style="margin:0 0 8px;">Pick a <strong>layer</strong> below — devices are tiered by role (core → edge → dist → leaf). <strong>Drag</strong> any node to pin it; pins persist per site/layer in your browser. <strong>Reset Layout</strong> recomputes from scratch.</p>
+      <!-- Layer chips — single-select. Order matches LAYER_ORDER in topology.py. -->
+      <div id="topo-layer-chips" class="topo-layer-row" role="tablist" aria-label="Topology layer selector">
+        <button class="topo-chip active" data-layer="physical" role="tab" aria-selected="true"
+                title="L1 / L3 view: interface names, IP addresses, descriptions">PHYSICAL</button>
+        <button class="topo-chip"        data-layer="bgp"      role="tab" aria-selected="false"
+                title="BGP sessions: ASNs, type (iBGP/eBGP), address families, VRF">BGP</button>
+        <button class="topo-chip"        data-layer="ospf"     role="tab" aria-selected="false"
+                title="OSPF adjacencies: area, router-IDs, timers, cost">OSPF</button>
+        <button class="topo-chip"        data-layer="vxlan"    role="tab" aria-selected="false"
+                title="VXLAN overlay: VTEPs, L2/L3 VNIs">VXLAN</button>
+        <span class="topo-legend-sep">·</span>
+        <button id="topo-reset-layout" class="tiny secondary" aria-label="Reset layout — clear pinned positions for this site/layer">↺ Reset Layout</button>
+        <label class="topo-chip-toggle" title="Group devices by POP/region when manifest provides one">
+          <input type="checkbox" id="topo-group-pop" checked> Group by POP
+        </label>
+        <label class="topo-chip-toggle" title="PHYSICAL layer: show interface IP addresses at each endpoint (off by default to keep dense fabrics readable)">
+          <input type="checkbox" id="topo-show-ips"> Show IPs
+        </label>
+      </div>
       <!-- Legend — semantic colors mirror the rest of the app -->
       <div class="topo-legend" role="list" aria-label="Topology legend">
         <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#bc8cff;"></span>Firewall</span>
@@ -1379,8 +1432,8 @@
         <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#ff7b72;"></span>High finding</span>
         <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#d29922;"></span>Medium finding</span>
       </div>
-      <svg id="topo-svg" width="100%" height="500"
-           style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;"></svg>
+      <div id="topo-empty-banner" style="display:none;margin:6px 0 8px;padding:8px 12px;background:rgba(210,153,34,0.08);border:1px solid #d29922;border-radius:6px;color:#d29922;font-size:13px;"></div>
+      <div id="topo-cy" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;height:760px;"></div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
         <button id="export-mermaid" class="tiny secondary" aria-label="Copy Mermaid diagram to clipboard">📋 Copy Mermaid</button>
         <button id="export-dot"     class="tiny secondary" aria-label="Copy Graphviz DOT diagram to clipboard">📋 Copy Graphviz DOT</button>
@@ -1453,10 +1506,15 @@
   </section>
 </main>
 
-<!-- `defer` keeps execution order (D3 before app.js) while letting the parser
-     work uninterrupted. Both scripts run after DOMContentLoaded, which the
-     app's init handler already expects. -->
+<!-- `defer` keeps execution order (D3 → cytoscape → elkjs → cytoscape-elk → app.js)
+     while letting the parser work uninterrupted. All scripts run after
+     DOMContentLoaded, which the app's init handler already expects.
+     - D3 is still used for a few small renderers; cytoscape is the topology engine.
+     - elkjs must load before cytoscape-elk (which registers the adapter). -->
 <script src="https://d3js.org/d3.v7.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-elk@2.2.0/dist/cytoscape-elk.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>
