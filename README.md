@@ -187,8 +187,13 @@ from ai_log_analyzer.adapters.tfsm_auto import auto_parse
 result = auto_parse(raw_cli_output, filter_hint="bgp_summary", min_score=40.0)
 ```
 
+<p align="center">
+  <img src="demo/tfsm_demo.gif" alt="tfsm_fire auto-detect demo — paste Cisco LLDP, IOS show version, FRR BGP summary; each picks the right template and scores 78–89/100" width="100%">
+</p>
+
 See [`docs/TFSM_AUTO_PARSER.md`](docs/TFSM_AUTO_PARSER.md) for the API, scoring guide,
-and filter-hint reference.
+and filter-hint reference. The full WebM video is [`demo/tfsm_demo.webm`](demo/tfsm_demo.webm)
+(19s, 311 KB) and the recording is reproducible via [`demo/record_tfsm_demo.sh`](demo/record_tfsm_demo.sh).
 
 ## Architecture
 
