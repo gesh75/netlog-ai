@@ -172,6 +172,24 @@ The topology engine ingests configs from every shipped sample:
 - **Nokia SRL** — `interface ethernet-1/X { subinterface 0 { ipv4 { address ... } } }`, `system0` loopback as implicit VTEP when `afi-safi evpn` is signaled.
 - **FRR** — Quagga-style block syntax, `interface lo` as implicit VTEP when `advertise-all-vni` is present, `vrf X { vni Y }` for L3 VNIs.
 
+### Auto-detection fallback parser (optional)
+
+For arbitrary `show` output where the platform isn't known up-front, install the `parse`
+extra to enable [tfsm_fire](https://github.com/scottpeterman/tfsm_fire) — it scores every
+TextFSM template in a 700-template DB and returns the best match:
+
+```bash
+pip install -e ".[parse]"
+```
+
+```python
+from ai_log_analyzer.adapters.tfsm_auto import auto_parse
+result = auto_parse(raw_cli_output, filter_hint="bgp_summary", min_score=40.0)
+```
+
+See [`docs/TFSM_AUTO_PARSER.md`](docs/TFSM_AUTO_PARSER.md) for the API, scoring guide,
+and filter-hint reference.
+
 ## Architecture
 
 <p align="center">

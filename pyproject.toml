@@ -35,7 +35,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.5"]
 mcp = ["mcp>=1.0"]
-all = ["mcp>=1.0"]
+# Auto-detection parser for arbitrary CLI output (scottpeterman/tfsm_fire).
+# Pulls in textfsm + a SQLite-backed template engine. ~600KB template DB is
+# auto-downloaded to ~/.cache/netlog-ai/ on first use — see docs/TFSM_AUTO_PARSER.md
+parse = ["tfsm-fire>=0.1.0"]
+all = ["mcp>=1.0", "tfsm-fire>=0.1.0"]
 
 [project.urls]
 Homepage = "https://github.com/gesh75/netlog-ai"
