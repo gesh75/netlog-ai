@@ -105,7 +105,12 @@ def frr_docker_logs(
             yield ev
 
 
-def list_lab_containers(prefix_filter: tuple[str, ...] = ("de-", "uk-", "nl-", "us-")) -> list[str]:
+def list_lab_containers(
+    prefix_filter: tuple[str, ...] = (
+        "de-", "uk-", "nl-", "us-",  # original FRR site-coded lab
+        "clab-",                     # containerlab multi-vendor fabric (clab-clos-evpn-*, etc.)
+    ),
+) -> list[str]:
     """Return running containers matching lab naming prefixes."""
     if not shutil.which("docker"):
         return []

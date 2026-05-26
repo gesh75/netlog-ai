@@ -1,0 +1,144 @@
+{
+  "site": "CLAB-CLOS-EVPN",
+  "vendor": "multi (Nokia SRL + Arista cEOS + FRR)",
+  "topology": "Clos EVPN-VXLAN fabric \u2014 3 spines, 6 leafs, 6 hosts",
+  "fabric": "clos-evpn",
+  "devices": [
+    {
+      "hostname": "spine1",
+      "file": "spine1.txt",
+      "platform": "srl",
+      "vendor": "nokia-srl",
+      "function": "router",
+      "function_code": "rt",
+      "role": "spine",
+      "rack": null,
+      "redacted": 3,
+      "by_rule": {
+        "openssh-host-key": 2,
+        "certificate-block": 1
+      },
+      "orig_bytes": 74920,
+      "sanitized_bytes": 73326
+    },
+    {
+      "hostname": "spine2",
+      "file": "spine2.txt",
+      "platform": "eos",
+      "vendor": "arista-eos",
+      "function": "router",
+      "function_code": "rt",
+      "role": "spine",
+      "rack": null,
+      "redacted": 0,
+      "by_rule": {},
+      "orig_bytes": 3737,
+      "sanitized_bytes": 3737
+    },
+    {
+      "hostname": "spine3",
+      "file": "spine3.txt",
+      "platform": "frr",
+      "vendor": "frr",
+      "function": "router",
+      "function_code": "rt",
+      "role": "spine",
+      "rack": null,
+      "redacted": 0,
+      "by_rule": {},
+      "orig_bytes": 2537,
+      "sanitized_bytes": 2537
+    },
+    {
+      "hostname": "leaf1",
+      "file": "leaf1.txt",
+      "platform": "eos",
+      "vendor": "arista-eos",
+      "function": "switch",
+      "function_code": "sw",
+      "role": "leaf",
+      "rack": "rack-1",
+      "redacted": 0,
+      "by_rule": {},
+      "orig_bytes": 3430,
+      "sanitized_bytes": 3430
+    },
+    {
+      "hostname": "leaf2",
+      "file": "leaf2.txt",
+      "platform": "srl",
+      "vendor": "nokia-srl",
+      "function": "switch",
+      "function_code": "sw",
+      "role": "leaf",
+      "rack": "rack-1",
+      "redacted": 3,
+      "by_rule": {
+        "openssh-host-key": 2,
+        "certificate-block": 1
+      },
+      "orig_bytes": 71367,
+      "sanitized_bytes": 69781
+    },
+    {
+      "hostname": "leaf3",
+      "file": "leaf3.txt",
+      "platform": "frr",
+      "vendor": "frr",
+      "function": "switch",
+      "function_code": "sw",
+      "role": "leaf",
+      "rack": "rack-2",
+      "redacted": 0,
+      "by_rule": {},
+      "orig_bytes": 2061,
+      "sanitized_bytes": 2061
+    },
+    {
+      "hostname": "leaf4",
+      "file": "leaf4.txt",
+      "platform": "eos",
+      "vendor": "arista-eos",
+      "function": "switch",
+      "function_code": "sw",
+      "role": "leaf",
+      "rack": "rack-2",
+      "redacted": 0,
+      "by_rule": {},
+      "orig_bytes": 3430,
+      "sanitized_bytes": 3430
+    },
+    {
+      "hostname": "leaf5",
+      "file": "leaf5.txt",
+      "platform": "srl",
+      "vendor": "nokia-srl",
+      "function": "switch",
+      "function_code": "sw",
+      "role": "leaf",
+      "rack": "rack-3",
+      "redacted": 3,
+      "by_rule": {
+        "openssh-host-key": 2,
+        "certificate-block": 1
+      },
+      "orig_bytes": 71367,
+      "sanitized_bytes": 69781
+    },
+    {
+      "hostname": "leaf6",
+      "file": "leaf6.txt",
+      "platform": "frr",
+      "vendor": "frr",
+      "function": "switch",
+      "function_code": "sw",
+      "role": "leaf",
+      "rack": "rack-3",
+      "redacted": 0,
+      "by_rule": {},
+      "orig_bytes": 2073,
+      "sanitized_bytes": 2073
+    }
+  ],
+  "default_link_speed": "10G"
+}

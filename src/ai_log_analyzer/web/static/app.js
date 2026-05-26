@@ -1262,7 +1262,67 @@ function renderOptimize(r) {
 // ── Last site analysis result (for report exports) ────────────────────────────
 let lastSiteResult = null;
 
-// ── Topology rendering (D3 force-directed, animated) ─────────────────────────
+// ── Topology rendering (cytoscape + ELK layered layout) ──────────────────────
+//
+// State lives in module-scoped vars so the layer chips can re-render without
+// re-fetching from the API. Pinned positions are persisted in localStorage
+// keyed by `${siteId}::${layer}` — drag a node, refresh, stays put.
+let _topoState = {
+  siteId: null,       // lowercase id matching the API
+  topo: null,         // the JSON returned by /api/topology
+  layer: "physical",  // active layer chip
+  cy: null,           // cytoscape instance (null until first render)
+  groupByPop: true,   // POP compound nodes on/off
+  showIps: false,     // PHYSICAL: hide IPs by default — toggle to reveal
+};
+const TOPO_LAYERS = ["physical", "bgp", "ospf", "vxlan"];
+
+// Lower = closer to the top in the layered layout. Anything not listed gets
+// MAX so it sinks to the bottom (where hosts/unknowns naturally belong).
+const TIER_RANK = {
+  superspine: 0, spine: 1, leaf: 2,
+  core: 0,      edge: 1,  dist: 2,
+  fw: 0,        rt: 1,    sw: 2,
+};
+
+// Pins are shared across ALL layers for a given site so toggling PHYSICAL→BGP
+// keeps each node in the same position — BGP/OSPF/VXLAN inherit the L1 layout
+// instead of recomputing per layer. Old per-layer keys are auto-migrated on read.
+function _pinStorageKey(siteId, _layer) {
+  return `netlog-ai.topo.pins.${siteId}`;
+}
+function _loadPins(siteId, _layer) {
+  try {
+    const raw = localStorage.getItem(_pinStorageKey(siteId));
+    if (raw) return JSON.parse(raw);
+    // Migrate any pre-v7 per-layer pins into the merged store on first read.
+    const merged = {};
+    for (const l of ["physical", "bgp", "ospf", "vxlan"]) {
+      const legacy = localStorage.getItem(`netlog-ai.topo.pins.${siteId}.${l}`);
+      if (legacy) Object.assign(merged, JSON.parse(legacy));
+    }
+    if (Object.keys(merged).length) localStorage.setItem(_pinStorageKey(siteId), JSON.stringify(merged));
+    return merged;
+  } catch { return {}; }
+}
+function _savePin(siteId, _layer, nodeId, pos) {
+  try {
+    const key = _pinStorageKey(siteId);
+    const pins = _loadPins(siteId);
+    pins[nodeId] = { x: Math.round(pos.x), y: Math.round(pos.y) };
+    localStorage.setItem(key, JSON.stringify(pins));
+  } catch { /* quota exceeded or private mode — non-fatal */ }
+}
+function _clearPins(siteId, _layer) {
+  try {
+    localStorage.removeItem(_pinStorageKey(siteId));
+    // Also clear any leftover per-layer keys from the old scheme.
+    for (const l of ["physical", "bgp", "ospf", "vxlan"]) {
+      localStorage.removeItem(`netlog-ai.topo.pins.${siteId}.${l}`);
+    }
+  } catch { /* */ }
+}
+
 async function renderTopology(siteId) {
   setStatus(`Topology: building graph for ${siteId.toUpperCase()}…`);
   $("topo-panel").style.display = "block";
@@ -1289,119 +1349,590 @@ async function renderTopology(siteId) {
       n.finding_severity = worst;
     });
   }
-  drawD3Topology(topo);
+  _topoState.siteId = siteId.toLowerCase();
+  _topoState.topo = topo;
+  // Initialize chip handlers + reset/grouping toggle once per page.
+  _wireTopoChipsOnce();
+  // Default to PHYSICAL — falls back automatically if absent (rare).
+  const initialLayer = _firstLayerWithEdges(topo) || "physical";
+  _setActiveChip(initialLayer);
+  _topoState.layer = initialLayer;
+  await _renderCytoscape();
   setStatus(`Topology: ${topo.nodes.length} nodes / ${topo.edges.length} edges`);
 }
 
-function drawD3Topology(topo) {
-  if (typeof d3 === "undefined") {
-    setStatus("D3 not loaded — refresh the page.");
+function _firstLayerWithEdges(topo) {
+  for (const l of TOPO_LAYERS) {
+    if (topo.edges.some((e) => (e.layers || []).includes(l))) return l;
+  }
+  return null;
+}
+
+function _wireTopoChipsOnce() {
+  const row = $("topo-layer-chips");
+  if (!row || row.dataset.wired === "1") return;
+  row.dataset.wired = "1";
+  row.querySelectorAll(".topo-chip").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const layer = btn.dataset.layer;
+      if (!layer || layer === _topoState.layer) return;
+      _setActiveChip(layer);
+      _topoState.layer = layer;
+      await _renderCytoscape();
+    });
+  });
+  const reset = $("topo-reset-layout");
+  if (reset) reset.addEventListener("click", async () => {
+    if (!_topoState.siteId) return;
+    _clearPins(_topoState.siteId, _topoState.layer);
+    await _renderCytoscape();
+    toast(`Layout reset for ${_topoState.siteId.toUpperCase()} (${_topoState.layer.toUpperCase()})`, "info");
+  });
+  const grpToggle = $("topo-group-pop");
+  if (grpToggle) grpToggle.addEventListener("change", async () => {
+    _topoState.groupByPop = grpToggle.checked;
+    await _renderCytoscape();
+  });
+  const ipToggle = $("topo-show-ips");
+  if (ipToggle) ipToggle.addEventListener("change", async () => {
+    _topoState.showIps = ipToggle.checked;
+    await _renderCytoscape();
+  });
+}
+
+function _setActiveChip(layer) {
+  document.querySelectorAll("#topo-layer-chips .topo-chip").forEach((b) => {
+    const on = b.dataset.layer === layer;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+}
+
+function _colorForNode(n) {
+  if (n.finding_severity === "critical") return "#f85149";
+  if (n.finding_severity === "high")     return "#ff7b72";
+  if (n.finding_severity === "medium")   return "#d29922";
+  if (n.role === "firewall") return "#bc8cff";
+  if (n.role === "router")   return "#58a6ff";
+  if (n.role === "switch")   return "#3fb950";
+  return "#8b949e";
+}
+
+// Edge labels split across three positions to avoid the "everything piles up
+// at the midpoint" problem on dense fabrics:
+//
+//   • src-end label  — LOCAL data near the source node (its iface/IP/RID/VTEP)
+//   • tgt-end label  — REMOTE data near the target node (its iface/IP/RID/VTEP)
+//   • mid label      — SHARED data on the line (subnet, AS pair, area, VNI list)
+//
+// IP Fabric and Forward Networks use this pattern: interface descriptions are
+// shown as labels at each end of the edge, common attributes in the middle.
+// Short forms for vendor interface naming. Keeps endpoint labels skinny so they
+// fit "along the line" without colliding.
+//   Ethernet1            → Et1
+//   ethernet-1/3         → et1/3
+//   GigabitEthernet0/1   → Gi0/1
+//   TenGigE0/0/0/1       → Te0/0/0/1
+//   HundredGigE0/0/0/1   → Hu0/0/0/1
+//   FortyGigE0/0/0/1     → Fo0/0/0/1
+//   xe-0/0/1             → xe0/0/1  (Junos)
+//   ge-0/0/1             → ge0/0/1
+//   et-0/0/1             → et0/0/1
+function _shortIface(name) {
+  if (!name) return "";
+  let s = String(name);
+  s = s.replace(/^HundredGig(?:abit)?Ethernet/i, "Hu");
+  s = s.replace(/^FortyGig(?:abit)?Ethernet/i, "Fo");
+  s = s.replace(/^TwentyFiveGig(?:abit)?Ethernet/i, "Twe");
+  s = s.replace(/^TenGig(?:abit)?Ethernet|^TenGigE/i, "Te");
+  s = s.replace(/^GigabitEthernet/i, "Gi");
+  s = s.replace(/^Ethernet/i, "Et");
+  s = s.replace(/^ethernet-/, "et");
+  s = s.replace(/^xe-/i, "xe");
+  s = s.replace(/^ge-/i, "ge");
+  s = s.replace(/^et-/i, "et");
+  s = s.replace(/^mge-/i, "mge");
+  return s;
+}
+
+// Drop the CIDR mask from "10.0.1.4/31" → "10.0.1.4" so endpoint labels are
+// shorter. The mask isn't useful at the endpoint (it's the same /31 on both
+// ends and shown once on the L1 link tooltip).
+function _ipOnly(cidr) {
+  if (!cidr) return "";
+  const i = cidr.indexOf("/");
+  return i > 0 ? cidr.slice(0, i) : cidr;
+}
+
+// Format link speed e.g. "100G" / "10G" / "1G" when the parser found it on
+// either side, or when the site manifest declared a default_link_speed. Skip
+// when unknown — never invent.
+function _linkSpeed(e) {
+  const sp = e.speed || e.src_speed || e.dst_speed;
+  return sp ? String(sp) : "";
+}
+
+function _edgeLabels(e, layer) {
+  // PHYSICAL: default to IFACE NAME ONLY at each endpoint (e.g. ``Et1``) so a
+  // dense Clos fabric doesn't drown in labels. The user can toggle "Show IPs"
+  // to reveal IP at each end, or hover an edge for full detail in the tooltip.
+  // Descriptions repeat ("to spine2-ceos" on every leaf↔spine2 link) so we
+  // keep them off the canvas — visible on hover only.
+  if (layer === "physical") {
+    const showIps = !!_topoState.showIps;
+    const srcParts = [_shortIface(e.src_iface)];
+    const tgtParts = [_shortIface(e.dst_iface)];
+    if (showIps) {
+      if (e.src_ip) srcParts.push(_ipOnly(e.src_ip));
+      if (e.dst_ip) tgtParts.push(_ipOnly(e.dst_ip));
+    }
+    const mid = _linkSpeed(e); // only speed at midpoint (when present)
+    return {
+      src: srcParts.filter(Boolean).join(" "),
+      tgt: tgtParts.filter(Boolean).join(" "),
+      mid: mid || "",
+    };
+  }
+
+  // For BGP / OSPF / VXLAN: per-node attrs (AS, RID, VTEP) move to the NODE label
+  // and edges stay clean — Hurricane Electric / bgp.he.net style.
+  // Only show per-edge attrs that genuinely differ per link.
+  if (layer === "bgp") {
+    // Only iBGP/eBGP needs a tag; AS already shown on each node.
+    const tag = e.bgp_type ? e.bgp_type.toUpperCase() : "";
+    return { src: "", tgt: "", mid: tag };
+  }
+  if (layer === "ospf") {
+    // Area is per-adjacency. Skip RID (on nodes) and timers (rarely vary).
+    return {
+      src: "", tgt: "",
+      mid: e.ospf_area ? `area ${e.ospf_area}` : "",
+    };
+  }
+  if (layer === "vxlan") {
+    // VTEP shown on each node. Show VNI list only if present and short.
+    const vnis = [...(e.l2_vnis || []), ...(e.l3_vnis || [])];
+    if (!vnis.length) return { src: "", tgt: "", mid: "" };
+    const head = vnis.slice(0, 3).join(",");
+    const more = vnis.length > 3 ? ` +${vnis.length - 3}` : "";
+    return { src: "", tgt: "", mid: `VNI ${head}${more}` };
+  }
+  return { src: "", tgt: "", mid: "" };
+}
+
+// Per-layer node label — hostname plus the one most relevant attribute for
+// the active layer. Hurricane Electric pattern: AS lives on the node, not on
+// every edge it touches.
+function _nodeLabel(n, layer) {
+  const host = n.id;
+  if (layer === "bgp"   && n.asn)        return `${host}\nAS${n.asn}`;
+  if (layer === "ospf"  && n.router_id)  return `${host}\nRID ${n.router_id}`;
+  if (layer === "vxlan" && n.vtep_ip)    return `${host}\nVTEP ${n.vtep_ip}`;
+  return host;
+}
+
+// Rich tooltip text shown on edge hover — multi-line, full detail.
+function _edgeTooltip(e, layer) {
+  if (layer === "physical") {
+    const a = `${e.source}${e.src_iface ? " · " + e.src_iface : ""}${e.src_ip ? " (" + e.src_ip + ")" : ""}`;
+    const b = `${e.target}${e.dst_iface ? " · " + e.dst_iface : ""}${e.dst_ip ? " (" + e.dst_ip + ")" : ""}`;
+    return [
+      `${a}  ↔  ${b}`,
+      e.subnet ? `Subnet: ${e.subnet}` : null,
+      e.description ? `Description: ${e.description}` : null,
+    ].filter(Boolean).join("\n");
+  }
+  if (layer === "bgp") {
+    return [
+      `${e.source} (AS${e.src_asn ?? "?"})  ↔  ${e.target} (AS${e.dst_asn ?? "?"})`,
+      e.bgp_type ? `Type: ${e.bgp_type.toUpperCase()}` : null,
+      (e.bgp_afs || []).length ? `Address Families: ${e.bgp_afs.join(", ")}` : null,
+      e.bgp_vrf && e.bgp_vrf !== "default" ? `VRF: ${e.bgp_vrf}` : "VRF: default",
+      (e.src_ip || e.dst_ip) ? `Neighbor IPs: ${e.src_ip || "?"} ↔ ${e.dst_ip || "?"}` : null,
+    ].filter(Boolean).join("\n");
+  }
+  if (layer === "ospf") {
+    return [
+      `${e.source} (RID ${e.src_router_id || "?"})  ↔  ${e.target} (RID ${e.dst_router_id || "?"})`,
+      e.ospf_area ? `Area: ${e.ospf_area}` : null,
+      e.ospf_network_type ? `Network Type: ${e.ospf_network_type}` : null,
+      (e.ospf_hello != null && e.ospf_dead != null) ? `Hello: ${e.ospf_hello}s · Dead: ${e.ospf_dead}s` : null,
+      e.ospf_cost != null ? `Cost: ${e.ospf_cost}` : null,
+    ].filter(Boolean).join("\n");
+  }
+  if (layer === "vxlan") {
+    return [
+      `${e.source} (VTEP ${e.src_vtep || "?"})  ↔  ${e.target} (VTEP ${e.dst_vtep || "?"})`,
+      (e.l2_vnis || []).length ? `L2 VNIs: ${e.l2_vnis.join(", ")}` : null,
+      (e.l3_vnis || []).length ? `L3 VNIs: ${e.l3_vnis.join(", ")}` : null,
+    ].filter(Boolean).join("\n");
+  }
+  return "";
+}
+
+async function _renderCytoscape() {
+  if (typeof cytoscape === "undefined") {
+    setStatus("Cytoscape not loaded — refresh the page.");
     return;
   }
-  const svg = d3.select("#topo-svg");
-  svg.selectAll("*").remove();
-  const width = svg.node().clientWidth || 800;
-  const height = +svg.attr("height");
+  const { siteId, topo, layer, groupByPop } = _topoState;
+  if (!topo) return;
+  const container = $("topo-cy");
+  if (!container) return;
 
-  const nodes = topo.nodes.map((n) => Object.assign({}, n));
-  const links = topo.edges.map((e) => ({ source: e.source, target: e.target, label: e.label, kind: e.kind }));
+  // Filter edges to the active layer. OSPF/IGP layer with zero edges = no IGP
+  // configured anywhere on this site; render nodes only (as a visible empty
+  // state) so the user can clearly tell IGP is absent. For other layers, fall
+  // back to L1 edges so device inventory is still visible.
+  const activeEdges = topo.edges.filter((e) => (e.layers || []).includes(layer));
+  const edgesToDraw = activeEdges.length > 0
+    ? activeEdges
+    : (layer === "ospf"
+        ? []
+        : topo.edges.filter((e) => (e.layers || []).includes("l1")));
 
-  const sim = d3.forceSimulation(nodes)
-    .force("link", d3.forceLink(links).id((d) => d.id).distance(110).strength(0.5))
-    .force("charge", d3.forceManyBody().strength(-380))
-    .force("center", d3.forceCenter(width / 2, height / 2))
-    .force("collide", d3.forceCollide().radius(40));
-
-  const g = svg.append("g");
-
-  // Pan + zoom
-  svg.call(d3.zoom().scaleExtent([0.3, 3]).on("zoom", (event) => g.attr("transform", event.transform)));
-
-  // Links
-  const link = g.append("g").selectAll("line").data(links).enter()
-    .append("line").attr("class", "topo-link");
-
-  // Nodes (g per node — for circle + label)
-  const node = g.append("g").selectAll("g.node").data(nodes).enter()
-    .append("g").attr("class", "node").call(
-      d3.drag()
-        .on("start", (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-        .on("drag",  (event, d) => { d.fx = event.x; d.fy = event.y; })
-        .on("end",   (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
-    );
-
-  function fillFor(d) {
-    if (d.finding_severity === "critical") return "#f85149";
-    if (d.finding_severity === "high")     return "#ff7b72";
-    if (d.finding_severity === "medium")   return "#d29922";
-    if (d.role === "firewall") return "#bc8cff";
-    if (d.role === "router")   return "#58a6ff";
-    if (d.role === "switch")   return "#3fb950";
-    return "#8b949e";
-  }
-  function classFor(d) {
-    if (d.finding_severity === "critical") return "node-critical";
-    if (d.finding_severity === "high")     return "node-high";
-    return "";
+  // Empty-state banner — explicit "no IGP / no VXLAN configured" message so
+  // empty layers don't look like a rendering bug. Only fires when the layer
+  // genuinely has zero edges (i.e. not when we successfully fell back to L1).
+  const banner = document.getElementById("topo-empty-banner");
+  if (banner) {
+    if (activeEdges.length === 0 && layer !== "physical") {
+      const layerName = {
+        ospf: "OSPF (or any internal IGP)",
+        bgp: "BGP",
+        vxlan: "VXLAN / EVPN",
+      }[layer] || layer.toUpperCase();
+      banner.textContent =
+        `No ${layerName} configured on this site — showing ${topo.nodes.length} devices only.`;
+      banner.style.display = "block";
+    } else {
+      banner.style.display = "none";
+      banner.textContent = "";
+    }
   }
 
-  // Richer native tooltip: hostname · role · platform · protocols · finding sev.
-  function nodeTooltip(d) {
-    const protos = [];
-    if (d.has_bgp)    protos.push("BGP");
-    if (d.has_evpn)   protos.push("EVPN");
-    if (d.has_vxlan)  protos.push("VXLAN");
-    if (d.isp_uplink) protos.push("ISP-uplink");
-    const lines = [
-      `${d.id}`,
-      `Role: ${d.role || "?"}`,
-      d.platform ? `Platform: ${d.platform}` : null,
-      protos.length ? `Protocols: ${protos.join(", ")}` : null,
-      d.finding_severity ? `Finding: ${d.finding_severity.toUpperCase()}` : null,
-      "(drag to move · scroll to zoom)",
-    ].filter(Boolean);
-    return lines.join("\n");
-  }
+  const pins = _loadPins(siteId, layer);
+  const popsPresent = groupByPop && topo.nodes.some((n) => n.pop);
 
-  node.append("circle")
-    .attr("r", 16)
-    .attr("fill", fillFor)
-    .attr("stroke", "#0d1117").attr("stroke-width", 2)
-    .attr("class", classFor)
-    .append("title").text(nodeTooltip);
-
-  // Role glyph inside circle
-  node.append("text").attr("class", "topo-role")
-    .attr("text-anchor", "middle").attr("dy", 3)
-    .text((d) => {
-      if (d.role === "firewall") return "FW";
-      if (d.role === "router")   return "RT";
-      if (d.role === "switch")   return "SW";
-      return "?";
+  // Build cytoscape elements. POP compound nodes are added as parents and the
+  // node `parent` field wires children under them.
+  const elements = [];
+  if (popsPresent) {
+    const seen = new Set();
+    topo.nodes.forEach((n) => {
+      if (n.pop && !seen.has(n.pop)) {
+        seen.add(n.pop);
+        elements.push({
+          data: { id: `pop:${n.pop}`, label: n.pop.toUpperCase(), isPop: true },
+          classes: "pop-group",
+        });
+      }
     });
-
-  // Label below
-  node.append("text").attr("class", "topo-label")
-    .attr("text-anchor", "middle").attr("dy", 30)
-    .text((d) => d.id);
-
-  // Tag pills (BGP/EVPN/ISP)
-  node.append("text").attr("class", "topo-role").attr("text-anchor", "middle").attr("dy", 44)
-    .text((d) => {
-      const t = [];
-      if (d.has_bgp)    t.push("BGP");
-      if (d.has_evpn)   t.push("EVPN");
-      if (d.has_vxlan)  t.push("VXLAN");
-      if (d.isp_uplink) t.push("ISP");
-      return t.join(" · ");
-    });
-
-  sim.on("tick", () => {
-    link
-      .attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y)
-      .attr("x2", (d) => d.target.x).attr("y2", (d) => d.target.y);
-    node.attr("transform", (d) => `translate(${d.x},${d.y})`);
+  }
+  topo.nodes.forEach((n) => {
+    const node = {
+      data: {
+        id: n.id, label: _nodeLabel(n, layer), role: n.role || "unknown",
+        tier: n.tier || "", pop: n.pop || "", asn: n.asn,
+        routerId: n.router_id || "",
+        vtepIp: n.vtep_ip || "",
+        bgpAfs: n.bgp_afs || [],
+        l2vnis: n.l2_vnis || [],
+        l3vnis: n.l3_vnis || [],
+        vrfs: n.vrfs || [],
+        bgcolor: _colorForNode(n),
+        sev: n.finding_severity || "",
+        protos: [
+          n.has_bgp ? "BGP" : null,
+          n.has_ospf ? "OSPF" : null,
+          n.has_evpn ? "EVPN" : null,
+          n.has_vxlan ? "VXLAN" : null,
+          n.isp_uplink ? "ISP" : null,
+        ].filter(Boolean).join(" · "),
+      },
+      classes: n.finding_severity ? `sev-${n.finding_severity}` : "",
+    };
+    if (popsPresent && n.pop) node.data.parent = `pop:${n.pop}`;
+    const pin = pins[n.id];
+    if (pin) {
+      node.position = { x: pin.x, y: pin.y };
+      node.locked = false; // we re-lock after layout; user can still drag
+    }
+    elements.push(node);
   });
+  edgesToDraw.forEach((e, i) => {
+    const labels = _edgeLabels(e, layer);
+    elements.push({
+      data: {
+        id: `e${i}-${e.source}-${e.target}-${layer}`,
+        source: e.source, target: e.target,
+        // Three label slots: source-end, target-end, midpoint. Cytoscape
+        // styles bind to these via `source-label` / `target-label` / `label`.
+        srcLabel: labels.src,
+        tgtLabel: labels.tgt,
+        label: labels.mid,
+        tooltip: _edgeTooltip(e, layer),
+        kind: e.kind,
+        layer,
+        bgpType: e.bgp_type || "",
+      },
+      classes: `layer-${layer} kind-${e.kind}${layer === "bgp" && e.bgp_type ? " bgp-" + e.bgp_type : ""}`,
+    });
+  });
+
+  // Destroy any prior instance so we don't leak listeners / canvases.
+  if (_topoState.cy) {
+    try { _topoState.cy.destroy(); } catch { /* */ }
+    _topoState.cy = null;
+  }
+
+  const cy = cytoscape({
+    container,
+    elements,
+    style: [
+      {
+        selector: "node",
+        style: {
+          "background-color": "data(bgcolor)",
+          "border-color": "#0d1117",
+          "border-width": 2,
+          "label": "data(label)",
+          "color": "#c9d1d9",
+          "font-size": 11,
+          "font-family": "ui-monospace, monospace",
+          "text-valign": "bottom",
+          "text-margin-y": 6,
+          "text-wrap": "wrap",
+          "text-max-width": 160,
+          "line-height": 1.15,
+          "text-outline-color": "#0d1117",
+          "text-outline-width": 2,
+          "width": 36,
+          "height": 36,
+          "overlay-padding": 4,
+        },
+      },
+      {
+        selector: "node.sev-critical",
+        style: { "border-color": "#f85149", "border-width": 4 },
+      },
+      {
+        selector: "node.sev-high",
+        style: { "border-color": "#ff7b72", "border-width": 3 },
+      },
+      {
+        selector: "node.pop-group",
+        style: {
+          "background-opacity": 0.10,
+          "background-color": "#58a6ff",
+          "border-color": "#30363d",
+          "border-width": 1,
+          "border-style": "dashed",
+          "label": "data(label)",
+          "color": "#8b949e",
+          "font-size": 10,
+          "text-valign": "top",
+          "text-halign": "center",
+          "text-margin-y": -4,
+          "padding": "16px",
+          "shape": "round-rectangle",
+        },
+      },
+      {
+        selector: "edge",
+        style: {
+          "width": 1.6,
+          "line-color": "#4a5160",
+          "curve-style": "bezier",
+          // Three labels per edge: mid (shared info), source-end (local data),
+          // target-end (remote data). All axis-aligned, wrapped, with pill BGs.
+          "label": "data(label)",
+          "source-label": "data(srcLabel)",
+          "target-label": "data(tgtLabel)",
+          "font-size": 10,
+          "font-family": "ui-monospace, monospace",
+          "color": "#c9d1d9",
+          "text-wrap": "wrap",
+          "text-max-width": 200,
+          "line-height": 1.1,
+          // Labels follow the edge angle — IP Fabric / NetBrain style. Far
+          // less midpoint clutter on dense fabrics; reads naturally because
+          // the label is parallel to the line it describes.
+          "text-rotation": "autorotate",
+          // Pull endpoint labels in toward each node.
+          "source-text-offset": 36,
+          "target-text-offset": 36,
+          "source-text-margin-y": -6,
+          "target-text-margin-y": -6,
+          "text-background-color": "#0d1117",
+          "text-background-opacity": 0.85,
+          "text-background-padding": 2,
+          "text-background-shape": "round-rectangle",
+          "text-border-color": "#30363d",
+          "text-border-width": 1,
+          "text-border-opacity": 0.5,
+        },
+      },
+      {
+        // PHYSICAL = the L1/L3 combined view: muted line, IP+iface label
+        selector: "edge.layer-physical",
+        style: { "line-color": "#58a6ff", "line-style": "solid", "width": 1.6 },
+      },
+      {
+        selector: "edge.layer-bgp",
+        style: { "line-color": "#bc8cff", "line-style": "solid", "width": 2 },
+      },
+      {
+        // eBGP — directional arrow (different AS, peer-to-peer)
+        selector: "edge.layer-bgp.bgp-ebgp",
+        style: {
+          "target-arrow-shape": "triangle",
+          "target-arrow-color": "#bc8cff",
+          "curve-style": "bezier",
+        },
+      },
+      {
+        // iBGP — dashed, no arrow (same AS, fabric internal)
+        selector: "edge.layer-bgp.bgp-ibgp",
+        style: { "line-style": "dashed" },
+      },
+      {
+        selector: "edge.layer-ospf",
+        style: { "line-color": "#3fb950", "line-style": "dashed", "width": 1.6 },
+      },
+      {
+        selector: "edge.layer-vxlan",
+        style: { "line-color": "#ff7b72", "line-style": "dashed", "width": 2 },
+      },
+      {
+        selector: "edge:active",
+        style: { "line-color": "#58a6ff", "width": 3 },
+      },
+    ],
+  });
+
+  // Tooltip via cytoscape's built-in (we attach the title to the canvas element
+  // on hover; a tippy-style popper would be nicer but adds another dep).
+  cy.on("mouseover", "node", (evt) => {
+    const n = evt.target.data();
+    const lines = [
+      n.label,
+      n.role && n.role !== "unknown" ? `Role: ${n.role}` : null,
+      n.tier ? `Tier: ${n.tier}` : null,
+      n.pop ? `POP: ${n.pop.toUpperCase()}` : null,
+      n.asn ? `AS: ${n.asn}` : null,
+      n.routerId ? `Router-ID: ${n.routerId}` : null,
+      n.vtepIp ? `VTEP: ${n.vtepIp}` : null,
+      (n.bgpAfs || []).length ? `BGP AFs: ${n.bgpAfs.join(", ")}` : null,
+      (n.l2vnis || []).length ? `L2 VNIs: ${n.l2vnis.join(", ")}` : null,
+      (n.l3vnis || []).length ? `L3 VNIs: ${n.l3vnis.join(", ")}` : null,
+      (n.vrfs || []).length ? `VRFs: ${n.vrfs.join(", ")}` : null,
+      n.protos ? `Protocols: ${n.protos}` : null,
+      n.sev ? `Finding: ${n.sev.toUpperCase()}` : null,
+    ].filter(Boolean);
+    container.title = lines.join("\n");
+  });
+  cy.on("mouseout", "node", () => { container.title = ""; });
+  cy.on("mouseover", "edge", (evt) => {
+    const e = evt.target.data();
+    container.title = e.tooltip || (e.label ? `${e.label} (${e.layer.toUpperCase()})` : `Layer: ${e.layer.toUpperCase()}`);
+  });
+  cy.on("mouseout", "edge", () => { container.title = ""; });
+
+  // Pin on drag-end: locks the node's position to localStorage so refreshes
+  // / layer toggles preserve the user's arrangement.
+  cy.on("dragfree", "node", (evt) => {
+    const n = evt.target;
+    if (n.data("isPop")) return; // don't pin compound parents
+    _savePin(_topoState.siteId, _topoState.layer, n.id(), n.position());
+  });
+
+  // If we have pins for every visible node, skip the ELK layout entirely.
+  const visibleNodeIds = topo.nodes.map((n) => n.id);
+  const allPinned = visibleNodeIds.length > 0 && visibleNodeIds.every((id) => pins[id]);
+
+  if (allPinned) {
+    cy.fit(undefined, 30);
+  } else {
+    // Nested ELK layout:
+    //   - When grouped by POP: root uses `box` packing so POPs sit side-by-side
+    //     as separate clusters, and each POP-parent uses `layered DOWN` so its
+    //     devices stack by tier (core on top → edge → dist).
+    //   - When ungrouped: root uses a single `layered DOWN` pass with tier
+    //     partitioning so the whole site reads top-to-bottom by role.
+    const popCount = cy.nodes(".pop-group").length;
+    const grouped = popCount > 0;
+    const layoutOpts = {
+      name: "elk",
+      nodeDimensionsIncludeLabels: true,
+      fit: true,
+      padding: 40,
+      elk: grouped
+        ? {
+            // Root: pack POP boxes like rectangles. `box` honours each compound's
+            // own algorithm for the internal layout. Bigger spacing now to fit
+            // 3-4 line edge labels without overlap.
+            "algorithm": "box",
+            "elk.spacing.nodeNode": 110,
+            "elk.padding": "[top=30,left=30,bottom=30,right=30]",
+            "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+          }
+        : {
+            "algorithm": "layered",
+            "elk.direction": "DOWN",
+            "elk.layered.spacing.nodeNodeBetweenLayers": 180,
+            "elk.spacing.nodeNode": 130,
+            "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+            "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+            // Activate partitioning so per-node `elk.partitioning.partition`
+            // values are honored — without this, the layered algorithm picks
+            // its own layer assignment which can flip core/spine to the bottom.
+            "elk.partitioning.activate": "true",
+          },
+      // Per-node options — POP compound parents get layered-DOWN inside them;
+      // leaf nodes carry a partition hint so cores sit above edges/dists.
+      nodeLayoutOptions: (node) => {
+        if (node.data("isPop")) {
+          return {
+            "elk.algorithm": "layered",
+            "elk.direction": "DOWN",
+            "elk.layered.spacing.nodeNodeBetweenLayers": 140,
+            "elk.spacing.nodeNode": 100,
+            "elk.padding": "[top=30,left=24,bottom=24,right=24]",
+            "elk.partitioning.activate": "true",
+          };
+        }
+        const tier = node.data("tier");
+        const rank = TIER_RANK[tier];
+        if (rank !== undefined) {
+          // Used by layered. `partition` keeps nodes with same rank on same layer.
+          return { "elk.partitioning.partition": String(rank) };
+        }
+        return {};
+      },
+    };
+    try {
+      cy.layout(layoutOpts).run();
+    } catch (e) {
+      console.warn("ELK layout failed, falling back to cose:", e);
+      cy.layout({ name: "cose", animate: false, fit: true, padding: 30 }).run();
+    }
+    // After layout, re-apply any user-pinned positions (overrides ELK for those nodes).
+    Object.entries(pins).forEach(([id, pos]) => {
+      const n = cy.getElementById(id);
+      if (n && n.length) n.position(pos);
+    });
+    // Auto-pin every node now that ELK has placed them. This makes the layout
+    // sticky across layer toggles — switching BGP/OSPF/VXLAN reuses the same
+    // L1/L3 positions instead of recomputing. Reset Layout clears the cache.
+    cy.nodes().forEach((n) => {
+      if (n.data("isPop")) return;
+      _savePin(_topoState.siteId, _topoState.layer, n.id(), n.position());
+    });
+    cy.fit(undefined, 30);
+  }
+
+  _topoState.cy = cy;
 }
 
 // Flash a button to ✅ Copied! for 1.5s, then restore.
