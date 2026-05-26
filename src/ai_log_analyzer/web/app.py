@@ -273,6 +273,10 @@ def create_app() -> Flask:
         if devices is None:
             return jsonify({"error": f"site bundle not found: {safe}"}), 404
         topo = topo_mod.build_topology(safe.upper(), devices)
+        # Enrich nodes with manifest extras (tier/pop/rack/asn) so the renderer
+        # can build the layered layout and POP compound groups.
+        if manifest:
+            topo_mod.apply_manifest_metadata(topo, manifest)
         fmt = request.args.get("format", "json").lower()
         if fmt == "mermaid":
             return topo_mod.to_mermaid(topo), 200, {"content-type": "text/plain; charset=utf-8"}

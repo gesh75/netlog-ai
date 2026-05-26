@@ -1,0 +1,35 @@
+frr version 9.1
+frr defaults traditional
+hostname de-fra-dist-01
+log syslog informational
+
+interface lo
+ ip address 10.255.0.9/32
+
+interface eth0
+ ip ospf area 0
+ ip ospf hello-interval 5
+ ip ospf dead-interval 20
+
+router ospf
+ ospf router-id 10.255.0.9
+ passive-interface lo
+
+router bgp 65009
+ bgp router-id 10.200.0.33
+ bgp log-neighbor-changes
+ no bgp ebgp-requires-policy
+ neighbor 10.200.0.11 remote-as 65001
+ neighbor 10.200.0.11 description de-fra-core-01
+ neighbor 10.200.0.11 timers 10 30
+ !
+ address-family ipv4 unicast
+  network 10.90.1.0/24
+  network 10.255.0.9/32
+  neighbor 10.200.0.11 activate
+  neighbor 10.200.0.11 soft-reconfiguration inbound
+ exit-address-family
+
+ip route 10.90.1.0/24 Null0
+
+line vty

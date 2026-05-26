@@ -1,0 +1,50 @@
+frr version 9.1
+frr defaults traditional
+hostname nl-ams-core-01
+log syslog informational
+
+interface lo
+ ip address 10.255.0.4/32
+
+interface eth0
+ ip ospf area 0
+ ip ospf hello-interval 5
+ ip ospf dead-interval 20
+
+router ospf
+ ospf router-id 10.255.0.4
+ passive-interface lo
+
+router bgp 65004
+ bgp router-id 10.200.0.14
+ bgp log-neighbor-changes
+ no bgp ebgp-requires-policy
+ neighbor 10.200.0.11 remote-as 65001
+ neighbor 10.200.0.11 description de-fra-core-01
+ neighbor 10.200.0.11 timers 10 30
+ neighbor 10.200.0.12 remote-as 65002
+ neighbor 10.200.0.12 description de-fra-core-02
+ neighbor 10.200.0.12 timers 10 30
+ neighbor 10.200.0.13 remote-as 65003
+ neighbor 10.200.0.13 description uk-lon-core-01
+ neighbor 10.200.0.13 timers 10 30
+ neighbor 10.200.0.23 remote-as 65008
+ neighbor 10.200.0.23 description nl-ams-edge-01
+ neighbor 10.200.0.23 timers 10 30
+ !
+ address-family ipv4 unicast
+  network 10.30.1.0/24
+  network 10.255.0.4/32
+  neighbor 10.200.0.11 activate
+  neighbor 10.200.0.11 soft-reconfiguration inbound
+  neighbor 10.200.0.12 activate
+  neighbor 10.200.0.12 soft-reconfiguration inbound
+  neighbor 10.200.0.13 activate
+  neighbor 10.200.0.13 soft-reconfiguration inbound
+  neighbor 10.200.0.23 activate
+  neighbor 10.200.0.23 soft-reconfiguration inbound
+ exit-address-family
+
+ip route 10.30.1.0/24 Null0
+
+line vty
