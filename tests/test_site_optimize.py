@@ -150,6 +150,76 @@ def test_analyze_site_wide_falls_back_to_deterministic_on_non_json():
 
 
 @pytest.mark.unit
+def test_split_scores_present_in_deterministic_path():
+    """Deterministic path always emits fabric_design + operational_readiness scores."""
+    r = site_optimize.analyze_site_wide("Z", [
+        {"hostname": "z-fw-01", "platform": "junos", "config_text": JUNOS_FW},
+    ])
+    assert "fabric_design_score" in r
+    assert "operational_readiness_score" in r
+    assert "maturity_score" in r
+    assert 0 <= r["fabric_design_score"] <= 100
+    assert 0 <= r["operational_readiness_score"] <= 100
+
+
+@pytest.mark.unit
+def test_split_scores_categorize_correctly():
+    """isp_redundancy → fabric_design; aaa/monitoring → operational_readiness."""
+    fabric_only = [
+        {"category": "isp_redundancy", "severity": "critical"},
+        {"category": "ha", "severity": "high"},
+    ]
+    ops_only = [
+        {"category": "aaa", "severity": "critical"},
+        {"category": "monitoring", "severity": "high"},
+    ]
+    s1 = site_optimize._score_split(fabric_only)
+    s2 = site_optimize._score_split(ops_only)
+    # Fabric gaps shouldn't penalize ops score and vice versa
+    assert s1["fabric_design_score"] < 100
+    assert s1["operational_readiness_score"] == 100
+    assert s2["operational_readiness_score"] < 100
+    assert s2["fabric_design_score"] == 100
+
+
+@pytest.mark.unit
+def test_llm_hostname_anchoring_drops_invented_hosts():
+    """Unknown hostnames in config_changes are filtered out post-validation."""
+    fake = (
+        '{"site_summary": "Test", "maturity_score": 50, "maturity_tier": "Tier 2", '
+        '"gaps": [{"category": "bgp_tuning", "severity": "high", '
+        '"title": "Add BFD", "current_state": "x", "ideal_state": "y", '
+        '"rationale": "z", "implementation": ["step"], '
+        '"config_changes": {"x-fw-01": ["set bfd"], "CR-01": ["bogus"], "BR-99": ["fake"]}, '
+        '"estimated_effort": "M", "roi": "high"}], "roadmap": {}}'
+    )
+    llm.set_enabled(True)
+    with patch.object(llm, "query", return_value=fake):
+        r = site_optimize.analyze_site_wide("X", [
+            {"hostname": "x-fw-01", "platform": "junos", "config_text": JUNOS_FW},
+        ])
+    assert r["llm_powered"] is True
+    assert len(r["gaps"]) == 1
+    changes = r["gaps"][0]["config_changes"]
+    # Real host kept, invented placeholders dropped
+    assert "x-fw-01" in changes
+    assert "CR-01" not in changes
+    assert "BR-99" not in changes
+
+
+@pytest.mark.unit
+def test_allowed_hostnames_helper_extracts_from_facts():
+    facts = site_optimize.collect_site_facts("T", [
+        {"hostname": "t-fw-01", "platform": "junos", "config_text": JUNOS_FW},
+        {"hostname": "t-sw-01", "platform": "eos",   "config_text": EOS_SW},
+    ])
+    hosts = site_optimize._allowed_hostnames(facts)
+    assert "t-fw-01" in hosts
+    assert "t-sw-01" in hosts
+    assert hosts == sorted(hosts)  # deterministic ordering
+
+
+@pytest.mark.unit
 def test_facts_isps_detection_active_vs_shutdown():
     cfg_with_telia = (
         "interfaces {\n  ge-0/0/0 {\n    unit 0 {\n"

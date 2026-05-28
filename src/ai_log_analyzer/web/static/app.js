@@ -2112,8 +2112,10 @@ async function runSiteWideOptimize() {
     });
     renderSiteWide(r);
     const n = (r.gaps || []).length;
-    setStatus(`Site-Wide Optimization: ${n} gaps · maturity ${r.maturity_score || 0}/100`);
-    toast(`Strategic analysis complete — ${n} gaps, maturity ${r.maturity_score || 0}/100.`, "success");
+    const fd = r.fabric_design_score ?? 0;
+    const op = r.operational_readiness_score ?? 0;
+    setStatus(`Site-Wide Optimization: ${n} gaps · fabric ${fd}/100 · ops ${op}/100`);
+    toast(`Strategic analysis complete — ${n} gaps · fabric ${fd} · ops ${op}.`, "success");
   } catch (e) {
     $("site-wide-summary").textContent = "Error: " + e.message;
     setStatus(`Site-Wide error: ${e.message}`);
@@ -2129,14 +2131,22 @@ function renderSiteWide(r) {
   $("site-wide-engine").className = "ai-badge " + (r.llm_powered ? "" : "kb-badge");
   $("site-wide-summary").textContent = r.site_summary || "";
 
-  // Score / tier row
+  // Score / tier row — two vectors (fabric design + operational readiness)
   const row = $("site-wide-score-row");
   clear(row);
-  const score = r.maturity_score || 0;
-  const grade = score >= 90 ? "A" : score >= 75 ? "B" : score >= 60 ? "C" : score >= 40 ? "D" : "F";
-  row.appendChild(el("div", { style: { textAlign: "center" } },
-    el("div", { className: "score-num grade-" + grade, text: String(score) }),
-    el("div", { style: { color: "var(--muted)", fontSize: "12px" }, text: "Maturity / 100" }),
+  const gradeFor = (s) =>
+    s >= 90 ? "A" : s >= 75 ? "B" : s >= 60 ? "C" : s >= 40 ? "D" : "F";
+
+  const fabric = r.fabric_design_score ?? 0;
+  const ops    = r.operational_readiness_score ?? 0;
+
+  row.appendChild(el("div", { style: { textAlign: "center" }, title: "Routing topology, HA, lifecycle, BGP tuning, overlay fabric" },
+    el("div", { className: "score-num grade-" + gradeFor(fabric), text: String(fabric) }),
+    el("div", { style: { color: "var(--muted)", fontSize: "12px" }, text: "Fabric Design / 100" }),
+  ));
+  row.appendChild(el("div", { style: { textAlign: "center" }, title: "NTP, syslog, AAA, SNMPv3, monitoring, compliance hygiene" },
+    el("div", { className: "score-num grade-" + gradeFor(ops), text: String(ops) }),
+    el("div", { style: { color: "var(--muted)", fontSize: "12px" }, text: "Operational Readiness / 100" }),
   ));
   row.appendChild(el("div", { style: { textAlign: "center", flex: "1" } },
     el("div", { style: { fontSize: "22px", fontWeight: "700" }, text: r.maturity_tier || "—" }),
