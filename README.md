@@ -195,6 +195,18 @@ See [`docs/TFSM_AUTO_PARSER.md`](docs/TFSM_AUTO_PARSER.md) for the API, scoring 
 and filter-hint reference. The full WebM video is [`demo/tfsm_demo.webm`](demo/tfsm_demo.webm)
 (19s, 311 KB) and the recording is reproducible via [`demo/record_tfsm_demo.sh`](demo/record_tfsm_demo.sh).
 
+## LOGS pipeline hardening (2026-05-27)
+
+Three follow-up fixes to the LOGS tab: (1) the Executive Summary LLM call now
+receives an `ALLOWED_HOSTNAMES` anchor and a post-validation scrubber so it
+can no longer emit textbook placeholders like `R1-R3` or `SW1-SW2`,
+(2) `classifier.strip_ansi` removes ANSI/VT100 escape codes from every event
+at the LogEvent → ClassifiedEvent boundary (no more `[0;32m  OK  [0m` garbage
+in the UI), and (3) `containerlab-multivendor/topologies/clos-evpn.clab.yml`
+now caps cEOS / SRL / linux containers via the `kinds:` block so a runaway
+control plane can't OOM-cascade the host. Full details and live validation
+data in [`docs/LOGS_PIPELINE_HARDENING.md`](docs/LOGS_PIPELINE_HARDENING.md).
+
 ## Site-Wide Optimization — split scoring + hostname anchoring
 
 The Site-Wide Strategic Optimization widget now returns **two independent scores** instead of a

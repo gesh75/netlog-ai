@@ -27,6 +27,31 @@ _RECOVERY_DESCRIPTIONS: frozenset[str] = frozenset({
     "LAG member joining bundle",
 })
 
+# Generic textbook placeholders the LLM falls back to when it ignores the
+# real inventory. Word-boundary matched, case-insensitive.
+_PLACEHOLDER_RE: re.Pattern[str] = re.compile(
+    r"\b(?:R[1-9]\d?|SW[1-9]\d?|CR-?\d+|BR-?\d+|"
+    r"spine-?[XYN]|leaf-?[XYN]|router-?[XYN]|switch-?[XYN])\b",
+    re.IGNORECASE,
+)
+
+
+def _scrub_placeholders(bullet: str, allowed_hostnames: list[str]) -> str:
+    """Replace generic placeholders (R1, SW2, CR-01, spine-X) with a neutral
+    marker when the bullet doesn't otherwise reference a real hostname.
+
+    If the bullet already names at least one real host from the inventory,
+    we leave placeholders alone — the operator can still see the LLM's
+    intent. Otherwise we substitute '[hostname?]' so the lie is visible.
+    """
+    if not _PLACEHOLDER_RE.search(bullet):
+        return bullet
+    bullet_lc = bullet.lower()
+    has_real_host = any(h and h in bullet_lc for h in allowed_hostnames)
+    if has_real_host:
+        return bullet
+    return _PLACEHOLDER_RE.sub("[hostname?]", bullet)
+
 
 @dataclass
 class ActionItem:
@@ -394,14 +419,28 @@ def _executive_summary(
     use_llm: bool,
 ) -> tuple[list[str], bool]:
     if use_llm:
+        # Collect the real hostnames from validated action items — single source
+        # of truth for the LLM. Anything outside this list is a hallucination.
+        allowed_hostnames = sorted({
+            h.lower() for a in items for h in (a.devices or []) if h
+        })
         sys_prompt = (
             "You are a senior network engineer writing a 4-6 bullet executive summary for a "
             "network operations standup. Each bullet must be specific (with device names + numbers), "
-            "actionable, and one line. Prefix every bullet with '• '. No headers, no preamble."
+            "actionable, and one line. Prefix every bullet with '• '. No headers, no preamble.\n\n"
+            "HOSTNAME ANCHORING (strict):\n"
+            "- Use ONLY hostnames from the ALLOWED_HOSTNAMES list provided in the user prompt.\n"
+            "- NEVER invent generic placeholders like R1, R2, SW1, SW2, CR-01, BR-01, spine-X, leaf-X.\n"
+            "- If a bullet is fleet-wide, say 'across N devices' rather than naming fake ones.\n"
+            "- Match hostnames verbatim — no abbreviations, no shortenings."
         )
-        top = [f"{a.severity.upper()} | {a.description} ({a.count}× on {len(a.devices)} devices)"
-               for a in items[:5]]
+        top = [
+            f"{a.severity.upper()} | {a.description} ({a.count}× on "
+            f"{', '.join(a.devices[:5]) if a.devices else 'unknown'})"
+            for a in items[:5]
+        ]
         user_prompt = (
+            f"ALLOWED_HOSTNAMES (use only these exact names): {allowed_hostnames}\n\n"
             f"Score: {score}/100 (grade {grade} — {grade_label})\n"
             f"Severity: critical={sev_counts.get('critical', 0)}, "
             f"high={sev_counts.get('high', 0)}, medium={sev_counts.get('medium', 0)}\n"
@@ -412,6 +451,9 @@ def _executive_summary(
         if text:
             bullets = [line.strip().lstrip("•- ").strip() for line in text.split("\n") if line.strip()]
             bullets = [b for b in bullets if b][:6]
+            # Post-validation: flag bullets that mention obvious placeholders.
+            # We rewrite them rather than drop, so the operator still gets info.
+            bullets = [_scrub_placeholders(b, allowed_hostnames) for b in bullets]
             if bullets:
                 return bullets, True
 

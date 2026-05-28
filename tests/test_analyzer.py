@@ -180,3 +180,100 @@ def test_optimize_config_handles_non_json_llm_response():
     assert out["llm_powered"]
     assert out["findings"] == []
     assert "raw" in out
+
+
+# ── Executive summary hostname anchoring (LOGS tab) ───────────────────────
+
+@pytest.mark.unit
+def test_scrub_placeholders_replaces_generic_when_no_real_host():
+    """Bullets with only placeholders (R1, SW2) get [hostname?] substituted."""
+    from ai_log_analyzer.analyzer import _scrub_placeholders
+    bullet = "BGP peer down on R1 and SW2"
+    out = _scrub_placeholders(bullet, ["leaf1", "spine2"])
+    assert "R1" not in out
+    assert "SW2" not in out
+    assert "[hostname?]" in out
+
+
+@pytest.mark.unit
+def test_scrub_placeholders_keeps_bullet_when_real_host_present():
+    """If the bullet also names a real host, leave it alone — operator can still read it."""
+    from ai_log_analyzer.analyzer import _scrub_placeholders
+    bullet = "BGP peer down on leaf1 (also called R1 by docs)"
+    out = _scrub_placeholders(bullet, ["leaf1", "spine2"])
+    assert out == bullet  # untouched
+
+
+@pytest.mark.unit
+def test_scrub_placeholders_passthrough_when_no_placeholders():
+    from ai_log_analyzer.analyzer import _scrub_placeholders
+    bullet = "BGP peer down on leaf1 and spine2"
+    assert _scrub_placeholders(bullet, ["leaf1", "spine2"]) == bullet
+
+
+@pytest.mark.unit
+def test_executive_summary_llm_prompt_anchors_hostnames(monkeypatch):
+    """The LLM call must receive an ALLOWED_HOSTNAMES line and real device names."""
+    from ai_log_analyzer import analyzer, llm
+    from ai_log_analyzer.analyzer import ActionItem, _executive_summary
+
+    captured = {}
+
+    def fake_query(system: str, user: str, max_tokens: int = 400) -> str:
+        captured["system"] = system
+        captured["user"] = user
+        return "• BGP down on leaf1\n• Memory pressure on spine2"
+
+    llm.set_enabled(True)
+    monkeypatch.setattr(llm, "query", fake_query)
+    items = [
+        ActionItem(severity="high", category="routing",
+                   description="BGP peer down", count=3,
+                   devices=["leaf1", "leaf4"], sample_messages=[]),
+        ActionItem(severity="critical", category="system",
+                   description="OOM kill", count=2,
+                   devices=["spine2"], sample_messages=[]),
+    ]
+    bullets, used_llm = _executive_summary(
+        sev_counts={"critical": 2, "high": 3, "medium": 0},
+        cat_counts={"routing": 3, "system": 2},
+        score=24, grade="F", grade_label="Critical",
+        items=items, use_llm=True,
+    )
+    assert used_llm
+    # Prompt anchoring
+    assert "HOSTNAME ANCHORING" in captured["system"]
+    assert "ALLOWED_HOSTNAMES" in captured["user"]
+    # Real hostnames passed through (not collapsed to counts)
+    assert "leaf1" in captured["user"]
+    assert "leaf4" in captured["user"]
+    assert "spine2" in captured["user"]
+
+
+@pytest.mark.unit
+def test_executive_summary_scrubs_placeholders_in_llm_output(monkeypatch):
+    """LLM that still emits R1/SW2 → bullet gets [hostname?] substitution."""
+    from ai_log_analyzer import llm
+    from ai_log_analyzer.analyzer import ActionItem, _executive_summary
+
+    monkeypatch.setattr(
+        llm, "query",
+        lambda s, u, max_tokens=400: "• BGP peer down on R1 to R3\n• OOM event on SW2",
+    )
+    llm.set_enabled(True)
+    items = [
+        ActionItem(severity="high", category="routing",
+                   description="BGP peer down", count=3,
+                   devices=["leaf1"], sample_messages=[]),
+    ]
+    bullets, used_llm = _executive_summary(
+        sev_counts={"critical": 0, "high": 3, "medium": 0},
+        cat_counts={"routing": 3},
+        score=70, grade="C", grade_label="Degraded",
+        items=items, use_llm=True,
+    )
+    assert used_llm
+    joined = " ".join(bullets)
+    # R1, R3, SW2 all stripped
+    assert " R1" not in joined and "R3" not in joined and "SW2" not in joined
+    assert "[hostname?]" in joined
