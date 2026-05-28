@@ -195,6 +195,17 @@ See [`docs/TFSM_AUTO_PARSER.md`](docs/TFSM_AUTO_PARSER.md) for the API, scoring 
 and filter-hint reference. The full WebM video is [`demo/tfsm_demo.webm`](demo/tfsm_demo.webm)
 (19s, 311 KB) and the recording is reproducible via [`demo/record_tfsm_demo.sh`](demo/record_tfsm_demo.sh).
 
+## Site-Wide Optimization — split scoring + hostname anchoring
+
+The Site-Wide Strategic Optimization widget now returns **two independent scores** instead of a
+single ambiguous "maturity" number: `fabric_design_score` (routing, HA, lifecycle, BGP tuning,
+overlay) and `operational_readiness_score` (NTP, syslog, AAA, SNMPv3, monitoring, compliance).
+This separates architectural gaps from day-2 hygiene so an engineer knows whether to plan a
+hardware change or just push config. The LLM prompt also injects an explicit `ALLOWED_HOSTNAMES`
+inventory and post-validation drops any `config_changes` key not in that list — no more invented
+`CR-01` / `BR-01` placeholders. Full design and validation in
+[`docs/SCORING_SPLIT.md`](docs/SCORING_SPLIT.md).
+
 ## Architecture
 
 <p align="center">

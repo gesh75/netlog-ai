@@ -283,6 +283,22 @@ _VALID_CATEGORIES: frozenset[str] = frozenset({
     "security", "monitoring", "aaa", "compliance", "capacity",
 })
 
+# Each category maps to one of two score vectors:
+#   fabric_design       = routing/topology/HA/lifecycle correctness
+#   operational_readiness = day-2 hygiene (NTP, syslog, AAA, SNMP, monitoring, compliance)
+_CATEGORY_VECTOR: dict[str, str] = {
+    "isp_redundancy":     "fabric_design",
+    "ha":                 "fabric_design",
+    "software_lifecycle": "fabric_design",
+    "bgp_tuning":         "fabric_design",
+    "overlay_fabric":     "fabric_design",
+    "capacity":           "fabric_design",
+    "security":           "operational_readiness",
+    "monitoring":         "operational_readiness",
+    "aaa":                "operational_readiness",
+    "compliance":         "operational_readiness",
+}
+
 
 def _infer_tier(facts: dict) -> str:
     roles = facts["by_role"]
@@ -297,12 +313,37 @@ def _infer_tier(facts: dict) -> str:
     return "Tier 3"
 
 
+_SEVERITY_PENALTY: dict[str, int] = {
+    "critical": 20, "high": 12, "medium": 7, "low": 3,
+}
+
+
 def _score_maturity(gaps: list[dict]) -> int:
+    """Composite maturity score across all gaps (kept for backward compatibility)."""
     score = 100
-    penalty = {"critical": 20, "high": 12, "medium": 7, "low": 3}
     for g in gaps:
-        score -= penalty.get(g.get("severity", "medium"), 5)
+        score -= _SEVERITY_PENALTY.get(g.get("severity", "medium"), 5)
     return max(0, min(100, score))
+
+
+def _score_vector(gaps: list[dict], vector: str) -> int:
+    """Score (0-100) for one vector — only penalize gaps whose category maps to it."""
+    score = 100
+    for g in gaps:
+        cat = g.get("category", "compliance")
+        if _CATEGORY_VECTOR.get(cat) != vector:
+            continue
+        score -= _SEVERITY_PENALTY.get(g.get("severity", "medium"), 5)
+    return max(0, min(100, score))
+
+
+def _score_split(gaps: list[dict]) -> dict[str, int]:
+    """Return both vector scores plus the composite maturity score."""
+    return {
+        "fabric_design_score": _score_vector(gaps, "fabric_design"),
+        "operational_readiness_score": _score_vector(gaps, "operational_readiness"),
+        "maturity_score": _score_maturity(gaps),
+    }
 
 
 def _build_roadmap(gaps: list[dict]) -> dict:
@@ -521,10 +562,13 @@ def _deterministic_advice(site_id: str, facts: dict) -> dict:
     """Pure rule-based gap analysis — runs when LLM is disabled or unavailable."""
     gaps, applied = _collect_deterministic_gaps(facts)
     tier = _infer_tier(facts)
+    scores = _score_split(gaps)
     return {
         "site_id": site_id.upper(),
         "site_summary": _build_deterministic_summary(facts, gaps, tier),
-        "maturity_score": _score_maturity(gaps),
+        "maturity_score": scores["maturity_score"],
+        "fabric_design_score": scores["fabric_design_score"],
+        "operational_readiness_score": scores["operational_readiness_score"],
         "maturity_tier": tier,
         "best_practices_applied": applied,
         "best_practices_missing": [g["title"] for g in gaps],
@@ -539,11 +583,18 @@ def _deterministic_advice(site_id: str, facts: dict) -> dict:
 # Schema validation for LLM output
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _validate_analysis(obj: dict | None) -> dict | None:
+def _validate_analysis(
+    obj: dict | None,
+    allowed_hostnames: list[str] | None = None,
+) -> dict | None:
     """Lightweight dict validator — coerces types, drops malformed gaps, caps lists.
 
     Returns None if obj is not a dict. Always returns a normalized shape with
     sensible defaults. This avoids returning unvalidated LLM output to clients.
+
+    When `allowed_hostnames` is provided, any hostname in `config_changes` that
+    is not in the inventory (case-insensitive) is dropped — prevents the LLM
+    from inventing placeholders like CR-01 or BR-01.
     """
     if not isinstance(obj, dict):
         return None
@@ -551,6 +602,8 @@ def _validate_analysis(obj: dict | None) -> dict | None:
     out: dict = {
         "site_summary": str(obj.get("site_summary") or ""),
         "maturity_score": 0,
+        "fabric_design_score": 0,
+        "operational_readiness_score": 0,
         "maturity_tier": "Unknown",
         "best_practices_applied": [],
         "best_practices_missing": [],
@@ -576,7 +629,7 @@ def _validate_analysis(obj: dict | None) -> dict | None:
     # Gaps — validate each entry, drop malformed, sort by (severity, roi), cap 8
     raw_gaps = obj.get("gaps") or []
     if isinstance(raw_gaps, list):
-        out["gaps"] = _validate_gaps(raw_gaps)
+        out["gaps"] = _validate_gaps(raw_gaps, allowed_hostnames=allowed_hostnames)
 
     # Roadmap
     raw_road = obj.get("roadmap") or {}
@@ -590,7 +643,11 @@ def _validate_analysis(obj: dict | None) -> dict | None:
     return out
 
 
-def _validate_gaps(raw: list) -> list[dict]:
+def _validate_gaps(
+    raw: list,
+    allowed_hostnames: list[str] | None = None,
+) -> list[dict]:
+    allowed_lc = {h.lower() for h in (allowed_hostnames or [])}
     valid: list[dict] = []
     for g in raw:
         if not isinstance(g, dict):
@@ -617,7 +674,12 @@ def _validate_gaps(raw: list) -> list[dict]:
         for host, cmds in changes.items():
             if not isinstance(cmds, list):
                 continue
-            clean_changes[str(host)] = [
+            host_str = str(host)
+            # If we have an inventory, drop hostnames not in it — prevents
+            # the LLM from inventing placeholders (CR-01, BR-01, spine-X, etc.).
+            if allowed_lc and host_str.lower() not in allowed_lc:
+                continue
+            clean_changes[host_str] = [
                 str(c) for c in cmds if isinstance(c, (str, int, float))
             ][:20]
 
@@ -702,24 +764,52 @@ Constraints:
 6. Roadmap entries reference gap titles from gaps[] verbatim.
 7. Effort scale: S=hours, M=days, L=weeks, XL=months.
 
+HOSTNAME ANCHORING (strict):
+- The user prompt contains an ALLOWED_HOSTNAMES array — the exact, validated inventory.
+- Every key in `config_changes` MUST be a verbatim member of ALLOWED_HOSTNAMES.
+  Match is case-insensitive but the full token must match — no abbreviations, no
+  generic placeholders (CR-01, BR-01, R1, spine-X), no invented names.
+- Same rule applies anywhere you reference a device by name in `current_state`,
+  `ideal_state`, `rationale`, or `implementation`: cite from ALLOWED_HOSTNAMES only.
+- If a gap is fleet-wide and cannot be tied to a specific host, leave
+  `config_changes` empty and describe the change generically in `implementation`.
+- Unknown hostnames will be silently dropped by post-validation, weakening the gap.
+
 Note: config_changes are ILLUSTRATIVE EXAMPLES ONLY. Network engineers will review before applying."""
 
 
+def _allowed_hostnames(facts: dict) -> list[str]:
+    """Extract the canonical hostname inventory from facts — single source of truth."""
+    return sorted({
+        str(d.get("hostname", "")).lower()
+        for d in facts.get("devices", [])
+        if d.get("hostname")
+    })
+
+
 def _build_user_prompt(facts: dict) -> str:
+    hosts = _allowed_hostnames(facts)
     return (
+        f"ALLOWED_HOSTNAMES (case-insensitive, exact-match only):\n"
+        f"{json.dumps(hosts)}\n\n"
         f"SITE FACT SUMMARY:\n```json\n{json.dumps(facts, indent=2)}\n```\n\n"
         "Produce the strategic optimization JSON now. "
-        "Focus on the 5-8 highest-impact gaps for this site's tier."
+        "Focus on the 5-8 highest-impact gaps for this site's tier. "
+        "REMEMBER: every key in `config_changes` MUST be from ALLOWED_HOSTNAMES verbatim."
     )
 
 
 def _build_retry_prompt(facts: dict) -> str:
+    hosts = _allowed_hostnames(facts)
     return (
+        f"ALLOWED_HOSTNAMES (case-insensitive, exact-match only):\n"
+        f"{json.dumps(hosts)}\n\n"
         f"SITE FACT SUMMARY:\n```json\n{json.dumps(facts, indent=2)}\n```\n\n"
         "PREVIOUS RESPONSE WAS INVALID OR TRUNCATED.\n"
         "Re-emit ONLY the JSON object. Keep `rationale` ≤ 1 sentence and "
         "`implementation` ≤ 3 steps per gap. Cap at 6 gaps total. "
-        "Start with `{` end with `}`. No fences. No preamble."
+        "Start with `{` end with `}`. No fences. No preamble. "
+        "All hostnames in config_changes MUST come from ALLOWED_HOSTNAMES."
     )
 
 
@@ -736,6 +826,8 @@ def _failure_response(
         "site_id": site_id.upper(),
         "site_summary": summary,
         "maturity_score": 0,
+        "fabric_design_score": 0,
+        "operational_readiness_score": 0,
         "maturity_tier": "Unknown",
         "best_practices_applied": [],
         "best_practices_missing": [],
@@ -786,8 +878,9 @@ def analyze_site_wide(site_id: str, devices: list[dict]) -> dict:
         result["llm_error"] = err
         return result
 
+    hosts = _allowed_hostnames(facts)
     parsed = _try_parse_json(text) if text else None
-    validated = _validate_analysis(parsed)
+    validated = _validate_analysis(parsed, allowed_hostnames=hosts)
 
     # Retry once with a stricter prompt
     if not validated:
@@ -796,7 +889,7 @@ def analyze_site_wide(site_id: str, devices: list[dict]) -> dict:
         if text2:
             last_text = text2
             parsed = _try_parse_json(text2)
-            validated = _validate_analysis(parsed)
+            validated = _validate_analysis(parsed, allowed_hostnames=hosts)
         if err2 and not validated:
             result = _deterministic_advice(site_id, facts)
             result["site_summary"] = f"LLM retry failed ({err2}). " + result["site_summary"]
@@ -819,11 +912,17 @@ def analyze_site_wide(site_id: str, devices: list[dict]) -> dict:
         result["raw_length"] = len(last_text)
         return result
 
-    # Success path: validated LLM output enriched with site metadata
+    # Success path: validated LLM output enriched with site metadata.
+    # Recompute split scores deterministically from validated gaps — the LLM
+    # may have hallucinated maturity_score, but category+severity are validated,
+    # so the per-vector scores are authoritative.
+    scores = _score_split(validated["gaps"])
     validated.update({
         "site_id": site_id.upper(),
         "llm_powered": True,
         "facts": facts,
+        "fabric_design_score": scores["fabric_design_score"],
+        "operational_readiness_score": scores["operational_readiness_score"],
     })
     return validated
 
