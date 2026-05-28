@@ -80,6 +80,26 @@ _COMPILED: list[tuple[re.Pattern[str], str, str, str]] = [
     (re.compile(p, re.IGNORECASE), s, c, d) for (p, s, c, d) in _KB_PATTERNS
 ]
 
+# ANSI/VT100 terminal escape sequences — systemd, journald, FRR vtysh, and
+# any source piping colored output leaks these into the message field.
+# Pattern covers CSI (\x1b[...m), OSC (\x1b]...\x07), and SGR-style codes.
+_ANSI_ESCAPE_RE: re.Pattern[str] = re.compile(
+    r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])"
+)
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI/VT100 escape sequences from log message text.
+
+    systemd boot messages (`\\x1b[0;32m  OK  \\x1b[0m Started ...`), FRR vtysh
+    output, and any colorized source leaks raw escape codes that render as
+    `[0;32m` / `[0m` garbage in the UI. Stripping at the LogEvent → Classified
+    boundary catches every source path with one call.
+    """
+    if not text or "\x1b" not in text:
+        return text
+    return _ANSI_ESCAPE_RE.sub("", text)
+
 
 @dataclass(frozen=True)
 class LogEvent:
@@ -154,7 +174,10 @@ def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], 
     cat_counts: dict[str, int] = {}
 
     for ev in events:
-        combined = f"{ev.appname} {ev.message}".lower()
+        # Strip ANSI escapes once at the boundary — catches systemd green-OK
+        # markers, FRR vtysh color codes, and any colorized adapter output.
+        clean_message = strip_ansi(ev.message)
+        combined = f"{ev.appname} {clean_message}".lower()
         sev, cat, desc = "info", "other", ""
 
         for pattern, p_sev, p_cat, p_desc in _COMPILED:
@@ -163,7 +186,7 @@ def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], 
                 break
 
         if not desc:
-            snippet = ev.message[:120].strip() or ev.appname or "General log message"
+            snippet = clean_message[:120].strip() or ev.appname or "General log message"
             desc = snippet
 
         # Promote raw severity if syslog says critical but classifier missed it
@@ -179,8 +202,8 @@ def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], 
             category=cat,
             description=desc,
             action=_action_for(sev, cat),
-            message=ev.message[:500],
-            sample_message=ev.message[:200],
+            message=clean_message[:500],
+            sample_message=clean_message[:200],
         ))
         sev_counts[sev] = sev_counts.get(sev, 0) + 1
         cat_counts[cat] = cat_counts.get(cat, 0) + 1
