@@ -101,3 +101,47 @@ def test_bulk_classification_counts():
     assert sev_counts["critical"] == 1
     assert sev_counts["high"] == 2
     assert sev_counts["low"] == 1
+
+
+# ── ANSI escape stripping ─────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_strip_ansi_removes_color_codes():
+    from ai_log_analyzer.classifier import strip_ansi
+    raw = "\x1b[0;32m  OK  \x1b[0m Started Docker Application Container Engine."
+    assert strip_ansi(raw) == "  OK   Started Docker Application Container Engine."
+
+
+@pytest.mark.unit
+def test_strip_ansi_passthrough_when_no_escapes():
+    from ai_log_analyzer.classifier import strip_ansi
+    plain = "BGP peer 10.0.0.1 went down at 12:34:56"
+    assert strip_ansi(plain) is plain  # fast path: same object
+
+
+@pytest.mark.unit
+def test_strip_ansi_handles_empty_and_none_like():
+    from ai_log_analyzer.classifier import strip_ansi
+    assert strip_ansi("") == ""
+    assert strip_ansi("plain") == "plain"
+
+
+@pytest.mark.unit
+def test_classify_events_strips_ansi_from_message_and_description():
+    """ANSI escapes must not propagate to description / sample_message."""
+    from ai_log_analyzer.classifier import LogEvent, classify_events
+    ev = LogEvent(
+        timestamp="2026-05-27T10:00:00Z",
+        hostname="leaf1",
+        appname="systemd",
+        severity_raw="info",
+        # systemd boot-style message with green-OK colour codes
+        message="\x1b[0;32m  OK  \x1b[0m Started \x1b[1;34mDocker\x1b[0m service",
+    )
+    classified, _, _ = classify_events([ev])
+    assert classified, "expected one classified event"
+    c = classified[0]
+    assert "\x1b" not in c.message
+    assert "[0;32m" not in c.message
+    assert "\x1b" not in c.sample_message
+    assert "\x1b" not in c.description
