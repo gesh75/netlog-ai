@@ -91,8 +91,13 @@ def test_fetch_running_config_returns_output():
 
 @pytest.mark.unit
 def test_fetch_running_config_returns_none_on_failure():
+    # Mock the availability probe (requests.get) too so is_available() returns
+    # True and the mocked HTTP-500 POST is actually exercised — otherwise this
+    # passes for the wrong reason (probe fails → docker fallback → None).
     resp = MagicMock(status_code=500, text="boom")
-    with patch.object(network_tool.requests, "post", return_value=resp):
+    probe = MagicMock(status_code=200)
+    with patch.object(network_tool.requests, "get", return_value=probe), \
+         patch.object(network_tool.requests, "post", return_value=resp):
         cfg = network_tool.fetch_running_config("h1")
         assert cfg is None
 
