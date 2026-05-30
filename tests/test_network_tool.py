@@ -77,9 +77,14 @@ def test_is_available_true_on_200():
 
 @pytest.mark.unit
 def test_fetch_running_config_returns_output():
+    # fetch_running_config gates on is_available() (a real requests.get to the
+    # backend) before issuing the SSH-proxy POST, so the availability probe must
+    # be mocked too — otherwise this test silently depends on a live :5757.
     resp = MagicMock(status_code=200, headers={"content-type": "application/json"})
     resp.json.return_value = {"ok": True, "output": "router bgp 65001\n neighbor ..."}
-    with patch.object(network_tool.requests, "post", return_value=resp):
+    probe = MagicMock(status_code=200)
+    with patch.object(network_tool.requests, "get", return_value=probe), \
+         patch.object(network_tool.requests, "post", return_value=resp):
         cfg = network_tool.fetch_running_config("h1", platform="frr")
         assert cfg and "router bgp" in cfg
 
