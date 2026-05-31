@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>netlog-ai — local, sanitize-first AI network log analyzer</title>
+<meta name="description" content="netlog-ai: network logs in, ranked actions out. A local-first, multi-vendor network log analyzer that classifies events, ranks them, sanitizes before any LLM call, and emits 5-phase root-cause playbooks with copy-pastable per-vendor CLI fixes.">
+<meta name="color-scheme" content="dark">
+<style>
+  :root {
+    --bg-0: #070b16;
+    --bg-1: #0b1020;
+    --bg-2: #131a2e;
+    --panel: rgba(255,255,255,.04);
+    --panel-border: rgba(255,255,255,.10);
+    --ink: #e7ecf6;
+    --ink-dim: #aab4c8;
+    --ink-faint: #7e8aa3;
+    --cyan: #5eead4;
+    --blue: #60a5fa;
+    --violet: #a78bfa;
+    --red: #f43f5e;
+    --amber: #fbbf24;
+    --accent-grad: linear-gradient(100deg, #5eead4 0%, #60a5fa 45%, #a78bfa 100%);
+    --radius: 16px;
+    --shadow: 0 18px 50px -22px rgba(0,0,0,.85);
+    --maxw: 1180px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 82px; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(1100px 620px at 78% -8%, rgba(167,139,250,.20), transparent 60%),
+      radial-gradient(900px 560px at 8% 4%, rgba(96,165,250,.16), transparent 58%),
+      radial-gradient(700px 520px at 60% 108%, rgba(244,63,94,.12), transparent 60%),
+      linear-gradient(160deg, var(--bg-1) 0%, var(--bg-2) 55%, var(--bg-0) 100%);
+    background-attachment: fixed;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(124,147,200,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,147,200,.05) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(circle at 50% 30%, #000 0%, transparent 75%);
+    pointer-events: none; z-index: 0;
+  }
+
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { color: var(--violet); }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 22px; position: relative; z-index: 1; }
+
+  /* Skip link */
+  .skip {
+    position: absolute; left: -999px; top: 8px;
+    background: var(--blue); color: #06101f; padding: 10px 16px;
+    border-radius: 10px; font-weight: 700; z-index: 200;
+  }
+  .skip:focus { left: 12px; }
+
+  /* Scroll progress */
+  #progress {
+    position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+    background: var(--accent-grad); z-index: 120;
+    box-shadow: 0 0 14px rgba(96,165,250,.7);
+  }
+
+  /* Nav */
+  header.nav {
+    position: sticky; top: 0; z-index: 100;
+    backdrop-filter: blur(14px);
+    background: rgba(8,12,24,.72);
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .nav-inner { display: flex; align-items: center; gap: 18px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: -.4px; font-size: 1.08rem; }
+  .brand .dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--accent-grad);
+    box-shadow: 0 0 12px var(--blue);
+    animation: dotpulse 2.6s ease-in-out infinite;
+  }
+  .brand b { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  nav.links { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+  nav.links a {
+    position: relative; color: var(--ink-dim); font-size: .9rem; font-weight: 600;
+    padding: 8px 11px; border-radius: 9px;
+  }
+  nav.links a::after {
+    content: ""; position: absolute; left: 11px; right: 11px; bottom: 4px; height: 2px;
+    background: var(--accent-grad); transform: scaleX(0); transform-origin: left;
+    transition: transform .25s ease; border-radius: 2px;
+  }
+  nav.links a:hover { color: var(--ink); }
+  nav.links a.active { color: #fff; }
+  nav.links a.active::after { transform: scaleX(1); }
+  .nav-cta {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--accent-grad); color: #06101f; font-weight: 800;
+    padding: 8px 14px; border-radius: 10px; font-size: .85rem;
+    box-shadow: 0 6px 20px -8px rgba(96,165,250,.8);
+  }
+  .nav-cta:hover { color: #06101f; filter: brightness(1.07); }
+  .nav-toggle { display: none; }
+
+  /* Sections */
+  main { position: relative; z-index: 1; }
+  section { padding: 84px 0 18px; scroll-margin-top: 80px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: .76rem; font-weight: 700; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--cyan); margin: 0 0 12px;
+  }
+  .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--accent-grad); border-radius: 2px; }
+  h2.title {
+    font-size: clamp(1.7rem, 3.6vw, 2.6rem); margin: 0 0 14px; line-height: 1.1; letter-spacing: -.6px;
+    background: linear-gradient(100deg, #eaf1ff 0%, #b9c8ea 60%, #a78bfa 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .lead { color: var(--ink-dim); font-size: 1.05rem; max-width: 760px; }
+
+  /* Hero */
+  .hero { padding-top: 46px; }
+  .hero-grid { display: grid; grid-template-columns: 1.02fr .98fr; gap: 38px; align-items: center; }
+  .hero-svg {
+    border-radius: 20px; overflow: hidden; border: 1px solid var(--panel-border);
+    box-shadow: var(--shadow); background: #0a0e1a;
+    position: relative;
+  }
+  .hero-svg svg { display: block; width: 100%; height: auto; }
+  .tagchip {
+    display: inline-flex; align-items: center; gap: 8px; font-size: .78rem; font-weight: 700;
+    color: var(--violet); background: rgba(167,139,250,.10);
+    border: 1px solid rgba(167,139,250,.32); padding: 6px 13px; border-radius: 999px;
+    letter-spacing: .03em;
+  }
+  .tagchip .spark { width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 9px var(--red); animation: dotpulse 1.8s ease-in-out infinite; }
+  h1.hero-title {
+    font-size: clamp(2.5rem, 6.6vw, 4.4rem); margin: 18px 0 12px; line-height: .98; letter-spacing: -2px; font-weight: 850;
+    background: linear-gradient(96deg, #38bdf8 0%, #60a5fa 38%, #a78bfa 78%, #f0abfc 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    background-size: 240% auto; animation: shimmer 8s linear infinite;
+  }
+  .hero-tag { font-size: 1.16rem; color: var(--ink-dim); max-width: 560px; margin: 0 0 26px; }
+  .hero-tag b { color: var(--ink); font-weight: 700; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 12px; margin: 4px 0 28px; }
+  .chip {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px;
+    padding: 12px 16px; min-width: 96px; backdrop-filter: blur(10px);
+  }
+  .chip .num {
+    font-size: 1.6rem; font-weight: 850; line-height: 1;
+    background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .chip .lbl { font-size: .72rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .07em; margin-top: 6px; }
+
+  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px; padding: 13px 22px; border-radius: 13px;
+    font-weight: 800; font-size: .96rem; cursor: pointer; border: 1px solid transparent; transition: transform .18s ease, filter .18s ease, box-shadow .18s ease;
+  }
+  .btn-primary { background: var(--accent-grad); color: #06101f; box-shadow: 0 12px 30px -12px rgba(96,165,250,.85); }
+  .btn-primary:hover { transform: translateY(-2px); filter: brightness(1.07); color: #06101f; }
+  .btn-ghost { background: var(--panel); color: var(--ink); border-color: var(--panel-border); }
+  .btn-ghost:hover { transform: translateY(-2px); border-color: var(--violet); color: var(--ink); box-shadow: 0 0 24px -8px var(--violet); }
+
+  /* Glass cards */
+  .card {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius);
+    padding: 22px; backdrop-filter: blur(12px); box-shadow: var(--shadow);
+    transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+  }
+  .card:hover { transform: translateY(-5px); border-color: rgba(167,139,250,.5); box-shadow: 0 22px 50px -22px rgba(167,139,250,.45); }
+
+  /* Overview */
+  .overview-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 26px; align-items: start; }
+  .invariant {
+    border-left: 3px solid var(--red);
+    background: linear-gradient(90deg, rgba(244,63,94,.10), rgba(244,63,94,0));
+    border-radius: 12px; padding: 16px 18px; margin-top: 18px;
+  }
+  .invariant .k { color: var(--red); font-weight: 800; letter-spacing: .04em; font-size: .8rem; text-transform: uppercase; }
+  .mini-pipe { display: flex; flex-direction: column; gap: 10px; }
+  .mini-pipe .step {
+    display: flex; align-items: center; gap: 12px; font-size: .9rem; color: var(--ink-dim);
+    padding: 11px 14px; border-radius: 11px; background: rgba(255,255,255,.03); border: 1px solid var(--panel-border);
+  }
+  .mini-pipe .step .b { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 8px; display: grid; place-items: center; font-weight: 800; font-size: .8rem; color: #06101f; background: var(--accent-grad); }
+  .mini-pipe .gate .b { background: var(--red); color: #fff; }
+
+  /* Feature grid */
+  .grid { display: grid; gap: 18px; }
+  .features { grid-template-columns: repeat(4, 1fr); }
+  .feat .ico { font-size: 1.8rem; line-height: 1; }
+  .feat h3 { margin: 14px 0 7px; font-size: 1.06rem; letter-spacing: -.2px; }
+  .feat p { margin: 0; color: var(--ink-dim); font-size: .92rem; }
+
+  /* Mermaid */
+  .diagrams { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .diagram-card { padding: 18px; }
+  .diagram-card h3 { margin: 0 0 4px; font-size: 1.04rem; }
+  .diagram-card .d-desc { color: var(--ink-faint); font-size: .85rem; margin: 0 0 14px; }
+  pre.mermaid {
+    margin: 0; background: rgba(6,10,20,.55); border: 1px solid var(--panel-border);
+    border-radius: 12px; padding: 14px; overflow-x: auto; min-height: 60px;
+    text-align: center;
+  }
+  pre.mermaid svg { max-width: 100%; height: auto; }
+
+  /* Tech chips */
+  .stack { display: flex; flex-wrap: wrap; gap: 10px; }
+  .tech {
+    font-size: .86rem; font-weight: 600; color: var(--ink-dim);
+    background: rgba(255,255,255,.04); border: 1px solid var(--panel-border);
+    padding: 8px 13px; border-radius: 999px; transition: color .2s ease, border-color .2s ease, transform .2s ease;
+  }
+  .tech:hover { color: var(--ink); border-color: var(--blue); transform: translateY(-2px); }
+  .tech::before { content: "▹ "; color: var(--cyan); }
+
+  /* Components */
+  .components { grid-template-columns: repeat(2, 1fr); }
+  .comp h3 { margin: 0 0 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95rem; color: var(--cyan); word-break: break-word; }
+  .comp p { margin: 0 0 12px; color: var(--ink-dim); font-size: .9rem; }
+  .comp .tline { font-size: .76rem; color: var(--ink-faint); border-top: 1px dashed var(--panel-border); padding-top: 9px; }
+  .comp .tline b { color: var(--violet); }
+
+  /* Quickstart code blocks */
+  .qs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .codeblock {
+    position: relative; background: rgba(6,10,20,.66); border: 1px solid var(--panel-border);
+    border-radius: 13px; overflow: hidden;
+  }
+  .codeblock .cb-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 13px; border-bottom: 1px solid var(--panel-border); background: rgba(255,255,255,.02);
+  }
+  .codeblock .cb-head .ttl { font-size: .76rem; color: var(--ink-faint); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  .copy-btn {
+    background: rgba(96,165,250,.12); border: 1px solid rgba(96,165,250,.35); color: var(--blue);
+    font-size: .74rem; font-weight: 700; padding: 5px 11px; border-radius: 8px; cursor: pointer;
+    transition: background .2s ease, color .2s ease;
+  }
+  .copy-btn:hover { background: var(--blue); color: #06101f; }
+  .copy-btn.copied { background: var(--cyan); color: #06101f; border-color: var(--cyan); }
+  pre.code {
+    margin: 0; padding: 15px 16px; overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; line-height: 1.7; color: #d6e2f5;
+  }
+  pre.code .c { color: var(--ink-faint); }
+  pre.code .p { color: var(--cyan); }
+
+  /* Footer */
+  footer {
+    margin-top: 64px; border-top: 1px solid var(--panel-border);
+    background: rgba(6,10,20,.5); padding: 40px 0 50px; position: relative; z-index: 1;
+  }
+  .foot-grid { display: flex; flex-wrap: wrap; gap: 26px; justify-content: space-between; align-items: flex-start; }
+  .foot-links { display: flex; flex-wrap: wrap; gap: 22px; }
+  .foot-links a { color: var(--ink-dim); font-weight: 600; font-size: .92rem; }
+  .foot-note { color: var(--ink-faint); font-size: .8rem; margin-top: 18px; }
+
+  /* Back to top */
+  #toTop {
+    position: fixed; right: 22px; bottom: 22px; z-index: 90;
+    width: 46px; height: 46px; border-radius: 50%; cursor: pointer;
+    background: var(--accent-grad); color: #06101f; border: none; font-size: 1.2rem; font-weight: 900;
+    box-shadow: 0 10px 28px -10px rgba(96,165,250,.9);
+    opacity: 0; pointer-events: none; transform: translateY(12px);
+    transition: opacity .3s ease, transform .3s ease;
+  }
+  #toTop.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+
+  /* Reveal animation */
+  .reveal { opacity: 0; transform: translateY(22px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+
+  @keyframes shimmer { to { background-position: 240% center; } }
+  @keyframes dotpulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.82); } }
+
+  :focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; border-radius: 6px; }
+
+  /* Responsive */
+  @media (max-width: 980px) {
+    .hero-grid, .overview-grid, .diagrams, .qs-grid { grid-template-columns: 1fr; }
+    .features { grid-template-columns: repeat(2, 1fr); }
+    .components { grid-template-columns: 1fr; }
+    .hero-svg { order: -1; }
+  }
+  @media (max-width: 720px) {
+    nav.links {
+      position: absolute; top: 64px; left: 0; right: 0;
+      flex-direction: column; gap: 2px; background: rgba(8,12,24,.97);
+      border-bottom: 1px solid var(--panel-border); padding: 10px 18px 16px;
+      display: none;
+    }
+    nav.links.open { display: flex; }
+    nav.links a { padding: 10px 8px; }
+    nav.links a::after { display: none; }
+    .nav-toggle {
+      display: inline-flex; margin-left: auto; background: var(--panel); border: 1px solid var(--panel-border);
+      color: var(--ink); border-radius: 10px; padding: 8px 12px; font-size: 1.1rem; cursor: pointer;
+    }
+    .nav-cta { display: none; }
+  }
+  @media (max-width: 480px) {
+    .features { grid-template-columns: 1fr; }
+    section { padding-top: 64px; }
+    .chip { flex: 1 1 calc(50% - 12px); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+    .reveal { opacity: 1; transform: none; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#overview">Skip to content</a>
+<div id="progress" aria-hidden="true"></div>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true"></span><b>netlog-ai</b></span>
+    <button type="button" class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <nav class="links" id="navLinks" aria-label="Section navigation">
+      <a href="#overview">Overview</a>
+      <a href="#features">Features</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#dataflow">Data flow</a>
+      <a href="#stack">Tech</a>
+      <a href="#components">Components</a>
+      <a href="#quickstart">Quickstart</a>
+      <a class="nav-cta" href="https://github.com/gesh75/netlog-ai" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- HERO -->
+  <section class="hero" id="hero" aria-label="Introduction">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <span class="tagchip"><span class="spark" aria-hidden="true"></span>local-first · sanitize-before-LLM</span>
+        <h1 class="hero-title">netlog-ai</h1>
+        <p class="hero-tag">Network logs in. <b>Ranked actions out.</b> A local, sanitize-first, multi-vendor AI log analyzer that turns raw syslog and CLI output into prioritized, copy-pastable root-cause playbooks.</p>
+
+        <div class="chips" id="chips" role="list" aria-label="Project statistics">
+          <div class="chip" role="listitem"><div class="num" data-count="192">0</div><div class="lbl">tests collected</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="55">0</div><div class="lbl">regex patterns</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="5">0</div><div class="lbl">log connectors</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="30">0</div><div class="lbl">demo devices</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="10">0</div><div class="lbl">MCP tools</div></div>
+        </div>
+
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/gesh75/netlog-ai" target="_blank" rel="noopener">View on GitHub ↗</a>
+          <a class="btn btn-ghost" href="#quickstart">Quickstart ↓</a>
+        </div>
+      </div>
+
+      <div class="hero-svg reveal" role="img" aria-label="Animated diagram: multi-vendor log streams flow through a sanitize shield into a violet LLM and rule-based knowledge-base core that emits a ranked action-item stack; a red anomaly spark races down one lane.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="hsTitle hsDesc" fill="none" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <title id="hsTitle">netlog-ai — architecture</title>
+  <desc id="hsDesc">Animated banner: multi-vendor network log streams flow left-to-right from Kibana, Splunk, Loki, syslog and FRR source nodes, pass through a glowing sanitize shield that redacts secrets, converge into a pulsing violet LLM and rule-based KB core, and emit a root-cause pulse into a ranked action-item stack. A red anomaly spark races down one lane.</desc>
+
+  <defs>
+    <linearGradient id="hbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0e1a"/>
+      <stop offset="0.55" stop-color="#0b1224"/>
+      <stop offset="1" stop-color="#0f1530"/>
+    </linearGradient>
+    <radialGradient id="hcoreGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.55"/>
+      <stop offset="0.6" stop-color="#6366f1" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hvignette" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.35"/>
+    </radialGradient>
+    <linearGradient id="htitle" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="0.45" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="hstream" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#38bdf8" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hshieldFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0e2a3a"/>
+      <stop offset="1" stop-color="#0a1726"/>
+    </linearGradient>
+    <filter id="hglow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="hsoftGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      @keyframes hs_pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+      @keyframes hs_breathe { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+      @keyframes hs_ring { 0%{transform:scale(.55);opacity:.85} 70%{opacity:.18} 100%{transform:scale(2.1);opacity:0} }
+      @keyframes hs_drawline { to { stroke-dashoffset: 0 } }
+      @keyframes hs_dash { to { stroke-dashoffset: -40 } }
+      @keyframes hs_flick { 0%,72%,100%{opacity:.16} 76%,96%{opacity:1} }
+      @keyframes hs_redflash { 0%,80%,100%{opacity:0} 86%,94%{opacity:1} }
+      .hs_node { transform-box: fill-box; transform-origin: center; }
+      .hs_pulse  { animation: hs_pulse 2.8s ease-in-out infinite; }
+      .hs_p1 { animation-delay:.0s } .hs_p2 { animation-delay:.45s } .hs_p3 { animation-delay:.9s }
+      .hs_p4 { animation-delay:1.35s } .hs_p5 { animation-delay:1.8s }
+      .hs_core   { transform-box: fill-box; transform-origin: center; animation: hs_breathe 3.4s ease-in-out infinite; }
+      .hs_ring   { transform-box: fill-box; transform-origin: center; animation: hs_ring 3.4s ease-out infinite; }
+      .hs_ring2  { animation-delay: 1.7s; }
+      .hs_flow   { stroke-dasharray: 6 10; animation: hs_dash 1.1s linear infinite; }
+      .hs_flowB  { animation-duration: 1.5s; }
+      .hs_underline { stroke-dasharray: 360; stroke-dashoffset: 360; animation: hs_drawline 1.7s ease-out .4s forwards; }
+      .hs_redact { animation: hs_flick 5.2s ease-in-out infinite; }
+      .hs_rd2 { animation-delay: 2.1s } .hs_rd3 { animation-delay: 3.4s }
+      .hs_spark  { transform-box: fill-box; transform-origin: center; animation: hs_redflash 5.6s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) {
+        svg * { animation: none !important; }
+        .hs_underline { stroke-dashoffset: 0; }
+        .hs_redact, .hs_ring { opacity: .85; }
+        .hs_spark { opacity: .9; }
+      }
+    </style>
+  </defs>
+
+  <rect width="1200" height="360" fill="url(#hbg)"/>
+  <g opacity="0.05" stroke="#7c93c8" stroke-width="1">
+    <path d="M0 60 H1200 M0 120 H1200 M0 180 H1200 M0 240 H1200 M0 300 H1200"/>
+    <path d="M200 0 V360 M400 0 V360 M600 0 V360 M800 0 V360 M1000 0 V360"/>
+  </g>
+  <ellipse cx="640" cy="180" rx="170" ry="150" fill="url(#hcoreGlow)"/>
+
+  <g stroke-linecap="round">
+    <path id="hlaneA" d="M150 86 C 320 86, 380 120, 470 138 S 560 168, 600 178" stroke="#1e2a4a" stroke-width="2.4"/>
+    <path id="hlaneB" d="M150 132 C 320 132, 390 140, 470 150 S 560 172, 600 180" stroke="#1e2a4a" stroke-width="2.4"/>
+    <path id="hlaneC" d="M150 178 C 320 178, 400 178, 470 178 S 560 178, 600 180" stroke="#1e2a4a" stroke-width="2.4"/>
+    <path id="hlaneD" d="M150 224 C 320 224, 390 216, 470 206 S 560 188, 600 182" stroke="#1e2a4a" stroke-width="2.4"/>
+    <path id="hlaneE" d="M150 270 C 320 270, 380 240, 470 218 S 560 192, 600 184" stroke="#1e2a4a" stroke-width="2.4"/>
+    <use href="#hlaneA" class="hs_flow"  stroke="url(#hstream)" stroke-width="2.6"/>
+    <use href="#hlaneB" class="hs_flow hs_flowB" stroke="url(#hstream)" stroke-width="2.6"/>
+    <use href="#hlaneC" class="hs_flow"  stroke="url(#hstream)" stroke-width="2.6"/>
+    <use href="#hlaneD" class="hs_flow hs_flowB" stroke="url(#hstream)" stroke-width="2.6"/>
+    <use href="#hlaneE" class="hs_flow"  stroke="url(#hstream)" stroke-width="2.6"/>
+    <path id="hout1" d="M680 165 C 760 150, 820 130, 905 124" stroke="#3a2f63" stroke-width="2.2"/>
+    <path id="hout2" d="M684 180 C 765 180, 820 180, 905 180" stroke="#3a2f63" stroke-width="2.2"/>
+    <path id="hout3" d="M680 195 C 760 210, 820 230, 905 236" stroke="#3a2f63" stroke-width="2.2"/>
+    <use href="#hout1" class="hs_flow hs_flowB" stroke="#a78bfa" stroke-width="2.4" opacity="0.8"/>
+    <use href="#hout2" class="hs_flow hs_flowB" stroke="#a78bfa" stroke-width="2.4" opacity="0.8"/>
+    <use href="#hout3" class="hs_flow hs_flowB" stroke="#a78bfa" stroke-width="2.4" opacity="0.8"/>
+  </g>
+
+  <g>
+    <rect width="14" height="3" rx="1.5" fill="#22d3ee"><animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto"><mpath href="#hlaneA"/></animateMotion></rect>
+    <rect width="14" height="3" rx="1.5" fill="#38bdf8"><animateMotion dur="3.0s" begin="0.5s" repeatCount="indefinite" rotate="auto"><mpath href="#hlaneB"/></animateMotion></rect>
+    <rect width="14" height="3" rx="1.5" fill="#6366f1"><animateMotion dur="2.4s" begin="0.2s" repeatCount="indefinite" rotate="auto"><mpath href="#hlaneC"/></animateMotion></rect>
+    <rect width="14" height="3" rx="1.5" fill="#38bdf8"><animateMotion dur="2.9s" begin="0.9s" repeatCount="indefinite" rotate="auto"><mpath href="#hlaneD"/></animateMotion></rect>
+    <rect width="14" height="3" rx="1.5" fill="#22d3ee"><animateMotion dur="2.7s" begin="0.35s" repeatCount="indefinite" rotate="auto"><mpath href="#hlaneE"/></animateMotion></rect>
+  </g>
+
+  <g class="hs_spark">
+    <circle r="5" fill="#ef4444" filter="url(#hglow)">
+      <animateMotion dur="0.9s" begin="4.2s" repeatCount="indefinite" rotate="auto" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines="0.4 0 0.2 1"><mpath href="#hlaneC"/></animateMotion>
+    </circle>
+  </g>
+  <circle class="hs_ring" cx="640" cy="180" r="44" fill="none" stroke="#f43f5e" stroke-width="2" opacity="0">
+    <animate attributeName="opacity" values="0;0.9;0" dur="5.6s" begin="0s" repeatCount="indefinite"/>
+  </circle>
+
+  <g font-size="13" font-weight="600">
+    <g class="hs_node hs_pulse hs_p1" filter="url(#hglow)"><rect x="58" y="73" width="92" height="26" rx="7" fill="#0e3a52" stroke="#22d3ee" stroke-width="1.3"/></g>
+    <text x="104" y="90" text-anchor="middle" fill="#a5f3fc">Kibana</text>
+    <g class="hs_node hs_pulse hs_p2" filter="url(#hglow)"><rect x="58" y="119" width="92" height="26" rx="7" fill="#0e3a52" stroke="#38bdf8" stroke-width="1.3"/></g>
+    <text x="104" y="136" text-anchor="middle" fill="#bae6fd">Splunk</text>
+    <g class="hs_node hs_pulse hs_p3" filter="url(#hglow)"><rect x="58" y="165" width="92" height="26" rx="7" fill="#0e3a52" stroke="#6366f1" stroke-width="1.3"/></g>
+    <text x="104" y="182" text-anchor="middle" fill="#c7d2fe">Loki</text>
+    <g class="hs_node hs_pulse hs_p4" filter="url(#hglow)"><rect x="58" y="211" width="92" height="26" rx="7" fill="#0e3a52" stroke="#38bdf8" stroke-width="1.3"/></g>
+    <text x="104" y="228" text-anchor="middle" fill="#bae6fd">syslog</text>
+    <g class="hs_node hs_pulse hs_p5" filter="url(#hglow)"><rect x="58" y="257" width="92" height="26" rx="7" fill="#0e3a52" stroke="#22d3ee" stroke-width="1.3"/></g>
+    <text x="104" y="274" text-anchor="middle" fill="#a5f3fc">FRR · file</text>
+  </g>
+  <text x="104" y="55" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="2" fill="#475569">SOURCES</text>
+
+  <g filter="url(#hsoftGlow)">
+    <path d="M362 110 L362 158 C362 196 392 218 392 218 C392 218 422 196 422 158 L422 110 C422 110 392 100 362 110 Z"
+          fill="url(#hshieldFill)" stroke="#22d3ee" stroke-width="2"/>
+    <path d="M376 158 l9 10 16 -22" stroke="#5eead4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="392" y="240" text-anchor="middle" font-size="12" font-weight="700" letter-spacing="1.5" fill="#5eead4">SANITIZE</text>
+  <g font-size="10" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    <text class="hs_redact"     x="392" y="86"  text-anchor="middle" fill="#f43f5e">$9$••••• → &lt;REDACTED&gt;</text>
+    <text class="hs_redact hs_rd2" x="392" y="266" text-anchor="middle" fill="#f43f5e">ssh-key → &lt;REDACTED&gt;</text>
+    <text class="hs_redact hs_rd3" x="392" y="300" text-anchor="middle" fill="#fbbf24">203.0.113.7 → PUB-9f</text>
+  </g>
+
+  <g>
+    <polygon class="hs_core" filter="url(#hsoftGlow)"
+             points="640,128 692,154 692,206 640,232 588,206 588,154"
+             fill="#3b1d74" stroke="#a78bfa" stroke-width="2.5"/>
+    <polygon points="640,142 678,161 678,199 640,218 602,199 602,161"
+             fill="#5b21b6" stroke="#c4b5fd" stroke-width="1.4" opacity="0.95"/>
+    <circle cx="640" cy="180" r="46" fill="none" stroke="#a78bfa" stroke-width="1.4" class="hs_ring hs_ring2" opacity="0"/>
+    <text x="640" y="176" text-anchor="middle" font-size="15" font-weight="800" fill="#ede9fe">LLM</text>
+    <text x="640" y="194" text-anchor="middle" font-size="10" font-weight="600" fill="#c4b5fd">+ rule KB</text>
+  </g>
+  <text x="640" y="262" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="2" fill="#7c6bb0">CLASSIFY · ANALYZE</text>
+
+  <text x="998" y="55" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="2" fill="#475569">RANKED ACTIONS</text>
+  <g font-size="11" font-weight="600">
+    <g class="hs_node hs_pulse hs_p1"><rect x="912" y="108" width="176" height="30" rx="7" fill="#3a0d18" stroke="#f43f5e" stroke-width="1.4"/></g>
+    <circle cx="930" cy="123" r="4" fill="#f43f5e"/>
+    <text x="944" y="127" fill="#fecdd3">CRIT · BGP peer down</text>
+    <g class="hs_node hs_pulse hs_p2"><rect x="912" y="148" width="176" height="30" rx="7" fill="#3a2207" stroke="#f59e0b" stroke-width="1.4"/></g>
+    <circle cx="930" cy="163" r="4" fill="#f59e0b"/>
+    <text x="944" y="167" fill="#fde68a">HIGH · interface flap</text>
+    <g class="hs_node hs_pulse hs_p3"><rect x="912" y="188" width="176" height="30" rx="7" fill="#0c2c3a" stroke="#38bdf8" stroke-width="1.4"/></g>
+    <circle cx="930" cy="203" r="4" fill="#38bdf8"/>
+    <text x="944" y="207" fill="#bae6fd">MED · OSPF adjacency</text>
+  </g>
+  <g font-size="9" font-weight="700" font-family="ui-monospace, Menlo, monospace">
+    <rect x="912" y="232" width="34" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="929" y="245" text-anchor="middle" fill="#94a3b8">Diag</text>
+    <rect x="950" y="232" width="34" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="967" y="245" text-anchor="middle" fill="#94a3b8">Mitg</text>
+    <rect x="988" y="232" width="40" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="1008" y="245" text-anchor="middle" fill="#94a3b8">Remed</text>
+    <rect x="1032" y="232" width="32" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="1048" y="245" text-anchor="middle" fill="#94a3b8">Verf</text>
+    <rect x="1068" y="232" width="20" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="1078" y="245" text-anchor="middle" fill="#94a3b8">Op</text>
+  </g>
+
+  <text x="600" y="316" text-anchor="middle" font-size="46" font-weight="800" fill="url(#htitle)" letter-spacing="-0.5">netlog-ai</text>
+  <path class="hs_underline" d="M452 332 H748" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/>
+  <text x="600" y="352" text-anchor="middle" font-size="14" font-weight="500" fill="#94a3b8">Network logs in · ranked actions out — sanitize-before-LLM, multi-vendor root-cause playbooks</text>
+
+  <rect width="1200" height="360" fill="url(#hvignette)" pointer-events="none"/>
+</svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- OVERVIEW -->
+  <section id="overview" aria-labelledby="overview-h">
+    <div class="wrap">
+      <p class="eyebrow">Overview</p>
+      <h2 class="title" id="overview-h">Network logs in. Ranked actions out.</h2>
+      <div class="overview-grid">
+        <div class="reveal">
+          <p class="lead">netlog-ai is a local-first, multi-vendor network log analyzer. It ingests syslog and CLI output from Junos, Arista EOS, Nokia SR Linux, and FRR, classifies events with a regex knowledge base, and deduplicates them into a severity-ranked action list. A local or cloud LLM then writes a 5-phase root-cause playbook with copy-pastable per-vendor CLI fixes — or, when no model is available, the tool degrades gracefully to a deterministic rule-based knowledge base.</p>
+          <p class="lead" style="margin-top:16px">Built for NOC operators and network engineers who need actionable, on-prem AI analysis without shipping data to a SaaS.</p>
+          <div class="invariant">
+            <div class="k">🛡️ Defining invariant — sanitize before LLM</div>
+            <p style="margin:8px 0 0; color:var(--ink-dim); font-size:.94rem">Every config and log is scrubbed of secrets and public IPs <em>before any outbound call</em>. Data never leaves the host unredacted.</p>
+          </div>
+        </div>
+        <div class="card reveal">
+          <p style="margin:0 0 14px; font-weight:700; color:var(--ink)">The pipeline at a glance</p>
+          <div class="mini-pipe">
+            <div class="step"><span class="b">1</span> Ingest from any source → normalize to immutable LogEvents</div>
+            <div class="step"><span class="b">2</span> strip_ansi + 55 regexes → severity &amp; category</div>
+            <div class="step"><span class="b">3</span> Dedup into ranked ActionItems (sev × count)</div>
+            <div class="step gate"><span class="b">🛡</span> Sanitize gate scrubs secrets &amp; public IPs</div>
+            <div class="step"><span class="b">4</span> LLM chain → 5-phase playbook (or rule KB)</div>
+            <div class="step"><span class="b">5</span> Health score 0–100 + A–F grade → AnalysisResult</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section id="features" aria-labelledby="features-h">
+    <div class="wrap">
+      <p class="eyebrow">Key Features</p>
+      <h2 class="title" id="features-h">What makes it different</h2>
+      <p class="lead" style="margin-bottom:30px">Local-first by design, multi-vendor by default, and agent-callable from your editor.</p>
+      <div class="grid features" id="featureGrid"></div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section id="architecture" aria-labelledby="arch-h">
+    <div class="wrap">
+      <p class="eyebrow">Architecture</p>
+      <h2 class="title" id="arch-h">One analyzer core, three entrypoints</h2>
+      <p class="lead" style="margin-bottom:30px">The Flask UI, the CLI, and the MCP server all wrap a single shared analyzer core — layered into ingest, the always-on sanitize gate, the classifier, the orchestrator, and pluggable intelligence backends.</p>
+      <div class="diagrams">
+        <div class="diagram-card card reveal">
+          <h3>System Context</h3>
+          <p class="d-desc">How the analyzer core sits between operators, AI agents, log platforms, LLM runtimes, and the network devices. Every outbound LLM call is gated by the sanitizer.</p>
+          <pre class="mermaid">flowchart TB
+    OP["NOC Operator - browser and CLI"]
+    AGENT["AI Agents - Claude Code and Cursor"]
+    NET(["netlog-ai analyzer core"])
+    LOGS["Log Platforms - Kibana Splunk Loki LibreNMS syslog"]
+    LLM["LLM Runtimes - Ollama DMR Claude"]
+    DEV["Network Devices - Junos EOS SR Linux FRR"]
+
+    OP -->|HTTP and JSON| NET
+    AGENT -->|MCP stdio| NET
+    LOGS -->|fetch logs| NET
+    DEV -.->|syslog and configs| LOGS
+    DEV -.->|docker logs and config| NET
+    NET -->|sanitized prompt| LLM
+    LLM -->|5-phase playbook JSON| NET
+    NET -->|ranked actions and CLI fixes| OP
+    NET -->|tool results| AGENT
+
+    classDef sys fill:#7c3aed,stroke:#c4b5fd,color:#f8fafc,stroke-width:2px
+    classDef person fill:#60a5fa,stroke:#bfdbfe,color:#0b1220
+    classDef ext fill:#475569,stroke:#94a3b8,color:#f8fafc
+    classDef ai fill:#a78bfa,stroke:#ddd6fe,color:#0b1220
+
+    class NET sys
+    class OP,AGENT person
+    class LOGS,DEV ext
+    class LLM ai</pre>
+        </div>
+        <div class="diagram-card card reveal">
+          <h3>Container &amp; Component Map</h3>
+          <p class="d-desc">Three entrypoints all wrap one analyzer core layered into ingest, the always-on sanitize gate, classifier, orchestrator, and pluggable intelligence backends.</p>
+          <pre class="mermaid">flowchart TB
+    subgraph ENTRY["Entrypoints"]
+        WEB["web/ Flask + vanilla-JS SPA :6060"]
+        CLI["cli.py serve analyze containers mcp"]
+        MCP["mcp_server/ FastMCP stdio"]
+    end
+    subgraph INGEST["Ingest"]
+        SRC["sources/ kibana splunk loki syslog librenms"]
+        ADP["adapters/ frr file network_tool tfsm_auto"]
+    end
+    subgraph CORE["Analyzer Core"]
+        SAN["sanitize.py redact gate"]
+        CLS["classifier.py 55 regexes"]
+        ANA["analyzer.py orchestrator"]
+        SITE["site intel topology optimize copilot"]
+    end
+    subgraph BRAIN["Intelligence"]
+        LLMC["llm.py provider chain"]
+        KB["kb.py rule-based fallback"]
+    end
+
+    WEB --> ANA
+    CLI --> ANA
+    MCP --> ANA
+    SRC --> ANA
+    ADP --> ANA
+    ANA --> SAN --> CLS
+    ANA --> SITE
+    ANA --> LLMC
+    LLMC -.fallback.-> KB
+
+    classDef entry fill:#60a5fa,stroke:#bfdbfe,color:#0b1220
+    classDef ingest fill:#475569,stroke:#94a3b8,color:#f8fafc
+    classDef gate fill:#f43f5e,stroke:#fda4af,color:#0b1220
+    classDef core fill:#7c3aed,stroke:#c4b5fd,color:#f8fafc
+    classDef brain fill:#a78bfa,stroke:#ddd6fe,color:#0b1220
+
+    class WEB,CLI,MCP entry
+    class SRC,ADP ingest
+    class SAN gate
+    class CLS,ANA,SITE core
+    class LLMC,KB brain</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DATA FLOW -->
+  <section id="dataflow" aria-labelledby="flow-h">
+    <div class="wrap">
+      <p class="eyebrow">How it works</p>
+      <h2 class="title" id="flow-h">The analysis pipeline, end to end</h2>
+      <p class="lead" style="margin-bottom:30px">Raw lines become normalized events, classified findings, then deduped ranked actions. The top items receive deep analysis only after passing the sanitize gate — then a weighted health score is computed and everything is assembled into one JSON result.</p>
+      <div class="diagrams">
+        <div class="diagram-card card reveal">
+          <h3>Primary Flow — POST /api/analyze</h3>
+          <p class="d-desc">The end-to-end runtime path: classify, rank, sanitize per item, query the LLM (or rule KB fallback), score health, and return assembled JSON to the SPA.</p>
+          <pre class="mermaid">sequenceDiagram
+    autonumber
+    actor OP as Operator SPA
+    participant API as Flask /api/analyze
+    participant AN as analyzer.analyze
+    participant CL as classifier
+    participant SA as sanitize
+    participant LK as llm and kb
+
+    OP->>API: POST logs or site bundle
+    API->>AN: analyze events and use_llm
+    AN->>CL: strip_ansi plus classify 55 regex
+    CL-->>AN: ClassifiedEvents plus counts
+    AN->>AN: dedup to ranked ActionItems by sev x count
+    loop top-N action items
+        AN->>SA: scrub secrets and public IPs
+        SA-->>AN: sanitized incident context
+        AN->>LK: query Ollama to DMR to Claude
+        alt LLM available
+            LK-->>AN: 5-phase JSON playbook
+        else off or failed
+            LK-->>AN: kb.lookup deterministic playbook
+        end
+    end
+    AN->>AN: health_score 0-100 plus grade
+    AN-->>API: AnalysisResult JSON
+    API-->>OP: score actions CLI topology</pre>
+        </div>
+        <div class="diagram-card card reveal">
+          <h3>Data Flow — the analysis pipeline</h3>
+          <p class="d-desc">Data moves strictly left-to-right: raw lines → normalized events → classified findings → deduped ranked actions; top items get deep analysis after the sanitize gate.</p>
+          <pre class="mermaid">flowchart LR
+    RAW["Raw lines syslog CLI paste"]
+    EV["LogEvent frozen records"]
+    CE["ClassifiedEvent sev category"]
+    AI["ActionItem ranked sev x count"]
+    GATE{{"sanitize gate"}}
+    DEEP["Deep analysis 5-phase playbook"]
+    SCORE["Health score 0-100 + A-F"]
+    OUT["Outputs SPA CLI MCP reports"]
+
+    RAW -->|adapters and connectors| EV
+    EV -->|strip_ansi + regex KB| CE
+    CE -->|dedup and drop recovery| AI
+    AI -->|top-N context| GATE
+    GATE -->|LLM or rule KB| DEEP
+    AI --> SCORE
+    DEEP --> OUT
+    SCORE --> OUT
+
+    classDef raw fill:#475569,stroke:#94a3b8,color:#f8fafc
+    classDef stage fill:#7c3aed,stroke:#c4b5fd,color:#f8fafc
+    classDef gate fill:#f43f5e,stroke:#fda4af,color:#0b1220
+    classDef score fill:#60a5fa,stroke:#bfdbfe,color:#0b1220
+    classDef out fill:#a78bfa,stroke:#ddd6fe,color:#0b1220
+
+    class RAW,EV raw
+    class CE,AI,DEEP stage
+    class GATE gate
+    class SCORE score
+    class OUT out</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TECH STACK -->
+  <section id="stack" aria-labelledby="stack-h">
+    <div class="wrap">
+      <p class="eyebrow">Tech Stack</p>
+      <h2 class="title" id="stack-h">Built on a no-build, local-first stack</h2>
+      <p class="lead" style="margin-bottom:26px">Python frozen dataclasses and protocols at the core, a vanilla-JS SPA on top, and pluggable LLM runtimes underneath.</p>
+      <div class="stack reveal" id="stackGrid"></div>
+    </div>
+  </section>
+
+  <!-- COMPONENTS -->
+  <section id="components" aria-labelledby="comp-h">
+    <div class="wrap">
+      <p class="eyebrow">Components</p>
+      <h2 class="title" id="comp-h">Modules &amp; responsibilities</h2>
+      <p class="lead" style="margin-bottom:30px">Every module maps to a real path in <code>src/ai_log_analyzer/</code>.</p>
+      <div class="grid components" id="componentGrid"></div>
+    </div>
+  </section>
+
+  <!-- QUICKSTART -->
+  <section id="quickstart" aria-labelledby="qs-h">
+    <div class="wrap">
+      <p class="eyebrow">Quickstart</p>
+      <h2 class="title" id="qs-h">Up and running in minutes</h2>
+      <p class="lead" style="margin-bottom:30px">Clone, install, and serve the UI on <code>http://localhost:6060</code> — or run the CLI and MCP server.</p>
+      <div class="qs-grid">
+        <div class="codeblock reveal">
+          <div class="cb-head"><span class="ttl">Install &amp; serve</span><button class="copy-btn" type="button" data-copy="install">Copy</button></div>
+          <pre class="code" id="code-install"><span class="c"># clone and enter</span>
+git clone https://github.com/gesh75/netlog-ai.git
+cd netlog-ai
+
+<span class="c"># create venv and install</span>
+python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install -e <span class="p">".[dev]"</span>
+cp .env.example .env
+
+<span class="c"># start the web UI on http://localhost:6060</span>
+ai-log-analyzer serve</pre>
+        </div>
+        <div class="codeblock reveal">
+          <div class="cb-head"><span class="ttl">Analyze · MCP · test</span><button class="copy-btn" type="button" data-copy="run">Copy</button></div>
+          <pre class="code" id="code-run"><span class="c"># analyze FRR containers, no LLM, print score</span>
+ai-log-analyzer analyze --frr r1 r2 --no-llm | jq .score
+
+<span class="c"># analyze a syslog file</span>
+ai-log-analyzer analyze --file /var/log/syslog
+
+<span class="c"># run the MCP stdio server for agents</span>
+pip install <span class="p">'netlog-ai[mcp]'</span> &amp;&amp; netlog-ai mcp
+
+<span class="c"># run the test suite with coverage</span>
+pytest --cov=src --cov-report=term-missing</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <span class="brand" style="font-size:1.2rem"><span class="dot" aria-hidden="true"></span><b>netlog-ai</b></span>
+        <p style="color:var(--ink-dim); max-width:420px; margin:14px 0 0; font-size:.92rem">A local, sanitize-first, multi-vendor AI network log analyzer. Network logs in, ranked actions out.</p>
+      </div>
+      <nav class="foot-links" aria-label="Footer links">
+        <a href="https://github.com/gesh75/netlog-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+        <a href="https://github.com/gesh75/netlog-ai#readme" target="_blank" rel="noopener">README ↗</a>
+        <a href="https://github.com/gesh75/netlog-ai/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+        <a href="#hero">Back to top ↑</a>
+      </nav>
+    </div>
+    <p class="foot-note">MIT licensed · auto-generated single-page documentation, reconciled from README.md, docs/ARCHITECTURE.md, and the source tree.</p>
+  </div>
+</footer>
+
+<button type="button" id="toTop" aria-label="Back to top" title="Back to top">↑</button>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- Data ---------- */
+  const features = [
+    { icon: "🛡️", title: "Sanitize-before-LLM gate", desc: "Every config/log payload is scrubbed of shadow hashes, Junos $9$, SSH keys, SNMP/RADIUS/TACACS+/IPsec keys, and public IPs (replaced with stable PUB-&lt;hash&gt; pseudonym tokens — a public IP is never sent to the LLM in clear text) before any outbound LLM call." },
+    { icon: "🔌", title: "Pluggable log sources", desc: "Kibana, Splunk, Loki, LibreNMS, and a zero-config syslog UDP/TCP listener on port 5514 — one LogSource Protocol, one config dict, hot-pluggable." },
+    { icon: "🤖", title: "MCP server mode", desc: "The analyzer core is agent-callable over stdio from Claude Code / Cursor / Continue, exposing analyze_logs, fetch_logs, get_top_offenders, and analyze_site." },
+    { icon: "🔎", title: "Multi-vendor classify & prioritize", desc: "55 regex patterns across Junos, Arista EOS, FRR, IOS and RFC-3164/5424 dedup into a severity × count ranked action list with recovery events excluded." },
+    { icon: "🧠", title: "Local-first LLM, graceful fallback", desc: "Provider chain walks Ollama → Docker Model Runner → Anthropic Claude, then degrades to a deterministic rule-based KB so the tool never hard-fails on a missing model." },
+    { icon: "🗺️", title: "Multi-layer topology", desc: "Cytoscape.js + ELK renders PHYSICAL, BGP, OSPF, and VXLAN as separate overlays on the same fabric, with AS/RID/VTEP on nodes and inferred link speed on edges." },
+    { icon: "📄", title: "Executable remediation + reports", desc: "Every finding ships Junos set lines, EOS running-config patches, and FRR vtysh commands plus rollback/verify steps, exportable as Markdown/HTML/CSV/PDF." },
+    { icon: "⌨️", title: "Keyboard-first, accessible PWA", desc: "WCAG-AA dark dashboard with 1/2/3 tab switching, Cmd/Ctrl+Enter to run, ARIA roles, prefers-reduced-motion, and an installable PWA manifest." }
+  ];
+
+  const stack = [
+    "Python 3.10+ (frozen dataclasses, typing.Protocol, re)", "Flask 3", "flask-cors", "gunicorn",
+    "vanilla JS (no build)", "Cytoscape.js + ELK", "requests", "raw AF_UNIX socket HTTP",
+    "subprocess (docker CLI)", "Ollama", "Docker Model Runner (OpenAI-compat)",
+    "Anthropic Claude (claude-haiku-4-5)", "rule-based KB", "MCP SDK (FastMCP)",
+    "tfsm-fire / TextFSM (optional)", "pytest + pytest-cov + ruff", "Docker + docker-compose"
+  ];
+
+  const components = [
+    { name: "analyzer.py", tech: "Python · frozen dataclasses", resp: "End-to-end pipeline orchestrator: classify → dedup into ranked ActionItems → sanitize → deep-analyze top-N → health score → assemble AnalysisResult." },
+    { name: "sanitize.py", tech: "re · ipaddress · hashlib", resp: "Always-on pre-LLM redaction gate: scrubs shadow hashes ($1$/$5$/$6$), Junos $9$, SSH keys, SNMP/RADIUS/TACACS+/IPsec PSKs, and replaces public IPv4 with stable PUB-&lt;hash&gt; pseudonym tokens (a public IP is never sent to the LLM in clear text) before any outbound call." },
+    { name: "classifier.py", tech: "Python regex", resp: "Deterministic event classifier: 55 regex patterns across Junos/EOS/FRR/IOS/RFC-3164/5424 with severity + category lookup; strip_ansi removes VT100 escapes at the LogEvent → ClassifiedEvent boundary." },
+    { name: "llm.py", tech: "requests · AF_UNIX HTTP · Anthropic API", resp: "Provider fallback chain: Ollama (:11434) → Docker Model Runner (:12434 TCP + Unix socket) → Anthropic Claude (claude-haiku-4-5); returns None to trigger the rule-based KB." },
+    { name: "kb.py", tech: "Python", resp: "Rule-based deep-analysis knowledge base producing deterministic 5-phase playbooks when no LLM is available." },
+    { name: "sources/", tech: "requests · typing.Protocol", resp: "Pluggable connector layer (LogSource Protocol + SourceManager): kibana, splunk, loki, syslog UDP/TCP listener, librenms — one config dict, hot-pluggable." },
+    { name: "adapters/", tech: "subprocess (docker CLI) · TextFSM", resp: "Local ingest adapters: frr (docker logs → LogEvent), file (RFC3164/5424/Junos/freeform parser), network_tool, tfsm_auto (optional TextFSM auto-detect)." },
+    { name: "web/app.py", tech: "Flask 3 · vanilla JS · Cytoscape.js + ELK", resp: "Flask create_app() exposing ~29 API routes plus a no-build vanilla-JS SPA (index.html + app.js) on port 6060." },
+    { name: "mcp_server/server.py", tech: "MCP SDK (FastMCP) · stdio", resp: "Agent surface: FastMCP stdio server exposing list_sources, add_source, fetch_logs, search_logs, analyze_logs, get_top_offenders, list_sites, analyze_site + healthcheck/inventory." },
+    { name: "cli.py", tech: "Python argparse", resp: "Console entrypoint (ai-log-analyzer / netlog-ai) with serve, analyze, containers, and mcp subcommands." },
+    { name: "topology_infer.py", tech: "Python", resp: "Multi-signal edge inference (BGP, MLAG, descriptions, subnets) feeding the multi-layer topology graph builder (topology.py)." },
+    { name: "site_optimize.py", tech: "Python", resp: "Site-wide cross-device gap finder emitting split scores: fabric_design_score and operational_readiness_score with ALLOWED_HOSTNAMES anchoring." }
+  ];
+
+  /* ---------- Render ---------- */
+  const featureGrid = document.getElementById('featureGrid');
+  featureGrid.innerHTML = features.map(f => `
+    <article class="card feat reveal">
+      <div class="ico" aria-hidden="true">${f.icon}</div>
+      <h3>${f.title}</h3>
+      <p>${f.desc}</p>
+    </article>`).join('');
+
+  document.getElementById('stackGrid').innerHTML = stack.map(t => `<span class="tech">${t}</span>`).join('');
+
+  document.getElementById('componentGrid').innerHTML = components.map(c => `
+    <article class="card comp reveal">
+      <h3>${c.name}</h3>
+      <p>${c.resp}</p>
+      <div class="tline"><b>Tech:</b> ${c.tech}</div>
+    </article>`).join('');
+
+  /* ---------- Mermaid ---------- */
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    securityLevel: 'strict',
+    themeVariables: {
+      primaryColor: '#1e293b', primaryTextColor: '#e2e8f0', lineColor: '#64748b',
+      primaryBorderColor: '#475569', fontFamily: 'ui-sans-serif, system-ui, sans-serif'
+    }
+  });
+
+  /* ---------- Copy buttons ---------- */
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const el = document.getElementById('code-' + btn.dataset.copy);
+      if (!el) return;
+      try {
+        await navigator.clipboard.writeText(el.innerText);
+        const prev = btn.textContent;
+        btn.textContent = 'Copied ✓'; btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 1600);
+      } catch (e) {
+        btn.textContent = 'Copy failed';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+      }
+    });
+  });
+
+  /* ---------- Scroll reveal ---------- */
+  const revealEls = document.querySelectorAll('.reveal');
+  if (reduceMotion || !('IntersectionObserver' in window)) {
+    revealEls.forEach(el => el.classList.add('in'));
+  } else {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((entry, i) => {
+        if (entry.isIntersecting) {
+          const sibs = Array.from(entry.target.parentElement.children).filter(c => c.classList.contains('reveal'));
+          const idx = sibs.indexOf(entry.target);
+          entry.target.style.transitionDelay = Math.min(idx, 6) * 80 + 'ms';
+          entry.target.classList.add('in');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    revealEls.forEach(el => io.observe(el));
+  }
+
+  /* ---------- Count-up stat chips ---------- */
+  const counters = document.querySelectorAll('[data-count]');
+  const animateCount = (el) => {
+    const target = parseInt(el.dataset.count, 10);
+    if (reduceMotion) { el.textContent = target; return; }
+    const dur = 1100; const start = performance.now();
+    const tick = (now) => {
+      const p = Math.min((now - start) / dur, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(target * eased);
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  };
+  if ('IntersectionObserver' in window) {
+    const cio = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) { animateCount(e.target); cio.unobserve(e.target); } });
+    }, { threshold: 0.6 });
+    counters.forEach(c => cio.observe(c));
+  } else {
+    counters.forEach(animateCount);
+  }
+
+  /* ---------- Scroll progress + back-to-top ---------- */
+  const progress = document.getElementById('progress');
+  const toTop = document.getElementById('toTop');
+  const onScroll = () => {
+    const st = window.scrollY || document.documentElement.scrollTop;
+    const h = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+    progress.style.width = (h > 0 ? (st / h) * 100 : 0) + '%';
+    toTop.classList.toggle('show', st > 600);
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+  toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' }));
+
+  /* ---------- Scroll-spy ---------- */
+  const navLinks = Array.from(document.querySelectorAll('nav.links a[href^="#"]'));
+  const sectionIds = navLinks.map(a => a.getAttribute('href').slice(1));
+  const sections = sectionIds.map(id => document.getElementById(id)).filter(Boolean);
+  if ('IntersectionObserver' in window) {
+    const spy = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          navLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + entry.target.id));
+        }
+      });
+    }, { rootMargin: '-45% 0px -50% 0px', threshold: 0 });
+    sections.forEach(s => spy.observe(s));
+  }
+
+  /* ---------- Mobile nav toggle ---------- */
+  const navToggle = document.getElementById('navToggle');
+  const navMenu = document.getElementById('navLinks');
+  navToggle.addEventListener('click', () => {
+    const open = navMenu.classList.toggle('open');
+    navToggle.setAttribute('aria-expanded', String(open));
+  });
+  navMenu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
+    navMenu.classList.remove('open');
+    navToggle.setAttribute('aria-expanded', 'false');
+  }));
+</script>
+</body>
+</html>
