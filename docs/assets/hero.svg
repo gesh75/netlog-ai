@@ -1,0 +1,209 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc" fill="none" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <title id="title">netlog-ai — architecture</title>
+  <desc id="desc">Animated banner: multi-vendor network log streams flow left-to-right from Kibana, Splunk, Loki, syslog and FRR source nodes, pass through a glowing sanitize shield that redacts secrets, converge into a pulsing violet LLM and rule-based KB core, and emit a root-cause pulse into a ranked action-item stack. A red anomaly spark races down one lane.</desc>
+
+  <defs>
+    <!-- backgrounds -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0e1a"/>
+      <stop offset="0.55" stop-color="#0b1224"/>
+      <stop offset="1" stop-color="#0f1530"/>
+    </linearGradient>
+    <radialGradient id="coreGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.55"/>
+      <stop offset="0.6" stop-color="#6366f1" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.35"/>
+    </radialGradient>
+
+    <!-- title + accent gradients -->
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="0.45" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="stream" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#38bdf8" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="shieldFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0e2a3a"/>
+      <stop offset="1" stop-color="#0a1726"/>
+    </linearGradient>
+
+    <!-- glow filters -->
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <style>
+      @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+      @keyframes breathe { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+      @keyframes ring { 0%{transform:scale(.55);opacity:.85} 70%{opacity:.18} 100%{transform:scale(2.1);opacity:0} }
+      @keyframes drawline { to { stroke-dashoffset: 0 } }
+      @keyframes dash { to { stroke-dashoffset: -40 } }
+      @keyframes flick { 0%,72%,100%{opacity:.16} 76%,96%{opacity:1} }
+      @keyframes redflash { 0%,80%,100%{opacity:0} 86%,94%{opacity:1} }
+
+      .node { transform-box: fill-box; transform-origin: center; }
+      .pulse  { animation: pulse 2.8s ease-in-out infinite; }
+      .p1 { animation-delay:.0s } .p2 { animation-delay:.45s } .p3 { animation-delay:.9s }
+      .p4 { animation-delay:1.35s } .p5 { animation-delay:1.8s }
+      .core   { transform-box: fill-box; transform-origin: center; animation: breathe 3.4s ease-in-out infinite; }
+      .ring   { transform-box: fill-box; transform-origin: center; animation: ring 3.4s ease-out infinite; }
+      .ring2  { animation-delay: 1.7s; }
+      .flow   { stroke-dasharray: 6 10; animation: dash 1.1s linear infinite; }
+      .flowB  { animation-duration: 1.5s; }
+      .underline { stroke-dasharray: 360; stroke-dashoffset: 360; animation: drawline 1.7s ease-out .4s forwards; }
+      .redact { animation: flick 5.2s ease-in-out infinite; }
+      .rd2 { animation-delay: 2.1s } .rd3 { animation-delay: 3.4s }
+      .spark  { transform-box: fill-box; transform-origin: center; animation: redflash 5.6s ease-in-out infinite; }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { animation: none !important; }
+        .underline { stroke-dashoffset: 0; }
+        .redact, .ring { opacity: .85; }
+        .spark { opacity: .9; }
+      }
+    </style>
+  </defs>
+
+  <!-- backdrop -->
+  <rect width="1200" height="360" fill="url(#bg)"/>
+  <g opacity="0.05" stroke="#7c93c8" stroke-width="1">
+    <path d="M0 60 H1200 M0 120 H1200 M0 180 H1200 M0 240 H1200 M0 300 H1200"/>
+    <path d="M200 0 V360 M400 0 V360 M600 0 V360 M800 0 V360 M1000 0 V360"/>
+  </g>
+  <ellipse cx="640" cy="180" rx="170" ry="150" fill="url(#coreGlow)"/>
+
+  <!-- ============ LANE CONNECTORS (source -> shield -> core) ============ -->
+  <g stroke-linecap="round">
+    <!-- straightish flow lines from each source through the shield toward the core -->
+    <path id="laneA" d="M150 86 C 320 86, 380 120, 470 138 S 560 168, 600 178" stroke="#1e2a4a" stroke-width="2.4"/>
+    <path id="laneB" d="M150 132 C 320 132, 390 140, 470 150 S 560 172, 600 180" stroke="#1e2a4a" stroke-width="2.4"/>
+    <path id="laneC" d="M150 178 C 320 178, 400 178, 470 178 S 560 178, 600 180" stroke="#1e2a4a" stroke-width="2.4"/>
+    <path id="laneD" d="M150 224 C 320 224, 390 216, 470 206 S 560 188, 600 182" stroke="#1e2a4a" stroke-width="2.4"/>
+    <path id="laneE" d="M150 270 C 320 270, 380 240, 470 218 S 560 192, 600 184" stroke="#1e2a4a" stroke-width="2.4"/>
+
+    <!-- animated flowing dash overlay on the same lanes -->
+    <use href="#laneA" class="flow"  stroke="url(#stream)" stroke-width="2.6"/>
+    <use href="#laneB" class="flow flowB" stroke="url(#stream)" stroke-width="2.6"/>
+    <use href="#laneC" class="flow"  stroke="url(#stream)" stroke-width="2.6"/>
+    <use href="#laneD" class="flow flowB" stroke="url(#stream)" stroke-width="2.6"/>
+    <use href="#laneE" class="flow"  stroke="url(#stream)" stroke-width="2.6"/>
+
+    <!-- core -> ranked action stack -->
+    <path id="out1" d="M680 165 C 760 150, 820 130, 905 124" stroke="#3a2f63" stroke-width="2.2"/>
+    <path id="out2" d="M684 180 C 765 180, 820 180, 905 180" stroke="#3a2f63" stroke-width="2.2"/>
+    <path id="out3" d="M680 195 C 760 210, 820 230, 905 236" stroke="#3a2f63" stroke-width="2.2"/>
+    <use href="#out1" class="flow flowB" stroke="#a78bfa" stroke-width="2.4" opacity="0.8"/>
+    <use href="#out2" class="flow flowB" stroke="#a78bfa" stroke-width="2.4" opacity="0.8"/>
+    <use href="#out3" class="flow flowB" stroke="#a78bfa" stroke-width="2.4" opacity="0.8"/>
+  </g>
+
+  <!-- traveling log packets (SMIL animateMotion) -->
+  <g>
+    <rect width="14" height="3" rx="1.5" fill="#22d3ee"><animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto"><mpath href="#laneA"/></animateMotion></rect>
+    <rect width="14" height="3" rx="1.5" fill="#38bdf8"><animateMotion dur="3.0s" begin="0.5s" repeatCount="indefinite" rotate="auto"><mpath href="#laneB"/></animateMotion></rect>
+    <rect width="14" height="3" rx="1.5" fill="#6366f1"><animateMotion dur="2.4s" begin="0.2s" repeatCount="indefinite" rotate="auto"><mpath href="#laneC"/></animateMotion></rect>
+    <rect width="14" height="3" rx="1.5" fill="#38bdf8"><animateMotion dur="2.9s" begin="0.9s" repeatCount="indefinite" rotate="auto"><mpath href="#laneD"/></animateMotion></rect>
+    <rect width="14" height="3" rx="1.5" fill="#22d3ee"><animateMotion dur="2.7s" begin="0.35s" repeatCount="indefinite" rotate="auto"><mpath href="#laneE"/></animateMotion></rect>
+  </g>
+
+  <!-- red anomaly spark racing down lane C and detonating at the core -->
+  <g class="spark">
+    <circle r="5" fill="#ef4444" filter="url(#glow)">
+      <animateMotion dur="0.9s" begin="4.2s" repeatCount="indefinite" rotate="auto" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines="0.4 0 0.2 1"><mpath href="#laneC"/></animateMotion>
+    </circle>
+  </g>
+  <circle class="ring" cx="640" cy="180" r="44" fill="none" stroke="#f43f5e" stroke-width="2" opacity="0">
+    <animate attributeName="opacity" values="0;0.9;0" dur="5.6s" begin="0s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- ============ SOURCE NODES ============ -->
+  <g font-size="13" font-weight="600">
+    <g class="node pulse p1" filter="url(#glow)"><rect x="58" y="73" width="92" height="26" rx="7" fill="#0e3a52" stroke="#22d3ee" stroke-width="1.3"/></g>
+    <text x="104" y="90" text-anchor="middle" fill="#a5f3fc">Kibana</text>
+
+    <g class="node pulse p2" filter="url(#glow)"><rect x="58" y="119" width="92" height="26" rx="7" fill="#0e3a52" stroke="#38bdf8" stroke-width="1.3"/></g>
+    <text x="104" y="136" text-anchor="middle" fill="#bae6fd">Splunk</text>
+
+    <g class="node pulse p3" filter="url(#glow)"><rect x="58" y="165" width="92" height="26" rx="7" fill="#0e3a52" stroke="#6366f1" stroke-width="1.3"/></g>
+    <text x="104" y="182" text-anchor="middle" fill="#c7d2fe">Loki</text>
+
+    <g class="node pulse p4" filter="url(#glow)"><rect x="58" y="211" width="92" height="26" rx="7" fill="#0e3a52" stroke="#38bdf8" stroke-width="1.3"/></g>
+    <text x="104" y="228" text-anchor="middle" fill="#bae6fd">syslog</text>
+
+    <g class="node pulse p5" filter="url(#glow)"><rect x="58" y="257" width="92" height="26" rx="7" fill="#0e3a52" stroke="#22d3ee" stroke-width="1.3"/></g>
+    <text x="104" y="274" text-anchor="middle" fill="#a5f3fc">FRR · file</text>
+  </g>
+  <text x="104" y="55" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="2" fill="#475569">SOURCES</text>
+
+  <!-- ============ SANITIZE SHIELD GATE ============ -->
+  <g filter="url(#softGlow)">
+    <path d="M362 110 L362 158 C362 196 392 218 392 218 C392 218 422 196 422 158 L422 110 C422 110 392 100 362 110 Z"
+          fill="url(#shieldFill)" stroke="#22d3ee" stroke-width="2"/>
+    <path d="M376 158 l9 10 16 -22" stroke="#5eead4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="392" y="240" text-anchor="middle" font-size="12" font-weight="700" letter-spacing="1.5" fill="#5eead4">SANITIZE</text>
+  <!-- tokens flipping to REDACTED near the gate -->
+  <g font-size="10" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    <text class="redact"     x="392" y="86"  text-anchor="middle" fill="#f43f5e">$9$••••• → &lt;REDACTED&gt;</text>
+    <text class="redact rd2" x="392" y="266" text-anchor="middle" fill="#f43f5e">ssh-key → &lt;REDACTED&gt;</text>
+    <text class="redact rd3" x="392" y="300" text-anchor="middle" fill="#fbbf24">203.0.113.7 → PUB-9f</text>
+  </g>
+
+  <!-- ============ LLM / KB CORE (hexagon) ============ -->
+  <g>
+    <polygon class="core" filter="url(#softGlow)"
+             points="640,128 692,154 692,206 640,232 588,206 588,154"
+             fill="#3b1d74" stroke="#a78bfa" stroke-width="2.5"/>
+    <polygon points="640,142 678,161 678,199 640,218 602,199 602,161"
+             fill="#5b21b6" stroke="#c4b5fd" stroke-width="1.4" opacity="0.95"/>
+    <circle cx="640" cy="180" r="46" fill="none" stroke="#a78bfa" stroke-width="1.4" class="ring ring2" opacity="0"/>
+    <text x="640" y="176" text-anchor="middle" font-size="15" font-weight="800" fill="#ede9fe">LLM</text>
+    <text x="640" y="194" text-anchor="middle" font-size="10" font-weight="600" fill="#c4b5fd">+ rule KB</text>
+  </g>
+  <text x="640" y="262" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="2" fill="#7c6bb0">CLASSIFY · ANALYZE</text>
+
+  <!-- ============ RANKED ACTION-ITEM STACK ============ -->
+  <text x="998" y="55" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="2" fill="#475569">RANKED ACTIONS</text>
+  <g font-size="11" font-weight="600">
+    <g class="node pulse p1"><rect x="912" y="108" width="176" height="30" rx="7" fill="#3a0d18" stroke="#f43f5e" stroke-width="1.4"/></g>
+    <circle cx="930" cy="123" r="4" fill="#f43f5e"/>
+    <text x="944" y="127" fill="#fecdd3">CRIT · BGP peer down</text>
+
+    <g class="node pulse p2"><rect x="912" y="148" width="176" height="30" rx="7" fill="#3a2207" stroke="#f59e0b" stroke-width="1.4"/></g>
+    <circle cx="930" cy="163" r="4" fill="#f59e0b"/>
+    <text x="944" y="167" fill="#fde68a">HIGH · interface flap</text>
+
+    <g class="node pulse p3"><rect x="912" y="188" width="176" height="30" rx="7" fill="#0c2c3a" stroke="#38bdf8" stroke-width="1.4"/></g>
+    <circle cx="930" cy="203" r="4" fill="#38bdf8"/>
+    <text x="944" y="207" fill="#bae6fd">MED · OSPF adjacency</text>
+  </g>
+  <!-- 5-phase playbook chips -->
+  <g font-size="9" font-weight="700" font-family="ui-monospace, Menlo, monospace">
+    <rect x="912" y="232" width="34" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="929" y="245" text-anchor="middle" fill="#94a3b8">Diag</text>
+    <rect x="950" y="232" width="34" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="967" y="245" text-anchor="middle" fill="#94a3b8">Mitg</text>
+    <rect x="988" y="232" width="40" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="1008" y="245" text-anchor="middle" fill="#94a3b8">Remed</text>
+    <rect x="1032" y="232" width="32" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="1048" y="245" text-anchor="middle" fill="#94a3b8">Verf</text>
+    <rect x="1068" y="232" width="20" height="18" rx="4" fill="#16233f" stroke="#475569"/><text x="1078" y="245" text-anchor="middle" fill="#94a3b8">Op</text>
+  </g>
+
+  <!-- ============ TITLE BLOCK ============ -->
+  <text x="600" y="316" text-anchor="middle" font-size="46" font-weight="800" fill="url(#title)" letter-spacing="-0.5">netlog-ai</text>
+  <path class="underline" d="M452 332 H748" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/>
+  <text x="600" y="352" text-anchor="middle" font-size="14" font-weight="500" fill="#94a3b8">Network logs in · ranked actions out — sanitize-before-LLM, multi-vendor root-cause playbooks</text>
+
+  <!-- vignette on top for depth -->
+  <rect width="1200" height="360" fill="url(#vignette)" pointer-events="none"/>
+</svg>
