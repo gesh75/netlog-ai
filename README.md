@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="netlog-ai — architecture" width="100%">
+</p>
+
 # netlog-ai
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
@@ -218,7 +222,43 @@ inventory and post-validation drops any `config_changes` key not in that list �
 `CR-01` / `BR-01` placeholders. Full design and validation in
 [`docs/SCORING_SPLIT.md`](docs/SCORING_SPLIT.md).
 
-## Architecture
+## 🏛️ Architecture
+
+The analyzer core sits between the operators who drive it (browser, CLI, or AI agents over MCP), the log
+platforms it pulls from, the LLM runtimes it can call, and the network devices that produce the logs and
+configs. **Every outbound LLM call is gated by the sanitizer.** Full diagram set —
+container map, runtime sequence, data-flow pipeline, provider-fallback state machine, ER model, and module
+map — lives in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+```mermaid
+flowchart TB
+    OP["👩‍💻 NOC Operator<br/>browser · CLI"]
+    AGENT["🤖 AI Agents<br/>Claude Code · Cursor"]
+    NET([netlog-ai<br/>analyzer core])
+    LOGS["📊 Log Platforms<br/>Kibana · Splunk · Loki · LibreNMS · syslog"]
+    LLM["🧠 LLM Runtimes<br/>Ollama · Docker Model Runner · Claude"]
+    DEV["🌐 Network Devices<br/>Junos · EOS · SR Linux · FRR"]
+
+    OP -->|HTTP / JSON| NET
+    AGENT -->|MCP stdio| NET
+    LOGS -->|fetch logs| NET
+    DEV -.->|syslog / configs| LOGS
+    DEV -.->|docker logs · running-config| NET
+    NET -->|sanitized prompt| LLM
+    LLM -->|5-phase playbook JSON| NET
+    NET -->|ranked actions · CLI fixes| OP
+    NET -->|tool results| AGENT
+
+    classDef sys     fill:#7c3aed,stroke:#c4b5fd,color:#fff,stroke-width:2px
+    classDef person  fill:#0ea5e9,stroke:#7dd3fc,color:#fff
+    classDef ext     fill:#475569,stroke:#94a3b8,color:#fff
+    classDef ai      fill:#a16207,stroke:#fbbf24,color:#fff
+
+    class NET sys
+    class OP,AGENT person
+    class LOGS,DEV ext
+    class LLM ai
+```
 
 <p align="center">
   <img src="docs/architecture.svg" alt="netlog-ai animated architecture diagram — Sources → Adapters → Pipeline → Intelligence → Outputs" width="100%">
