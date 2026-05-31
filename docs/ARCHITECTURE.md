@@ -128,12 +128,12 @@ model is off or fails — then scores health and returns the assembled JSON to t
 ```mermaid
 sequenceDiagram
     autonumber
-    actor OP as Operator (SPA)
+    actor OP as Operator SPA
     participant API as Flask /api/analyze
-    participant AN as analyzer.analyze()
+    participant AN as analyzer.analyze
     participant CL as classifier
     participant SA as sanitize
-    participant LK as llm · kb
+    participant LK as llm and kb
 
     OP->>API: POST logs or site bundle
     API->>AN: analyze events and use_llm
