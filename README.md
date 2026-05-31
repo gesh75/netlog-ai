@@ -232,21 +232,21 @@ map — lives in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ```mermaid
 flowchart TB
-    OP["👩‍💻 NOC Operator<br/>browser · CLI"]
-    AGENT["🤖 AI Agents<br/>Claude Code · Cursor"]
-    NET([netlog-ai<br/>analyzer core])
-    LOGS["📊 Log Platforms<br/>Kibana · Splunk · Loki · LibreNMS · syslog"]
-    LLM["🧠 LLM Runtimes<br/>Ollama · Docker Model Runner · Claude"]
-    DEV["🌐 Network Devices<br/>Junos · EOS · SR Linux · FRR"]
+    OP["NOC Operator - browser and CLI"]
+    AGENT["AI Agents - Claude Code and Cursor"]
+    NET(["netlog-ai analyzer core"])
+    LOGS["Log Platforms - Kibana, Splunk, Loki, LibreNMS, syslog"]
+    LLM["LLM Runtimes - Ollama, Docker Model Runner, Claude"]
+    DEV["Network Devices - Junos, EOS, SR Linux, FRR"]
 
-    OP -->|HTTP / JSON| NET
+    OP -->|HTTP and JSON| NET
     AGENT -->|MCP stdio| NET
     LOGS -->|fetch logs| NET
-    DEV -.->|syslog / configs| LOGS
-    DEV -.->|docker logs · running-config| NET
+    DEV -.->|syslog and configs| LOGS
+    DEV -.->|docker logs and running-config| NET
     NET -->|sanitized prompt| LLM
     LLM -->|5-phase playbook JSON| NET
-    NET -->|ranked actions · CLI fixes| OP
+    NET -->|ranked actions and CLI fixes| OP
     NET -->|tool results| AGENT
 
     classDef sys     fill:#7c3aed,stroke:#c4b5fd,color:#fff,stroke-width:2px

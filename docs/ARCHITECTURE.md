@@ -36,21 +36,21 @@ devices that are the ultimate source of logs and configs. Every outbound LLM cal
 
 ```mermaid
 flowchart TB
-    OP["👩‍💻 NOC Operator<br/>browser · CLI"]
-    AGENT["🤖 AI Agents<br/>Claude Code · Cursor"]
-    NET([netlog-ai<br/>analyzer core])
-    LOGS["📊 Log Platforms<br/>Kibana · Splunk · Loki · LibreNMS · syslog"]
-    LLM["🧠 LLM Runtimes<br/>Ollama · Docker Model Runner · Claude"]
-    DEV["🌐 Network Devices<br/>Junos · EOS · SR Linux · FRR"]
+    OP["NOC Operator - browser and CLI"]
+    AGENT["AI Agents - Claude Code and Cursor"]
+    NET(["netlog-ai analyzer core"])
+    LOGS["Log Platforms - Kibana, Splunk, Loki, LibreNMS, syslog"]
+    LLM["LLM Runtimes - Ollama, Docker Model Runner, Claude"]
+    DEV["Network Devices - Junos, EOS, SR Linux, FRR"]
 
-    OP -->|HTTP / JSON| NET
+    OP -->|HTTP and JSON| NET
     AGENT -->|MCP stdio| NET
     LOGS -->|fetch logs| NET
-    DEV -.->|syslog / configs| LOGS
-    DEV -.->|docker logs · running-config| NET
+    DEV -.->|syslog and configs| LOGS
+    DEV -.->|docker logs and running-config| NET
     NET -->|sanitized prompt| LLM
     LLM -->|5-phase playbook JSON| NET
-    NET -->|ranked actions · CLI fixes| OP
+    NET -->|ranked actions and CLI fixes| OP
     NET -->|tool results| AGENT
 
     classDef sys     fill:#7c3aed,stroke:#c4b5fd,color:#fff,stroke-width:2px
@@ -74,27 +74,27 @@ pipeline orchestrator, and the pluggable intelligence backends (LLM client and r
 
 ```mermaid
 flowchart TB
-    subgraph ENTRY["🚪 Entrypoints"]
-        WEB["web/ — Flask + vanilla-JS SPA<br/>:6060 · ~28 /api/* routes"]
-        CLI["cli.py — serve · analyze · mcp"]
-        MCP["mcp_server/ — FastMCP stdio"]
+    subgraph ENTRY["Entrypoints"]
+        WEB["web/ - Flask plus vanilla-JS SPA, port 6060, ~28 api routes"]
+        CLI["cli.py - serve, analyze, mcp"]
+        MCP["mcp_server/ - FastMCP stdio"]
     end
 
-    subgraph INGEST["📥 Ingest"]
-        SRC["sources/ — connectors<br/>kibana · splunk · loki · syslog · librenms"]
-        ADP["adapters/ — local<br/>frr · file · network_tool · tfsm"]
+    subgraph INGEST["Ingest"]
+        SRC["sources/ - connectors kibana, splunk, loki, syslog, librenms"]
+        ADP["adapters/ - local frr, file, network_tool, tfsm"]
     end
 
-    subgraph CORE["⚙️ Analyzer Core"]
-        SAN["sanitize.py — redact gate"]
-        CLS["classifier.py — ~60 regexes"]
-        ANA["analyzer.py — orchestrator"]
-        SITE["site intelligence<br/>topology · optimize · copilot"]
+    subgraph CORE["Analyzer Core"]
+        SAN["sanitize.py - redact gate"]
+        CLS["classifier.py - ~60 regexes"]
+        ANA["analyzer.py - orchestrator"]
+        SITE["site intelligence - topology, optimize, copilot"]
     end
 
-    subgraph BRAIN["🧠 Intelligence"]
-        LLMC["llm.py — provider chain"]
-        KB["kb.py — rule-based fallback"]
+    subgraph BRAIN["Intelligence"]
+        LLMC["llm.py - provider chain"]
+        KB["kb.py - rule-based fallback"]
     end
 
     WEB & CLI & MCP --> ANA
@@ -135,24 +135,24 @@ sequenceDiagram
     participant SA as sanitize
     participant LK as llm · kb
 
-    OP->>API: POST logs / site bundle
-    API->>AN: analyze(events, use_llm)
-    AN->>CL: strip_ansi + classify (~60 regex)
-    CL-->>AN: ClassifiedEvents + counts
-    AN->>AN: dedup → ranked ActionItems (sev × count)
+    OP->>API: POST logs or site bundle
+    API->>AN: analyze events and use_llm
+    AN->>CL: strip_ansi plus classify ~60 regex
+    CL-->>AN: ClassifiedEvents plus counts
+    AN->>AN: dedup to ranked ActionItems by sev times count
     loop top-N action items
-        AN->>SA: scrub context (secrets, public IPs)
+        AN->>SA: scrub context secrets and public IPs
         SA-->>AN: sanitized incident context
-        AN->>LK: query() — ollama → local → claude
+        AN->>LK: query ollama to local to claude
         alt LLM available
             LK-->>AN: 5-phase JSON playbook
-        else off / failed
-            LK-->>AN: kb.lookup() deterministic playbook
+        else off or failed
+            LK-->>AN: kb.lookup deterministic playbook
         end
     end
-    AN->>AN: health_score (0–100 + grade) + exec summary
-    AN-->>API: AnalysisResult (JSON)
-    API-->>OP: score · actions · CLI · topology
+    AN->>AN: health_score 0 to 100 plus grade plus exec summary
+    AN-->>API: AnalysisResult JSON
+    API-->>OP: score, actions, CLI, topology
 ```
 
 ---
@@ -165,18 +165,18 @@ always passing through the sanitize gate before any LLM call.
 
 ```mermaid
 flowchart LR
-    RAW["📝 Raw lines<br/>syslog · CLI · paste"]
-    EV["LogEvent<br/>frozen records"]
-    CE["ClassifiedEvent<br/>sev · category"]
-    AI["ActionItem stack<br/>ranked sev × count"]
-    GATE{{"🛡️ sanitize gate"}}
-    DEEP["Deep analysis<br/>5-phase playbook"]
-    SCORE["Health score<br/>0–100 + A–F"]
-    OUT["📤 Outputs<br/>SPA · CLI · MCP · reports"]
+    RAW["Raw lines - syslog, CLI, paste"]
+    EV["LogEvent - frozen records"]
+    CE["ClassifiedEvent - sev, category"]
+    AI["ActionItem stack - ranked sev times count"]
+    GATE{{"sanitize gate"}}
+    DEEP["Deep analysis - 5-phase playbook"]
+    SCORE["Health score - 0 to 100 plus A to F"]
+    OUT["Outputs - SPA, CLI, MCP, reports"]
 
-    RAW -->|adapters / connectors| EV
-    EV -->|strip_ansi + regex KB| CE
-    CE -->|dedup · drop recovery| AI
+    RAW -->|adapters and connectors| EV
+    EV -->|strip_ansi plus regex KB| CE
+    CE -->|dedup and drop recovery| AI
     AI -->|top-N context| GATE
     GATE -->|LLM or rule KB| DEEP
     AI --> SCORE
@@ -206,10 +206,10 @@ the tool never hard-fails on a missing model.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Ollama: provider = local
+    [*] --> Ollama: provider local
     Ollama --> DMR: no response
-    DMR --> Claude: no response / no socket
-    Claude --> RuleKB: API error / disabled
+    DMR --> Claude: no response or no socket
+    Claude --> RuleKB: API error or disabled
 
     Ollama --> Done: text returned
     DMR --> Done: text returned
@@ -218,17 +218,9 @@ stateDiagram-v2
 
     Done --> [*]
 
-    note right of Ollama
-        :11434 native /api/chat
-    end note
-    note right of DMR
-        Docker Model Runner
-        :12434 + unix socket
-    end note
-    note right of RuleKB
-        kb.lookup() — always
-        emits actionable output
-    end note
+    note right of Ollama : port 11434 native api chat
+    note right of DMR : Docker Model Runner port 12434 unix socket
+    note right of RuleKB : kb.lookup always emits actionable output
 ```
 
 ---
@@ -242,8 +234,8 @@ whole run is assembled into one `AnalysisResult`.
 ```mermaid
 erDiagram
     LOG_SOURCE  ||--o{ LOG_EVENT       : emits
-    LOG_EVENT   ||--|| CLASSIFIED_EVENT : "classify()"
-    CLASSIFIED_EVENT }o--|| ACTION_ITEM : "dedup (sev, desc)"
+    LOG_EVENT   ||--|| CLASSIFIED_EVENT : "classify"
+    CLASSIFIED_EVENT }o--|| ACTION_ITEM : "dedup by sev desc"
     ACTION_ITEM ||--o| PLAYBOOK         : "deep_analyze top-N"
     ANALYSIS_RESULT ||--o{ ACTION_ITEM  : ranks
 
@@ -285,26 +277,26 @@ site-aware features operates over whole-fabric config bundles.
 
 ```mermaid
 flowchart TB
-    subgraph IN["📥 ingest"]
-        SOURCES["sources/ — LogSource Protocol<br/>+ SourceManager singleton"]
-        ADAPTERS["adapters/ — frr · file<br/>network_tool · tfsm_auto"]
+    subgraph IN["ingest"]
+        SOURCES["sources/ - LogSource Protocol plus SourceManager singleton"]
+        ADAPTERS["adapters/ - frr, file, network_tool, tfsm_auto"]
     end
 
-    subgraph PIPE["⚙️ pipeline"]
+    subgraph PIPE["pipeline"]
         SANITIZE["sanitize.py"]
         CLASSIFIER["classifier.py"]
         ANALYZER["analyzer.py"]
     end
 
-    subgraph INTEL["🧠 intelligence"]
+    subgraph INTEL["intelligence"]
         LLM["llm.py"]
         KB["kb.py"]
     end
 
-    subgraph SITE["🗺️ site features"]
-        TOPO["topology · topology_infer"]
-        OPT["site_optimize · compliance"]
-        EXTRA["copilot · diff · reports · runbook"]
+    subgraph SITE["site features"]
+        TOPO["topology and topology_infer"]
+        OPT["site_optimize and compliance"]
+        EXTRA["copilot, diff, reports, runbook"]
     end
 
     SOURCES & ADAPTERS --> ANALYZER
