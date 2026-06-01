@@ -9,6 +9,8 @@
 [![netlog-ai — live documentation](docs/assets/preview.png)](https://gesh75.github.io/netlog-ai/)
 
 > 🌐 **Live:** <https://gesh75.github.io/netlog-ai/> — an animated single-page guide: architecture diagrams, data flow, tech stack, and quickstart.
+>
+> 🗂️ Part of the **[gesh75 documentation hub](https://gesh75.github.io/)** — all my network & AI engineering project docs in one place.
 
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
