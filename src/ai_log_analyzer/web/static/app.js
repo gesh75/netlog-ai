@@ -593,6 +593,32 @@ function sevBadge(severity) {
   return el("span", { className: `sev sev-${severity}`, text: severity });
 }
 
+/** Confirmed/Suspected confidence badge — CONFIRMED is the strong/actionable
+ *  variant, SUSPECTED the muted "needs a 2nd source" variant. Pairs icon+text
+ *  so it never relies on color alone. */
+function confBadge(status, sourceCount) {
+  const confirmed = status === "confirmed";
+  return el("span", {
+    className: confirmed ? "conf conf-confirmed" : "conf conf-suspected",
+    text: `${confirmed ? "✓ CONFIRMED" : "? SUSPECTED"} · ${sourceCount} src`,
+  });
+}
+
+/** Per-source coverage pips: filled = source flagged this host, hollow = clean.
+ *  allSources is the full source_ids list from the result. */
+function sourcePips(deviceSources, allSources) {
+  const flagged = new Set(deviceSources || []);
+  const wrap = el("span", { className: "src-pips" });
+  (allSources || []).forEach((sid) => {
+    wrap.appendChild(el("span", {
+      className: "pip " + (flagged.has(sid) ? "pip-on" : "pip-off"),
+      attrs: { title: sid + (flagged.has(sid) ? " (flagged)" : " (clean)") },
+      text: "●",
+    }));
+  });
+  return wrap;
+}
+
 /** Tiny origin pill next to a hostname — tells the user where the event
  *  came from (SecureCRT recording, FRR docker logs, etc). Returns null for
  *  generic syslog so the table stays uncluttered. */
@@ -1256,6 +1282,204 @@ function renderOptimize(r) {
   clear(monUl);
   (r.monitoring_gaps || []).forEach((m) => {
     monUl.appendChild(el("li", { className: "monitoring-gap", text: m }));
+  });
+}
+
+// ── A. Cross-source correlation ───────────────────────────────────────────────
+let _correlateAllSources = [];   // captured for pip rendering / sort
+
+async function runCorrelate() {
+  const btn = $("correlate-btn");
+  const minSev = $("correlate-minsev").value;
+  const since = parseInt($("correlate-since").value, 10) || 3600;
+  btn.disabled = true; btn.setAttribute("aria-busy", "true");
+  setStatus("Correlate: scanning sources…");
+  setContext("Device · cross-source correlation");
+  $("correlate-panel").style.display = "block";
+  $("correlate-summary").textContent = "Running…";
+  clear($("correlate-table-wrap"));
+  const clearProgress = showPanelProgress("correlate-panel", "Correlating sources");
+  try {
+    const r = await fetchJSON("/api/correlate", {
+      method: "POST",
+      body: JSON.stringify({ since_seconds: since, min_severity: minSev }),
+    });
+    renderCorrelate(r);
+    setStatus(`Correlate: ${r.confirmed_count} confirmed, ${r.suspected_count} suspected `
+              + `across ${r.source_ids.length} sources`);
+    toast(`Correlation done — ${r.confirmed_count} confirmed, `
+          + `${r.suspected_count} suspected.`, "success");
+  } catch (e) {
+    $("correlate-summary").textContent = "Error: " + e.message;
+    setStatus(`Correlate error: ${e.message}`);
+    toast("Correlate error: " + e.message, "error", 6000);
+  } finally {
+    clearProgress(); btn.disabled = false; btn.removeAttribute("aria-busy");
+  }
+}
+
+function renderCorrelate(r) {
+  _correlateAllSources = r.source_ids || [];
+  const skippedN = Object.keys(r.skipped || {}).length;
+  $("correlate-summary").textContent =
+    `${r.device_count} device(s) · ${r.confirmed_count} confirmed · `
+    + `${r.suspected_count} suspected · ${r.source_ids.length} source(s)`
+    + (skippedN ? ` · ${skippedN} source(s) skipped` : "");
+
+  const wrap = $("correlate-table-wrap"); clear(wrap);
+  if (!(r.devices || []).length) {
+    wrap.appendChild(el("p", { className: "row-msg", text: "No actionable devices in window." }));
+    return;
+  }
+  // Backend already sorts confirmed-first, worst-severity, then events desc.
+  const table = el("table", { className: "events-table" });
+  const thead = el("thead", {}, el("tr", {},
+    el("th", { text: "Confidence" }), el("th", { text: "Device" }),
+    el("th", { text: "Source coverage" }), el("th", { text: "# Src" }),
+    el("th", { text: "Worst severity" }), el("th", { text: "Events" }),
+    el("th", { text: "" }),
+  ));
+  const tbody = el("tbody");
+  (r.devices || []).forEach((d) => {
+    const tr = el("tr", { className: `sev-row-${d.worst_severity || "info"}` },
+      el("td", {}, confBadge(d.status, d.source_count)),
+      el("td", {}, el("strong", { text: d.hostname })),
+      el("td", {}, sourcePips(d.sources, _correlateAllSources)),
+      el("td", { text: String(d.source_count) }),
+      el("td", {}, sevBadge(d.worst_severity || "info")),
+      el("td", { text: String(d.total_events) }),
+      el("td", {}, el("button", {
+        className: "tiny secondary",
+        text: "🔬 Triage",
+        attrs: { style: "width:auto;margin:0;padding:3px 9px;font-size:10px;" },
+        on: { click: () => triageDevice(d.hostname) },
+      })),
+    );
+    tbody.appendChild(tr);
+  });
+  table.appendChild(thead); table.appendChild(tbody);
+  wrap.appendChild(table);
+}
+
+// ── B. Per-device triage ──────────────────────────────────────────────────────
+async function runTriage() {
+  const host = $("triage-host").value.trim();
+  if (!host) { setStatus("Triage: hostname required"); toast("Triage: hostname required", "error"); return; }
+  await triageDevice(host);
+}
+
+async function triageDevice(hostname) {
+  const btn = $("triage-btn");
+  $("triage-host").value = hostname;
+  if (btn) { btn.disabled = true; btn.setAttribute("aria-busy", "true"); }
+  setStatus(`Triage: analyzing ${hostname}…`);
+  setContext(`Device · triage ${hostname}`);
+  $("triage-panel").style.display = "block";
+  $("triage-verdict").textContent = "Running…";
+  $("triage-verdict").className = "triage-verdict";
+  clear($("triage-histogram")); clear($("triage-processes")); clear($("triage-patterns"));
+  const clearProgress = showPanelProgress("triage-panel", "Triaging device");
+  try {
+    const r = await fetchJSON("/api/triage", {
+      method: "POST", body: JSON.stringify({ hostname }),
+    });
+    renderTriage(r);
+    setStatus(`Triage: ${hostname} — score ${r.health_score}/100`);
+    toast(`Triage complete — ${hostname}, score ${r.health_score}/100.`, "success");
+  } catch (e) {
+    $("triage-verdict").textContent = "Error: " + e.message;
+    setStatus(`Triage error: ${e.message}`);
+    toast("Triage error: " + e.message, "error", 6000);
+  } finally {
+    clearProgress(); if (btn) { btn.disabled = false; btn.removeAttribute("aria-busy"); }
+  }
+}
+
+// Map a 0-100 health score to a status band (verdict banner uses STATUS palette,
+// not the severity palette — per research "status ≠ severity").
+function _healthBand(score) {
+  if (score >= 80) return { cls: "ok",   label: "HEALTHY" };
+  if (score >= 50) return { cls: "warn", label: "DEGRADED" };
+  return { cls: "crit", label: "DOWN" };
+}
+
+// Order severity buckets most→least severe for the histogram (raw syslog labels
+// emitted by the backend severity_dist).
+const _RAW_SEV_ORDER = ["emerg", "alert", "crit", "error", "err", "warning", "warn", "notice", "info", "debug"];
+function _rawSevClass(raw) {
+  if (["emerg", "alert", "crit"].includes(raw)) return "critical";
+  if (["error", "err"].includes(raw))           return "high";
+  if (["warning", "warn"].includes(raw))        return "medium";
+  if (["notice"].includes(raw))                 return "low";
+  return "info";
+}
+
+function renderTriage(r) {
+  // 1. Verdict banner (status-colored) ─ top of hierarchy
+  const band = _healthBand(r.health_score);
+  const banner = $("triage-verdict");
+  banner.className = "triage-verdict band-" + band.cls;
+  banner.textContent = "";
+  banner.appendChild(el("strong", { text: `${band.label} · ${r.hostname}` }));
+  banner.appendChild(el("div", {
+    style: { fontSize: "12px", marginTop: "4px", opacity: "0.9" },
+    text: `${r.verdict} — ${r.total_events} events · top process: ${r.top_process || "—"}`
+          + (r.issue_type ? ` · ${r.issue_type}` : ""),
+  }));
+
+  // 2. Health score ring — reuse the existing gauge color-by-band convention.
+  $("triage-score").textContent = String(r.health_score);
+  const arc = $("triage-gauge-arc");
+  if (arc) {
+    const TR_CIRC = 578.05;  // matches index.html stroke-dasharray (r=92)
+    arc.setAttribute("stroke-dashoffset",
+      String(TR_CIRC * (1 - Math.max(0, Math.min(100, r.health_score)) / 100)));
+    arc.style.stroke = ({ ok: "var(--ok)", warn: "var(--warn)", crit: "var(--crit)" })[band.cls];
+  }
+
+  // 3. Severity histogram — horizontal segmented bars, most→least severe.
+  const hist = $("triage-histogram"); clear(hist);
+  const buckets = Object.entries(r.severity_dist || {})
+    .sort((a, b) => _RAW_SEV_ORDER.indexOf(a[0]) - _RAW_SEV_ORDER.indexOf(b[0]));
+  const maxCount = Math.max(1, ...buckets.map(([, c]) => c));
+  buckets.forEach(([raw, count]) => {
+    const sevCls = _rawSevClass(raw);
+    hist.appendChild(el("div", { className: "hist-row" },
+      el("span", { className: "hist-label" }, sevBadge(sevCls)),
+      el("span", {
+        className: `hist-bar sev-row-${sevCls}`,
+        style: { width: Math.round((count / maxCount) * 100) + "%" },
+      }),
+      el("span", { className: "hist-count", text: `${raw}: ${count}` }),
+    ));
+  });
+
+  // 4. Top processes (ranked, highest first — backend already sorted desc).
+  const procWrap = $("triage-processes"); clear(procWrap);
+  const ptable = el("table", { className: "events-table" });
+  ptable.appendChild(el("thead", {}, el("tr", {},
+    el("th", { text: "Process" }), el("th", { text: "Events" }), el("th", { text: "%" }))));
+  const ptbody = el("tbody");
+  (r.processes || []).slice(0, 10).forEach((p) => {
+    ptbody.appendChild(el("tr", {},
+      el("td", {}, el("strong", { text: p.process })),
+      el("td", { text: String(p.count) }),
+      el("td", { text: `${p.pct}%` })));
+  });
+  ptable.appendChild(ptbody); procWrap.appendChild(ptable);
+
+  // 5. Deduplicated error patterns — highest count first (backend sorted desc).
+  const patWrap = $("triage-patterns"); clear(patWrap);
+  if (!(r.patterns || []).length) {
+    patWrap.appendChild(el("p", { className: "row-msg", text: "No error-grade patterns." }));
+  }
+  (r.patterns || []).forEach((p) => {
+    patWrap.appendChild(el("div", { className: "finding" },
+      el("div", {},
+        sevBadge(_rawSevClass((p.severity || "").toLowerCase())), " ",
+        el("strong", { text: `×${p.count}` }), " ",
+        el("span", { className: "src-badge", text: p.app || "—" })),
+      el("div", { className: "finding-evidence", text: p.pattern })));
   });
 }
 
@@ -2352,7 +2576,7 @@ function switchSideTab(name) {
 function hideIdleStateIfAnyPanelVisible() {
   const watch = ["health-panel", "summary-panel", "actions-panel", "optimize-panel",
                   "site-panel", "topo-panel", "compliance-panel", "copilot-panel",
-                  "pm-panel", "site-wide-panel"];
+                  "pm-panel", "site-wide-panel", "correlate-panel", "triage-panel"];
   const anyVisible = watch.some((id) => {
     const el = $(id);
     return el && el.style.display !== "none" && el.style.display !== "";
@@ -2376,6 +2600,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("provider").addEventListener("change", changeProvider);
   $("run-btn").addEventListener("click", runAnalysis);
   $("opt-btn").addEventListener("click", runOptimize);
+  $("correlate-btn").addEventListener("click", runCorrelate);
+  $("triage-btn").addEventListener("click", runTriage);
   $("sample-opt-btn").addEventListener("click", runSampleOptimize);
   $("sample-picker").addEventListener("change", showSampleMeta);
   $("site-opt-btn").addEventListener("click", runSiteOptimize);

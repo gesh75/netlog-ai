@@ -68,6 +68,7 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"chassisd|craft.*interface",                                      "low",      "hardware",   "Chassis daemon activity"),
     (r"rpd_isis|rpd_ospf|rpd.*(?:start|init|ready)",                    "low",      "routing",    "Routing daemon activity"),
     (r"pfed|dfwd|dcd",                                                  "low",      "system",     "Forwarding daemon activity"),
+    (r"inetd|xinetd|ftpd",                                              "low",      "system",     "inetd service activity"),
     (r"(?:arista|strata|eos).*(?:agent|process)",                       "low",      "system",     "EOS agent/process activity"),
     (r"jlaunchd|process.*(?:start|stop|restart)",                       "low",      "system",     "Process lifecycle event"),
     (r"last\s+message\s+repeated",                                      "low",      "system",     "Repeated message suppressed"),
