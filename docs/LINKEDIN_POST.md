@@ -14,7 +14,7 @@
 > 🚀 **No telemetry, no SaaS** — configs never leave the host.
 > 🎯 **Multi-vendor from day one** — Junos, Arista, and FRR are all first-class. Not a chatbot retrofit.
 > ♿ **WCAG-AA accessible** — axe-core verified across every UI state. Full keyboard nav, ARIA, reduced-motion, dark color-scheme.
-> 🧪 **139 tests passing** across 8 review rounds — classifier, sanitizer, topology inference, LLM providers, site analysis.
+> 🧪 **237 tests passing** across 8 review rounds — classifier, sanitizer, topology inference, LLM providers, site analysis.
 >
 > 📦 Bundled with two synthetic demo sites (11 devices total, mixed Junos + Arista EOS) so every feature runs end-to-end the moment you clone.
 >
@@ -66,7 +66,7 @@
 | 0:25–0:50 | DEVICE tab | Switch to DEVICE, pick `junos-fw-01` sample, click Optimize → LLM auditing → findings populate with severity badges, code blocks (Proposed Patch, Rollback, Verify CLI), Copy All Patches button, toast "Optimization complete" | "Audit a device config — LLM produces patches + rollback + verify CLI" → "Findings with severity, evidence, proposed patch, rollback, verify CLI" |
 | 0:50–1:25 | SITE tab | Switch to SITE, pick `lab-bravo`, Analyze Whole Site → cross-device findings populate, then Topology → D3 force-directed map with 6 nodes, legend visible | "Or analyze a full site bundle" → "Cross-device gap analysis — BGP, OSPF, MTU, missing BFD…" → "D3 force-directed topology inferred from configs alone" |
 | 1:25–1:42 | Copilot | AI Copilot section opens, "Which devices are missing BFD on BGP?" types, Ask Copilot fires → LLM streams a markdown answer listing all affected devices | "Ask the LLM questions about the loaded site" → "Context-grounded answer — LLM never sees raw secrets (pre-sanitized)" |
-| 1:42–1:47 | Outro | Scroll to top, clean dashboard, outro caption | "github.com/gesh75/netlog-ai · MIT · 139 tests passing" |
+| 1:42–1:47 | Outro | Scroll to top, clean dashboard, outro caption | "github.com/gesh75/netlog-ai · MIT · 237 tests passing" |
 
 **Total runtime: 1:47 (107 seconds)** — comfortably under the 2-minute target.
 

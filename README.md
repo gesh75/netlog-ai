@@ -19,8 +19,6 @@
 
 > 📓 Recent changes — cross-source correlation + per-device triage (MCP tools **and** Device-tab UI) — are in [`CHANGELOG.md`](CHANGELOG.md).
 
-![screenshot](docs/screenshot.png)
-
 ---
 
 ## Why this exists
@@ -394,7 +392,7 @@ src/ai_log_analyzer/
 
 ## Tested & accessible
 
-- **139 unit + integration tests** (pytest, ~0.2s suite)
+- **237 unit + integration tests** (pytest)
 - Frontend audited across 8 review rounds:
   - WCAG-AA: `:focus-visible` rings, `aria-live` regions, `role=tablist/tab/tabpanel`, skip-to-main link, `prefers-reduced-motion` fallback
   - Responsive ≤ 1100px, PWA-ready (`theme-color`, `mobile-web-app-capable`, SVG favicon)

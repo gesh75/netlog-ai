@@ -415,6 +415,6 @@
 
   <!-- Legend dot pulse animation -->
   <g transform="translate(640,700)" text-anchor="middle">
-    <text font-size="10" fill="#6b7280">github.com/gesh75/netlog-ai · MIT · 139 tests passing</text>
+    <text font-size="10" fill="#6b7280">github.com/gesh75/netlog-ai · MIT · 237 tests passing</text>
   </g>
 </svg>
