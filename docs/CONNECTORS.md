@@ -113,18 +113,20 @@ netlog-ai mcp --transport streamable-http
 
 ### Tools exposed
 
-| Tool                    | Purpose |
-|-------------------------|---------|
-| `list_connector_kinds`  | Enumerate built-in connector types |
-| `list_sources`          | Show registered live sources |
-| `add_source`            | Register a new connector at runtime |
-| `test_source`           | Healthcheck a registered source |
-| `fetch_logs`            | Pull raw events from a source |
-| `search_logs`           | Pull events matching a regex pattern |
-| `analyze_logs`          | Full analyzer pipeline (classify + dedup + rank + optional LLM) |
-| `get_top_offenders`     | Return the N noisiest hostnames |
-| `list_sites`            | Enumerate bundled site directories |
-| `analyze_site`          | Run site-wide cross-device analysis |
+| Tool                   | Purpose                                                                              |
+|------------------------|--------------------------------------------------------------------------------------|
+| `list_connector_kinds` | Enumerate built-in connector types                                                   |
+| `list_sources`         | Show registered live sources                                                         |
+| `add_source`           | Register a new connector at runtime                                                  |
+| `test_source`          | Healthcheck a registered source                                                      |
+| `fetch_logs`           | Pull raw events from a source                                                        |
+| `search_logs`          | Pull events matching a regex pattern                                                 |
+| `analyze_logs`         | Full analyzer pipeline (classify + dedup + rank + optional LLM)                      |
+| `get_top_offenders`    | Return the N noisiest hostnames                                                      |
+| `correlate_sources`    | Cross-source correlation: marks devices confirmed (2+ sources) or suspected (1)      |
+| `analyze_device`       | Per-device triage: histogram, process breakdown, KB verdict, 0-100 health score      |
+| `list_sites`           | Enumerate bundled site directories                                                   |
+| `analyze_site`         | Run site-wide cross-device analysis                                                  |
 
 ### Hook into Claude Code
 
