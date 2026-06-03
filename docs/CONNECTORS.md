@@ -94,6 +94,11 @@ export NETLOG_SOURCE_librenms_API_TOKEN=...
 | POST   | `/api/sources/<id>/test`              | Healthcheck a source |
 | POST   | `/api/sources/<id>/fetch`             | Pull raw events `{since_seconds, limit, host_filter}` |
 | POST   | `/api/sources/<id>/analyze`           | Pull + run full analyzer pipeline (auth-required) |
+| POST   | `/api/correlate`                      | Cross-source correlation — confirmed (≥ 2 sources) vs suspected (1) devices (auth-required) |
+| POST   | `/api/triage`                         | Per-device triage — verdict, health score, histogram, processes, patterns (auth-required) |
+
+The last two are the HTTP surface (Device tab in the SPA) of the same capability
+exposed to agents by the `correlate_sources` / `analyze_device` MCP tools below.
 
 ---
 
@@ -113,18 +118,20 @@ netlog-ai mcp --transport streamable-http
 
 ### Tools exposed
 
-| Tool                    | Purpose |
-|-------------------------|---------|
-| `list_connector_kinds`  | Enumerate built-in connector types |
-| `list_sources`          | Show registered live sources |
-| `add_source`            | Register a new connector at runtime |
-| `test_source`           | Healthcheck a registered source |
-| `fetch_logs`            | Pull raw events from a source |
-| `search_logs`           | Pull events matching a regex pattern |
-| `analyze_logs`          | Full analyzer pipeline (classify + dedup + rank + optional LLM) |
-| `get_top_offenders`     | Return the N noisiest hostnames |
-| `list_sites`            | Enumerate bundled site directories |
-| `analyze_site`          | Run site-wide cross-device analysis |
+| Tool                   | Purpose                                                                              |
+|------------------------|--------------------------------------------------------------------------------------|
+| `list_connector_kinds` | Enumerate built-in connector types                                                   |
+| `list_sources`         | Show registered live sources                                                         |
+| `add_source`           | Register a new connector at runtime                                                  |
+| `test_source`          | Healthcheck a registered source                                                      |
+| `fetch_logs`           | Pull raw events from a source                                                        |
+| `search_logs`          | Pull events matching a regex pattern                                                 |
+| `analyze_logs`         | Full analyzer pipeline (classify + dedup + rank + optional LLM)                      |
+| `get_top_offenders`    | Return the N noisiest hostnames                                                      |
+| `correlate_sources`    | Cross-source correlation: marks devices confirmed (2+ sources) or suspected (1)      |
+| `analyze_device`       | Per-device triage: histogram, process breakdown, KB verdict, 0-100 health score      |
+| `list_sites`           | Enumerate bundled site directories                                                   |
+| `analyze_site`         | Run site-wide cross-device analysis                                                  |
 
 ### Hook into Claude Code
 

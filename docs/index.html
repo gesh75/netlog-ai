@@ -359,7 +359,7 @@
           <div class="chip" role="listitem"><div class="num" data-count="55">0</div><div class="lbl">regex patterns</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="5">0</div><div class="lbl">log connectors</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="30">0</div><div class="lbl">demo devices</div></div>
-          <div class="chip" role="listitem"><div class="num" data-count="10">0</div><div class="lbl">MCP tools</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="12">0</div><div class="lbl">MCP tools</div></div>
         </div>
 
         <div class="cta-row">
@@ -843,7 +843,9 @@ pytest --cov=src --cov-report=term-missing</pre>
   const features = [
     { icon: "🛡️", title: "Sanitize-before-LLM gate", desc: "Every config/log payload is scrubbed of shadow hashes, Junos $9$, SSH keys, SNMP/RADIUS/TACACS+/IPsec keys, and public IPs (replaced with stable PUB-&lt;hash&gt; pseudonym tokens — a public IP is never sent to the LLM in clear text) before any outbound LLM call." },
     { icon: "🔌", title: "Pluggable log sources", desc: "Kibana, Splunk, Loki, LibreNMS, and a zero-config syslog UDP/TCP listener on port 5514 — one LogSource Protocol, one config dict, hot-pluggable." },
-    { icon: "🤖", title: "MCP server mode", desc: "The analyzer core is agent-callable over stdio from Claude Code / Cursor / Continue, exposing analyze_logs, fetch_logs, get_top_offenders, and analyze_site." },
+    { icon: "🤖", title: "MCP server mode", desc: "The analyzer core is agent-callable over stdio from Claude Code / Cursor / Continue, exposing analyze_logs, fetch_logs, get_top_offenders, correlate_sources, analyze_device, and analyze_site." },
+    { icon: "🔗", title: "Cross-source correlation", desc: "The Device tab's Correlate Sources view scans every registered source and tags each host confirmed (flagged by ≥ 2 independent sources) or suspected (1 only) in a sortable, severity-coded table — single-source noise is filtered before escalation." },
+    { icon: "🔬", title: "Per-device triage", desc: "The Device tab's Triage Device panel returns one host's verdict, a 0–100 health score ring, a severity histogram, top processes, and frequency-deduped error patterns in a single anchored view." },
     { icon: "🔎", title: "Multi-vendor classify & prioritize", desc: "55 regex patterns across Junos, Arista EOS, FRR, IOS and RFC-3164/5424 dedup into a severity × count ranked action list with recovery events excluded." },
     { icon: "🧠", title: "Local-first LLM, graceful fallback", desc: "Provider chain walks Ollama → Docker Model Runner → Anthropic Claude, then degrades to a deterministic rule-based KB so the tool never hard-fails on a missing model." },
     { icon: "🗺️", title: "Multi-layer topology", desc: "Cytoscape.js + ELK renders PHYSICAL, BGP, OSPF, and VXLAN as separate overlays on the same fabric, with AS/RID/VTEP on nodes and inferred link speed on edges." },
@@ -867,8 +869,8 @@ pytest --cov=src --cov-report=term-missing</pre>
     { name: "kb.py", tech: "Python", resp: "Rule-based deep-analysis knowledge base producing deterministic 5-phase playbooks when no LLM is available." },
     { name: "sources/", tech: "requests · typing.Protocol", resp: "Pluggable connector layer (LogSource Protocol + SourceManager): kibana, splunk, loki, syslog UDP/TCP listener, librenms — one config dict, hot-pluggable." },
     { name: "adapters/", tech: "subprocess (docker CLI) · TextFSM", resp: "Local ingest adapters: frr (docker logs → LogEvent), file (RFC3164/5424/Junos/freeform parser), network_tool, tfsm_auto (optional TextFSM auto-detect)." },
-    { name: "web/app.py", tech: "Flask 3 · vanilla JS · Cytoscape.js + ELK", resp: "Flask create_app() exposing ~29 API routes plus a no-build vanilla-JS SPA (index.html + app.js) on port 6060." },
-    { name: "mcp_server/server.py", tech: "MCP SDK (FastMCP) · stdio", resp: "Agent surface: FastMCP stdio server exposing list_sources, add_source, fetch_logs, search_logs, analyze_logs, get_top_offenders, list_sites, analyze_site + healthcheck/inventory." },
+    { name: "web/app.py", tech: "Flask 3 · vanilla JS · Cytoscape.js + ELK", resp: "Flask create_app() exposing ~31 API routes (incl. /api/correlate and /api/triage — the Device-tab cross-source correlation and per-device triage surfaces) plus a no-build vanilla-JS SPA (index.html + app.js) on port 6060." },
+    { name: "mcp_server/server.py", tech: "MCP SDK (FastMCP) · stdio", resp: "Agent surface: FastMCP stdio server exposing list_sources, add_source, fetch_logs, search_logs, analyze_logs, get_top_offenders, correlate_sources, analyze_device, list_sites, analyze_site + healthcheck/inventory." },
     { name: "cli.py", tech: "Python argparse", resp: "Console entrypoint (ai-log-analyzer / netlog-ai) with serve, analyze, containers, and mcp subcommands." },
     { name: "topology_infer.py", tech: "Python", resp: "Multi-signal edge inference (BGP, MLAG, descriptions, subnets) feeding the multi-layer topology graph builder (topology.py)." },
     { name: "site_optimize.py", tech: "Python", resp: "Site-wide cross-device gap finder emitting split scores: fabric_design_score and operational_readiness_score with ALLOWED_HOSTNAMES anchoring." }

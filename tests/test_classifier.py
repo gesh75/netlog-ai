@@ -145,3 +145,39 @@ def test_classify_events_strips_ansi_from_message_and_description():
     assert "[0;32m" not in c.message
     assert "\x1b" not in c.sample_message
     assert "\x1b" not in c.description
+
+
+# ── inetd / xinetd / ftpd pattern (Item 4 backfill) ──────────────────────────
+
+@pytest.mark.unit
+def test_inetd_classified_as_low_system():
+    ev = LogEvent("", "h1", "inetd", "info", "inetd: /usr/sbin/sshd invoked from inetd")
+    out, sev_counts, cat_counts = classify_events([ev])
+    assert out[0].severity == "low"
+    assert out[0].category == "system"
+    assert sev_counts["low"] == 1
+    assert cat_counts["system"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("appname,message", [
+    ("xinetd", "xinetd: started /usr/sbin/in.telnetd"),
+    ("ftpd", "ftpd: connection from 192.168.1.10 accepted"),
+])
+def test_xinetd_and_ftpd_match(appname: str, message: str) -> None:
+    ev = LogEvent("", "h1", appname, "info", message)
+    out, _, cat_counts = classify_events([ev])
+    assert out[0].severity == "low"
+    assert out[0].category == "system"
+
+
+@pytest.mark.unit
+def test_inetd_does_not_shadow_higher_pattern():
+    """A message containing both an ftpd token and a BGP-down token must be
+    classified by the earlier (higher-severity) BGP pattern — proving
+    first-match-wins is preserved after the new inetd tuple was inserted."""
+    ev = LogEvent("", "h1", "rpd", "err", "ftpd: bgp peer 10.0.0.1 down")
+    out, _, _ = classify_events([ev])
+    # BGP pattern (high/routing) must win over the later inetd pattern (low/system)
+    assert out[0].severity == "high"
+    assert out[0].category == "routing"

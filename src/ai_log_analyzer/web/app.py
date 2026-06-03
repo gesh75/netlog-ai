@@ -36,6 +36,8 @@ from ai_log_analyzer import (compliance as comp_engine, copilot, diff as diff_mo
                               site_optimize, topology as topo_mod)
 from ai_log_analyzer.sources import SourceConfig, SourceError, registry  # noqa: E402
 from ai_log_analyzer.sources.manager import manager as source_manager  # noqa: E402
+from ai_log_analyzer.correlate import correlate_from_manager  # noqa: E402
+from ai_log_analyzer.device_triage import triage_from_manager  # noqa: E402
 
 STATIC_DIR = Path(__file__).parent / "static"
 SAMPLES_DIR = Path(__file__).resolve().parents[3] / "samples"
@@ -825,6 +827,48 @@ def create_app() -> Flask:
                             "message": "no events in window"})
         result = analyze(events, use_llm=_parse_bool(body.get("use_llm", True), default=True))
         return jsonify({"ok": True, "count": len(events), "result": result.to_dict()})
+
+    @app.route("/api/correlate", methods=["POST"])
+    @require_api_token
+    def api_correlate():
+        """Cross-source device correlation: which hosts surface actionable
+        events from >=2 sources (confirmed) vs 1 (suspected). Thin wrapper
+        over correlate_from_manager(); never raises for a single bad source."""
+        body = request.get_json(silent=True) or {}
+        # None => all registered sources; an explicit list selects a subset.
+        raw_ids = body.get("source_ids")
+        source_ids = [str(s) for s in raw_ids] if isinstance(raw_ids, list) else None
+        min_severity = (body.get("min_severity") or "medium").strip().lower()
+        try:
+            result = correlate_from_manager(
+                source_ids,
+                since_seconds=int(body.get("since_seconds", 3600)),
+                limit=int(body.get("limit", 5000)),
+                min_severity=min_severity,
+            )
+        except ValueError as exc:  # unknown min_severity label
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify(result)
+
+    @app.route("/api/triage", methods=["POST"])
+    @require_api_token
+    def api_triage():
+        """Per-device deep triage: verdict + health score + severity histogram
+        + top processes + deduped error patterns for one host. Thin wrapper
+        over triage_from_manager(); never raises for a single bad source."""
+        body = request.get_json(silent=True) or {}
+        hostname = (body.get("hostname") or "").strip()
+        if not hostname:
+            return jsonify({"ok": False, "error": "hostname required"}), 400
+        raw_ids = body.get("source_ids")
+        source_ids = [str(s) for s in raw_ids] if isinstance(raw_ids, list) else None
+        result = triage_from_manager(
+            hostname,
+            source_ids,
+            since_seconds=int(body.get("since_seconds", 86_400)),
+            limit=int(body.get("limit", 5000)),
+        )
+        return jsonify(result)
 
     # Auto-load env-configured sources on app boot (idempotent).
     try:

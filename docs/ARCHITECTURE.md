@@ -75,7 +75,7 @@ pipeline orchestrator, and the pluggable intelligence backends (LLM client and r
 ```mermaid
 flowchart TB
     subgraph ENTRY["Entrypoints"]
-        WEB["web/ - Flask plus vanilla-JS SPA, port 6060, ~28 api routes"]
+        WEB["web/ - Flask plus vanilla-JS SPA, port 6060, ~30 api routes"]
         CLI["cli.py - serve, analyze, mcp"]
         MCP["mcp_server/ - FastMCP stdio"]
     end

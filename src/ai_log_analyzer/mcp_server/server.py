@@ -12,6 +12,8 @@ Tools exposed:
   - search_logs           : pull events filtered by a regex pattern
   - analyze_logs          : pull + classify + dedup + (optional) LLM ranking
   - get_top_offenders     : pull + return the N noisiest hostnames
+  - correlate_sources     : cross-source device correlation (confirmed/suspected)
+  - analyze_device        : per-device deep triage (verdict, score, process/pattern breakdown)
   - list_sites            : enumerate site bundles available locally
   - analyze_site          : run full site-wide analysis on a bundle
 
@@ -201,6 +203,49 @@ def _build_server():
         counter: Counter[str] = Counter(e.hostname or "unknown" for e in events)
         offenders = [{"hostname": h, "count": n} for h, n in counter.most_common(top_n)]
         return {"ok": True, "total_events": len(events), "offenders": offenders}
+
+    # ── cross-source correlation ─────────────────────────────────────────────
+    @mcp.tool()
+    def correlate_sources(
+        source_ids: list[str] | None = None,
+        since_seconds: int = 3600,
+        limit: int = 5000,
+        min_severity: str = "medium",
+    ) -> dict[str, Any]:
+        """Cross-source correlation: classify each source's events, then mark
+        every device `confirmed` (appears with actionable events in >=2 sources)
+        or `suspected` (1 source). Defaults to ALL registered sources."""
+        from ai_log_analyzer.correlate import correlate_from_manager
+        try:
+            return correlate_from_manager(
+                source_ids,
+                since_seconds=since_seconds,
+                limit=limit,
+                min_severity=min_severity,
+            )
+        except Exception as exc:  # noqa: BLE001 - never crash the MCP session
+            return {"ok": False, "error": str(exc)}
+
+    # ── per-device triage ────────────────────────────────────────────────────
+    @mcp.tool()
+    def analyze_device(
+        hostname: str,
+        source_ids: list[str] | None = None,
+        since_seconds: int = 86_400,
+        limit: int = 5000,
+    ) -> dict[str, Any]:
+        """Per-device deep triage: severity histogram, process breakdown,
+        frequency-deduped error patterns, a verdict (HARDWARE/ROUTING/LAG/...)
+        and a 0-100 health score. Pulls this host's events from the given
+        sources (default: all registered)."""
+        from ai_log_analyzer.device_triage import triage_from_manager
+        try:
+            return triage_from_manager(
+                hostname, source_ids,
+                since_seconds=since_seconds, limit=limit,
+            )
+        except Exception as exc:  # noqa: BLE001 - never crash the MCP session
+            return {"ok": False, "error": str(exc)}
 
     # ── site bundle helpers ──────────────────────────────────────────────────
     @mcp.tool()
