@@ -54,9 +54,9 @@ netlog-ai mcp        # stdio transport — wire into Claude Code, Cursor, Contin
 ```
 
 Tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
-`analyze_logs`, `get_top_offenders`, `list_sites`, `analyze_site`, plus
-healthcheck + connector inventory. See [docs/CONNECTORS.md](docs/CONNECTORS.md)
-for the full reference.
+`analyze_logs`, `get_top_offenders`, `correlate_sources`, `analyze_device`,
+`list_sites`, `analyze_site`, plus healthcheck + connector inventory. See
+[docs/CONNECTORS.md](docs/CONNECTORS.md) for the full reference.
 
 ## Features
 
@@ -64,6 +64,8 @@ for the full reference.
 |---|---|
 | 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
 | 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly as agent tools |
+| 🔗 **Cross-source correlation** | **Device tab** → *Correlate Sources*: scans every registered source and tags each host `confirmed` (flagged by ≥ 2 sources) or `suspected` (1) in a sortable, severity-coded table |
+| 🔬 **Per-device triage** | **Device tab** → *Triage Device*: one host's verdict + 0–100 health score, severity histogram, top processes, and deduped error patterns in a single panel |
 | 🔎 **Classify** | 50+ regex patterns across Junos, EOS, FRR, IOS, RFC-3164/5424 |
 | 🧭 **Prioritize** | Deduped action items, ranked by severity × count, recovery events excluded |
 | 🧠 **Deep analyze** | Top-N items get an LLM-written root-cause + risk + remediation playbook |
@@ -348,6 +350,8 @@ src/ai_log_analyzer/
 | `POST` | `/api/optimize` | Device-level config audit + patches |
 | `POST` | `/api/optimize/site` | Cross-device site analysis |
 | `POST` | `/api/optimize/site-wide/<id>` | Strategic maturity scoring + phased roadmap |
+| `POST` | `/api/correlate` | Cross-source correlation — confirmed (≥ 2 sources) vs suspected (1) devices |
+| `POST` | `/api/triage` | Per-device triage — verdict, health score, severity histogram, top processes, patterns |
 | `GET`  | `/api/topology/<id>` | Topology graph (JSON / Mermaid / DOT) |
 | `GET`  | `/api/compliance/<id>` | Compliance rules pass/fail |
 | `POST` | `/api/copilot` | Free-form Q&A grounded in selected site config |

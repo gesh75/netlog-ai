@@ -5,6 +5,10 @@ Four capabilities backfilled from the closed-source **DCN AI Intelligence Center
 same cross-source correlation and per-device triage patterns that operate against
 real Kibana/LibreNMS feeds into the open-source, lab-portable tool.
 
+Both correlation and triage are now reachable **two ways**: as the agent-facing MCP
+tools documented below (`correlate_sources`, `analyze_device`) and as first-class
+**Web GUI** surfaces in the Device tab of the SPA — see [Web GUI surface](#web-gui-surface).
+
 ---
 
 ## 1. Multi-source correlation (`correlate_sources`)
@@ -170,4 +174,26 @@ analyze_device(hostname="fra4-rt-01", source_ids=["kibana"])
 | `src/ai_log_analyzer/classifier.py` | +1 pattern (`inetd\|xinetd\|ftpd`) |
 | `src/ai_log_analyzer/kb.py` | Richer `rca` blocks on all existing entries; new `_VPN_DOWN`, `_REDUNDANCY`, `_FPC_ERR`, `_CHASSIS_ENV` entries; `hardware` sub-tree extended; `vpn` and `redundancy` keys added to `KB` dict |
 | `src/ai_log_analyzer/mcp_server/server.py` | +2 tools: `correlate_sources`, `analyze_device` |
+| `src/ai_log_analyzer/web/app.py` | +2 routes: `POST /api/correlate`, `POST /api/triage` (thin wrappers over `correlate_from_manager` / `triage_from_manager`) |
+| `src/ai_log_analyzer/web/static/index.html` | Device-tab controls + result panels for the Correlate / Triage GUI |
+| `src/ai_log_analyzer/web/static/app.js` | Handlers + renderers for the correlation table and triage panel |
 | `tests/test_classifier.py` | +3 unit tests for the new inetd pattern |
+| `tests/test_web_correlate_triage.py` | Route-wrapper tests for `/api/correlate` and `/api/triage` |
+
+---
+
+## Web GUI surface
+
+The correlation and triage capabilities are no longer MCP-only — both now have a
+front-end home in the **Device tab** of the SPA, alongside *Optimize Device*:
+
+- **🔗 Correlate Sources** (`POST /api/correlate`, wrapping `correlate_from_manager`) —
+  a sidebar control (min-severity + time window) renders a sortable, severity-coded
+  table of devices, each tagged **CONFIRMED** (≥ 2 sources) or **SUSPECTED** (1), with
+  per-source coverage pips and a per-row *Triage* button.
+- **🔬 Triage Device** (`POST /api/triage`, wrapping `triage_from_manager`) — a hostname
+  input opens a result panel with a status-colored verdict banner, a 0–100 health-score
+  ring, a severity histogram, a top-process table, and the deduped error patterns.
+
+These are the GUI front-ends of the same `correlate_sources` / `analyze_device` tools
+above; the routes are pure thin wrappers and add no business logic.

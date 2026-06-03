@@ -649,6 +649,39 @@
   .sev-info     { background: rgba(139,148,158,0.12); color: var(--info);
                   border: 1px solid rgba(139,148,158,0.25); }
 
+  /* ── Confidence badges (correlation) ─────────────────────────────────── */
+  .conf { display:inline-block; padding:2px 9px; border-radius:12px;
+          font-size:10px; font-weight:700; text-transform:uppercase;
+          letter-spacing:0.4px; white-space:nowrap; }
+  .conf-confirmed { background:rgba(255,68,68,0.18); color:var(--crit);
+                    border:1px solid rgba(255,68,68,0.45); }      /* strong/actionable */
+  .conf-suspected { background:rgba(139,148,158,0.10); color:var(--info);
+                    border:1px dashed rgba(139,148,158,0.45); }   /* muted/undefined */
+
+  /* ── Source coverage pips ────────────────────────────────────────────── */
+  .src-pips { display:inline-flex; gap:3px; }
+  .src-pips .pip { font-size:11px; line-height:1; }
+  .pip-on  { color:var(--accent-2); }                              /* filled = flagged */
+  .pip-off { color:var(--info); opacity:0.35; }                    /* hollow = clean */
+
+  /* ── Triage verdict banner (STATUS palette) ──────────────────────────── */
+  .triage-verdict { padding:12px 14px; border-radius:8px; font-size:15px;
+                    font-weight:700; border-left:4px solid var(--info);
+                    background:rgba(139,148,158,0.08); }
+  .triage-verdict.band-ok   { border-left-color:var(--ok);
+                              background:rgba(63,185,80,0.10); color:var(--ok); }
+  .triage-verdict.band-warn { border-left-color:var(--warn);
+                              background:rgba(210,153,34,0.10); color:var(--warn); }
+  .triage-verdict.band-crit { border-left-color:var(--crit);
+                              background:rgba(255,68,68,0.10); color:var(--crit); }
+  .triage-verdict div { color:var(--fg, #c9d1d9); font-weight:400; }
+
+  /* ── Triage severity histogram ───────────────────────────────────────── */
+  .hist-row { display:flex; align-items:center; gap:8px; margin:3px 0; }
+  .hist-label { flex:0 0 64px; }
+  .hist-bar { height:14px; border-radius:3px; min-width:2px; }
+  .hist-count { font-size:11px; color:var(--muted); white-space:nowrap; }
+
   /* ── Code block + copy button ────────────────────────────────────────── */
   .code-block {
     position: relative;
@@ -1206,6 +1239,36 @@
         </div>
       </details>
 
+      <details class="side-section" open>
+        <summary>Cross-Source Correlation</summary>
+        <div class="side-section-body">
+          <p class="row-msg" style="margin:0 0 8px;">Find hosts flagged by ≥2 sources (confirmed) vs 1 (suspected), across all registered sources.</p>
+          <label for="correlate-minsev">Min severity</label>
+          <select id="correlate-minsev" aria-label="Minimum severity to correlate">
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium" selected>Medium</option>
+            <option value="low">Low</option>
+            <option value="info">Info</option>
+          </select>
+          <label for="correlate-since">Window (seconds)</label>
+          <input id="correlate-since" type="number" value="3600" min="60" max="604800"
+                 inputmode="numeric" pattern="[0-9]*" title="Correlation time window in seconds">
+          <button id="correlate-btn" class="secondary">🔗 Correlate Sources</button>
+        </div>
+      </details>
+
+      <details class="side-section">
+        <summary>Device Triage</summary>
+        <div class="side-section-body">
+          <p class="row-msg" style="margin:0 0 8px;">Full verdict for one host: health score, severity histogram, top processes, deduped error patterns.</p>
+          <label for="triage-host">Hostname</label>
+          <input id="triage-host" placeholder="de-fra-core-01"
+                 autocomplete="off" spellcheck="false" autocapitalize="off">
+          <button id="triage-btn" class="secondary">🔬 Triage Device</button>
+        </div>
+      </details>
+
       <details class="side-section">
         <summary>Real-Config Samples</summary>
         <div class="side-section-body">
@@ -1387,6 +1450,40 @@
       <div id="opt-findings" class="panel-scroll-cap"></div>
       <h3>Monitoring Gaps</h3>
       <ul id="opt-monitoring"></ul>
+    </div>
+
+    <div class="panel" id="correlate-panel" style="display:none;">
+      <h2>🔗 Cross-Source Correlation</h2>
+      <div id="correlate-summary" style="color:var(--muted); margin-bottom:8px;"></div>
+      <div id="correlate-table-wrap" class="panel-scroll-cap"></div>
+    </div>
+
+    <div class="panel" id="triage-panel" style="display:none;">
+      <h2>🔬 Device Triage</h2>
+      <div id="triage-verdict" class="triage-verdict"></div>
+      <div class="health-wrap" style="margin-top:12px;">
+        <div class="health-left">
+          <div class="health-gauge">
+            <svg viewBox="0 0 220 220">
+              <circle class="bg-arc" cx="110" cy="110" r="92"/>
+              <circle class="fg-arc" id="triage-gauge-arc" cx="110" cy="110" r="92"
+                      stroke-dasharray="578.05" stroke-dashoffset="578.05"/>
+            </svg>
+            <div class="gauge-center">
+              <div class="score-num" id="triage-score">—</div>
+              <div style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:0.4px;margin-top:6px;">health</div>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <h3 style="margin-top:0;">Severity Histogram</h3>
+          <div id="triage-histogram"></div>
+        </div>
+      </div>
+      <h3>Top Processes</h3>
+      <div id="triage-processes"></div>
+      <h3>Deduplicated Error Patterns</h3>
+      <div id="triage-patterns" class="panel-scroll-cap"></div>
     </div>
 
     <div class="panel" id="site-panel" style="display:none;">

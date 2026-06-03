@@ -94,6 +94,11 @@ export NETLOG_SOURCE_librenms_API_TOKEN=...
 | POST   | `/api/sources/<id>/test`              | Healthcheck a source |
 | POST   | `/api/sources/<id>/fetch`             | Pull raw events `{since_seconds, limit, host_filter}` |
 | POST   | `/api/sources/<id>/analyze`           | Pull + run full analyzer pipeline (auth-required) |
+| POST   | `/api/correlate`                      | Cross-source correlation — confirmed (≥ 2 sources) vs suspected (1) devices (auth-required) |
+| POST   | `/api/triage`                         | Per-device triage — verdict, health score, histogram, processes, patterns (auth-required) |
+
+The last two are the HTTP surface (Device tab in the SPA) of the same capability
+exposed to agents by the `correlate_sources` / `analyze_device` MCP tools below.
 
 ---
 
