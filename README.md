@@ -54,9 +54,9 @@ netlog-ai mcp        # stdio transport — wire into Claude Code, Cursor, Contin
 ```
 
 Tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
-`analyze_logs`, `get_top_offenders`, `list_sites`, `analyze_site`, plus
-healthcheck + connector inventory. See [docs/CONNECTORS.md](docs/CONNECTORS.md)
-for the full reference.
+`analyze_logs`, `get_top_offenders`, `correlate_sources`, `analyze_device`,
+`list_sites`, `analyze_site`, plus healthcheck + connector inventory. See
+[docs/CONNECTORS.md](docs/CONNECTORS.md) for the full reference.
 
 ## Features
 
@@ -64,6 +64,8 @@ for the full reference.
 |---|---|
 | 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
 | 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly as agent tools |
+| 🔗 **Cross-source correlation** | **Device tab** → *Correlate Sources*: scans every registered source and tags each host `confirmed` (flagged by ≥ 2 sources) or `suspected` (1) in a sortable, severity-coded table |
+| 🔬 **Per-device triage** | **Device tab** → *Triage Device*: one host's verdict + 0–100 health score, severity histogram, top processes, and deduped error patterns in a single panel |
 | 🔎 **Classify** | 50+ regex patterns across Junos, EOS, FRR, IOS, RFC-3164/5424 |
 | 🧭 **Prioritize** | Deduped action items, ranked by severity × count, recovery events excluded |
 | 🧠 **Deep analyze** | Top-N items get an LLM-written root-cause + risk + remediation playbook |
@@ -208,6 +210,17 @@ See [`docs/TFSM_AUTO_PARSER.md`](docs/TFSM_AUTO_PARSER.md) for the API, scoring 
 and filter-hint reference. The full WebM video is [`demo/tfsm_demo.webm`](demo/tfsm_demo.webm)
 (19s, 311 KB) and the recording is reproducible via [`demo/record_tfsm_demo.sh`](demo/record_tfsm_demo.sh).
 
+## DCN AI port — correlation, triage, and expanded KB (2026-06-02)
+
+Four capabilities backfilled from the closed-source DCN AI Intelligence Center:
+
+- **Multi-source correlation** — `correlate_sources` MCP tool classifies events from every registered source and tags each device `confirmed` (seen in ≥ 2 independent sources) or `suspected` (1 source only). Eliminates single-source noise before escalation.
+- **Richer RCA KB** — every KB entry (`bgp`, `ospf`, `interface`, `lag`, `hardware`, `compliance`, `security`, `system`) now carries a structured `rca` block: numbered root-cause list, risk sentence, ordered resolution steps, and copy-pastable Junos / EOS CLI commands. Two new categories added: `vpn` (IKE/IPsec failure) and `redundancy` (VRRP/HSRP failover); `hardware` extended with `fpc` (line-card errors) and `chassis` (PSU/fan/temperature alarms).
+- **Expanded classifier patterns** — `inetd|xinetd|ftpd` added as a low-severity `system` pattern, positioned after all high-severity patterns so first-match-wins is preserved. Three new unit tests confirm matching and priority ordering.
+- **Per-device triage** — `analyze_device` MCP tool pulls one hostname's events from all sources, returns a severity histogram, process breakdown, frequency-deduped error patterns, a KB verdict (e.g. `ROUTING`, `HARDWARE`), and a 0–100 health score.
+
+Full details and usage examples: [`docs/PORTED_FROM_DCN_AI.md`](docs/PORTED_FROM_DCN_AI.md).
+
 ## LOGS pipeline hardening (2026-05-27)
 
 Three follow-up fixes to the LOGS tab: (1) the Executive Summary LLM call now
@@ -337,6 +350,8 @@ src/ai_log_analyzer/
 | `POST` | `/api/optimize` | Device-level config audit + patches |
 | `POST` | `/api/optimize/site` | Cross-device site analysis |
 | `POST` | `/api/optimize/site-wide/<id>` | Strategic maturity scoring + phased roadmap |
+| `POST` | `/api/correlate` | Cross-source correlation — confirmed (≥ 2 sources) vs suspected (1) devices |
+| `POST` | `/api/triage` | Per-device triage — verdict, health score, severity histogram, top processes, patterns |
 | `GET`  | `/api/topology/<id>` | Topology graph (JSON / Mermaid / DOT) |
 | `GET`  | `/api/compliance/<id>` | Compliance rules pass/fail |
 | `POST` | `/api/copilot` | Free-form Q&A grounded in selected site config |
