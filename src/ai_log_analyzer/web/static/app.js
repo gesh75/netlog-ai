@@ -471,6 +471,11 @@ async function refreshNetToolStatus() {
     setChipText("ntool-badge", `NetTool: ${ok ? "online :5757" : "offline"}`);
     $("ntool-badge").classList.toggle("ok",   ok);
     $("ntool-badge").classList.toggle("warn", !ok);
+    // Header badge follows the package version — never hardcode it again
+    if (h.version) {
+      const brand = document.querySelector(".brand-version");
+      if (brand) brand.textContent = `v${h.version}`;
+    }
   } catch {
     setChipText("ntool-badge", "NetTool: error");
     $("ntool-badge").classList.add("crit");
