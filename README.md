@@ -15,7 +15,7 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-256%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-270%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
 > 📓 Recent changes — cross-source correlation + per-device triage (MCP tools **and** Device-tab UI) — are in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -392,7 +392,7 @@ src/ai_log_analyzer/
 
 ## Tested & accessible
 
-- **256 unit + integration tests** (pytest)
+- **270 unit + integration tests** (pytest)
 - Frontend audited across 8 review rounds:
   - WCAG-AA: `:focus-visible` rings, `aria-live` regions, `role=tablist/tab/tabpanel`, skip-to-main link, `prefers-reduced-motion` fallback
   - Responsive ≤ 1100px, PWA-ready (`theme-color`, `mobile-web-app-capable`, SVG favicon)
@@ -404,7 +404,7 @@ src/ai_log_analyzer/
 
 - [ ] Multi-site comparison view (delta between two sites)
 - [ ] Real-time tail mode (websocket stream of new events)
-- [ ] PagerDuty / Slack alert webhooks per severity threshold
+- [x] Slack / generic-JSON alert webhooks per severity threshold (`AI_LOG_ANALYZER_WEBHOOK_URL` — see `.env.example`)
 - [ ] More vendor adapters (Nokia SR Linux, Cisco IOS-XE, Cumulus NCLU)
 - [ ] Snapshot / replay analysis runs for regression testing
 - [ ] Custom rule editor in the UI
