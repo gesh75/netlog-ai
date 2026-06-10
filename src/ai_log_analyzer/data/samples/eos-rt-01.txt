@@ -159,13 +159,13 @@ interface Ethernet4/1
 !
 interface Ethernet5/1
    traffic-policy input filter-internet-traffic-combined
-   description peer-a-ISP-Arelion-IC-389418
+   description peer-a-ISP-TransitA-IC-100001
    no switchport
    ip address 198.51.100.151/31
    ipv6 address 2001:2035:0:6ff::2/126
 !
 interface Ethernet6/1
-   description peer-a-rt-02-WL-ams1-rt-02-LE-305750
+   description peer-a-rt-02-WL-dc03-rt-02-LE-305750
    mtu 9202
    no switchport
    ip address 198.51.100.88/31
@@ -413,9 +413,9 @@ ip access-list filter-all-in-one-v4
 !
 ip routing
 !
-ip community-list SET_ARELION_FRA_GEOTAG permit 1299:35410
-ip community-list SET_ORIGIN_GEO_PEER-A permit 35793:21014
-ip community-list SET_ORIGIN_GEO_PEER-A permit 35793:2101
+ip community-list SET_TRANSITA_FRA_GEOTAG permit 65101:35410
+ip community-list SET_ORIGIN_GEO_PEER-A permit 64900:21014
+ip community-list SET_ORIGIN_GEO_PEER-A permit 64900:2101
 ip community-list SET_TYPE_INTERNET_TRANSIT permit 1:51
 !
 ip prefix-list example_BGP_ADV_V4_PREFIXES
@@ -561,63 +561,63 @@ ntp server 10.1.251.49 prefer
 role gnmi
    10 deny mode exec command .*
 !
-route-map AKAMAI_BGP_RCV_V4 deny 10
+route-map CDNA_BGP_RCV_V4 deny 10
    match ip address prefix-list STANDARD_DENIAL_V4
 !
-route-map AKAMAI_BGP_RCV_V4 deny 20
+route-map CDNA_BGP_RCV_V4 deny 20
    match ip address prefix-list example_BGP_ADV_V4_PREFIXES
 !
-route-map AKAMAI_BGP_RCV_V4 permit 30
+route-map CDNA_BGP_RCV_V4 permit 30
    match ip address prefix-list ALL_UP_TO_24
    match source-protocol bgp
    set community REDACTED
    set local-preference 3000
 !
-route-map AKAMAI_BGP_RCV_V6 deny 10
+route-map CDNA_BGP_RCV_V6 deny 10
    match ipv6 address prefix-list STANDARD_DENIAL_V6
 !
-route-map AKAMAI_BGP_RCV_V6 deny 20
+route-map CDNA_BGP_RCV_V6 deny 20
    match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
 !
-route-map AKAMAI_BGP_RCV_V6 permit 30
+route-map CDNA_BGP_RCV_V6 permit 30
    match source-protocol bgp
    match ipv6 address prefix-list ALL_UP_TO_48
    set community REDACTED
    set local-preference 3000
 !
-route-map ARELION_BGP_ADV_V4 permit 10
+route-map TRANSITA_BGP_ADV_V4 permit 10
    sub-route-map GENERIC_BGP_ADV_V4
 !
-route-map ARELION_BGP_ADV_V6 permit 10
+route-map TRANSITA_BGP_ADV_V6 permit 10
    sub-route-map GENERIC_BGP_ADV_V6
 !
-route-map ARELION_BGP_RCV_V4 permit 10
+route-map TRANSITA_BGP_RCV_V4 permit 10
    sub-route-map GENERIC_ISP_BGP_RCV_V4
-   set community REDACTED SET_ARELION_FRA_GEOTAG SET_ORIGIN_GEO_PEER-A SET_TYPE_INTERNET_TRANSIT
+   set community REDACTED SET_TRANSITA_FRA_GEOTAG SET_ORIGIN_GEO_PEER-A SET_TYPE_INTERNET_TRANSIT
 !
-route-map ARELION_BGP_RCV_V6 permit 10
+route-map TRANSITA_BGP_RCV_V6 permit 10
    sub-route-map GENERIC_ISP_BGP_RCV_V6
-   set community REDACTED SET_ARELION_FRA_GEOTAG SET_ORIGIN_GEO_PEER-A SET_TYPE_INTERNET_TRANSIT
+   set community REDACTED SET_TRANSITA_FRA_GEOTAG SET_ORIGIN_GEO_PEER-A SET_TYPE_INTERNET_TRANSIT
 !
-route-map ATOM86_BGP_RCV_V4 deny 10
+route-map PEERB_BGP_RCV_V4 deny 10
    match ip address prefix-list STANDARD_DENIAL_V4
 !
-route-map ATOM86_BGP_RCV_V4 deny 20
+route-map PEERB_BGP_RCV_V4 deny 20
    match ip address prefix-list example_BGP_ADV_V4_PREFIXES
 !
-route-map ATOM86_BGP_RCV_V4 permit 30
+route-map PEERB_BGP_RCV_V4 permit 30
    match ip address prefix-list ALL_UP_TO_24
    match source-protocol bgp
    set community REDACTED
    set local-preference 3000
 !
-route-map ATOM86_BGP_RCV_V6 deny 10
+route-map PEERB_BGP_RCV_V6 deny 10
    match ipv6 address prefix-list STANDARD_DENIAL_V6
 !
-route-map ATOM86_BGP_RCV_V6 deny 20
+route-map PEERB_BGP_RCV_V6 deny 20
    match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
 !
-route-map ATOM86_BGP_RCV_V6 permit 30
+route-map PEERB_BGP_RCV_V6 permit 30
    match source-protocol bgp
    match ipv6 address prefix-list ALL_UP_TO_48
    set community REDACTED
@@ -930,12 +930,12 @@ route-map HETZNER_BGP_RCV_V6 permit 30
 !
 route-map HE_BGP_ADV_V4 permit 10
    match ip address prefix-list example_BGP_ADV_V4_PREFIXES
-   set as-path prepend 35793
+   set as-path prepend 64900
    set community REDACTED
 !
 route-map HE_BGP_ADV_V6 permit 10
    match ipv6 address prefix-list example_BGP_ADV_V6_PREFIXES
-   set as-path prepend 35793
+   set as-path prepend 64900
    set community REDACTED
 !
 route-map HE_BGP_RCV_V4 deny 10
@@ -1093,58 +1093,58 @@ route-map ZETNET_BGP_RCV_V6 permit 30
    set community REDACTED
    set local-preference 3000
 !
-router bgp 35793
+router bgp 64900
    router-id 10.3.254.135
    distance bgp 170 170 170
    maximum-paths 10 ecmp 10
-   neighbor AKAMAI_IXPEER_V4 peer group
-   neighbor AKAMAI_IXPEER_V4 remote-as 20940
-   neighbor AKAMAI_IXPEER_V4 remove-private-as
-   neighbor AKAMAI_IXPEER_V4 update-source Port-Channel2.7
-   neighbor AKAMAI_IXPEER_V4 description AKAMAI_IX_PEER_V4
-   neighbor AKAMAI_IXPEER_V4 route-map AKAMAI_BGP_RCV_V4 in
-   neighbor AKAMAI_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
-   neighbor AKAMAI_IXPEER_V4 maximum-routes 0
-   neighbor AKAMAI_IXPEER_V6 peer group
-   neighbor AKAMAI_IXPEER_V6 remote-as 20940
-   neighbor AKAMAI_IXPEER_V6 remove-private-as
-   neighbor AKAMAI_IXPEER_V6 update-source Port-Channel2.7
-   neighbor AKAMAI_IXPEER_V6 description AKAMAI_IX_PEER_V6
-   neighbor AKAMAI_IXPEER_V6 route-map AKAMAI_BGP_RCV_V6 in
-   neighbor AKAMAI_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
-   neighbor AKAMAI_IXPEER_V6 maximum-routes 0
-   neighbor ARELION_ISP_V4 peer group
-   neighbor ARELION_ISP_V4 remote-as 1299
-   neighbor ARELION_ISP_V4 remove-private-as
-   neighbor ARELION_ISP_V4 update-source 198.51.100.151
-   neighbor ARELION_ISP_V4 route-map ARELION_BGP_RCV_V4 in
-   neighbor ARELION_ISP_V4 route-map GENERIC_BGP_ADV_V4 out
-   neighbor ARELION_ISP_V4 maximum-routes 0
-   neighbor ARELION_ISP_V6 peer group
-   neighbor ARELION_ISP_V6 remote-as 1299
-   neighbor ARELION_ISP_V6 remove-private-as
-   neighbor ARELION_ISP_V6 update-source 2001:2035:0:6ff::2
-   neighbor ARELION_ISP_V6 route-map ARELION_BGP_RCV_V6 in
-   neighbor ARELION_ISP_V6 route-map GENERIC_BGP_ADV_V6 out
-   neighbor ARELION_ISP_V6 maximum-routes 0
-   neighbor ATOM86_IXPEER_V4 peer group
-   neighbor ATOM86_IXPEER_V4 remote-as 8455
-   neighbor ATOM86_IXPEER_V4 remove-private-as
-   neighbor ATOM86_IXPEER_V4 update-source Port-Channel2.7
-   neighbor ATOM86_IXPEER_V4 description ATOM86_IX_PEER_V4
-   neighbor ATOM86_IXPEER_V4 route-map ATOM86_BGP_RCV_V4 in
-   neighbor ATOM86_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
-   neighbor ATOM86_IXPEER_V4 maximum-routes 0
-   neighbor ATOM86_IXPEER_V6 peer group
-   neighbor ATOM86_IXPEER_V6 remote-as 8455
-   neighbor ATOM86_IXPEER_V6 remove-private-as
-   neighbor ATOM86_IXPEER_V6 update-source Port-Channel2.7
-   neighbor ATOM86_IXPEER_V6 description ATOM86_IX_PEER_V6
-   neighbor ATOM86_IXPEER_V6 route-map ATOM86_BGP_RCV_V6 in
-   neighbor ATOM86_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
-   neighbor ATOM86_IXPEER_V6 maximum-routes 0
+   neighbor CDNA_IXPEER_V4 peer group
+   neighbor CDNA_IXPEER_V4 remote-as 65102
+   neighbor CDNA_IXPEER_V4 remove-private-as
+   neighbor CDNA_IXPEER_V4 update-source Port-Channel2.7
+   neighbor CDNA_IXPEER_V4 description CDNA_IX_PEER_V4
+   neighbor CDNA_IXPEER_V4 route-map CDNA_BGP_RCV_V4 in
+   neighbor CDNA_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor CDNA_IXPEER_V4 maximum-routes 0
+   neighbor CDNA_IXPEER_V6 peer group
+   neighbor CDNA_IXPEER_V6 remote-as 65102
+   neighbor CDNA_IXPEER_V6 remove-private-as
+   neighbor CDNA_IXPEER_V6 update-source Port-Channel2.7
+   neighbor CDNA_IXPEER_V6 description CDNA_IX_PEER_V6
+   neighbor CDNA_IXPEER_V6 route-map CDNA_BGP_RCV_V6 in
+   neighbor CDNA_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor CDNA_IXPEER_V6 maximum-routes 0
+   neighbor TRANSITA_ISP_V4 peer group
+   neighbor TRANSITA_ISP_V4 remote-as 65101
+   neighbor TRANSITA_ISP_V4 remove-private-as
+   neighbor TRANSITA_ISP_V4 update-source 198.51.100.151
+   neighbor TRANSITA_ISP_V4 route-map TRANSITA_BGP_RCV_V4 in
+   neighbor TRANSITA_ISP_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor TRANSITA_ISP_V4 maximum-routes 0
+   neighbor TRANSITA_ISP_V6 peer group
+   neighbor TRANSITA_ISP_V6 remote-as 65101
+   neighbor TRANSITA_ISP_V6 remove-private-as
+   neighbor TRANSITA_ISP_V6 update-source 2001:2035:0:6ff::2
+   neighbor TRANSITA_ISP_V6 route-map TRANSITA_BGP_RCV_V6 in
+   neighbor TRANSITA_ISP_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor TRANSITA_ISP_V6 maximum-routes 0
+   neighbor PEERB_IXPEER_V4 peer group
+   neighbor PEERB_IXPEER_V4 remote-as 65103
+   neighbor PEERB_IXPEER_V4 remove-private-as
+   neighbor PEERB_IXPEER_V4 update-source Port-Channel2.7
+   neighbor PEERB_IXPEER_V4 description PEERB_IX_PEER_V4
+   neighbor PEERB_IXPEER_V4 route-map PEERB_BGP_RCV_V4 in
+   neighbor PEERB_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
+   neighbor PEERB_IXPEER_V4 maximum-routes 0
+   neighbor PEERB_IXPEER_V6 peer group
+   neighbor PEERB_IXPEER_V6 remote-as 65103
+   neighbor PEERB_IXPEER_V6 remove-private-as
+   neighbor PEERB_IXPEER_V6 update-source Port-Channel2.7
+   neighbor PEERB_IXPEER_V6 description PEERB_IX_PEER_V6
+   neighbor PEERB_IXPEER_V6 route-map PEERB_BGP_RCV_V6 in
+   neighbor PEERB_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
+   neighbor PEERB_IXPEER_V6 maximum-routes 0
    neighbor AWS_IXPEER_V4 peer group
-   neighbor AWS_IXPEER_V4 remote-as 16509
+   neighbor AWS_IXPEER_V4 remote-as 65104
    neighbor AWS_IXPEER_V4 remove-private-as
    neighbor AWS_IXPEER_V4 update-source Port-Channel2.7
    neighbor AWS_IXPEER_V4 description AWS_IX_PEER_V4
@@ -1152,7 +1152,7 @@ router bgp 35793
    neighbor AWS_IXPEER_V4 route-map GENERIC_BGP_ADV_V4 out
    neighbor AWS_IXPEER_V4 maximum-routes 0
    neighbor AWS_IXPEER_V6 peer group
-   neighbor AWS_IXPEER_V6 remote-as 16509
+   neighbor AWS_IXPEER_V6 remote-as 65104
    neighbor AWS_IXPEER_V6 remove-private-as
    neighbor AWS_IXPEER_V6 update-source Port-Channel2.7
    neighbor AWS_IXPEER_V6 description AWS_IX_PEER_V6
@@ -1160,7 +1160,7 @@ router bgp 35793
    neighbor AWS_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
    neighbor AWS_IXPEER_V6 maximum-routes 0
    neighbor BB_V4 peer group
-   neighbor BB_V4 remote-as 35793
+   neighbor BB_V4 remote-as 64900
    neighbor BB_V4 next-hop-self
    neighbor BB_V4 update-source Loopback0
    neighbor BB_V4 description BB_V4
@@ -1169,7 +1169,7 @@ router bgp 35793
    neighbor BB_V4 send-community
    REDACTED BB_V4 maximum-routes 0
    neighbor BB_V6 peer group
-   neighbor BB_V6 remote-as 35793
+   neighbor BB_V6 remote-as 64900
    neighbor BB_V6 next-hop-self
    neighbor BB_V6 update-source 2a07:7940:0:ffff:18::2
    neighbor BB_V6 description CYBERNET_BACKBONE_V6
@@ -1244,7 +1244,7 @@ router bgp 35793
    neighbor HETZNER_IXPEER_V6 route-map GENERIC_BGP_ADV_V6 out
    neighbor HETZNER_IXPEER_V6 maximum-routes 0
    neighbor HE_IXPEER_V4 peer group
-   neighbor HE_IXPEER_V4 remote-as 6939
+   neighbor HE_IXPEER_V4 remote-as 65107
    neighbor HE_IXPEER_V4 remove-private-as
    neighbor HE_IXPEER_V4 update-source Port-Channel2.7
    neighbor HE_IXPEER_V4 description HE_IX_PEER_V4
@@ -1252,7 +1252,7 @@ router bgp 35793
    neighbor HE_IXPEER_V4 route-map HE_BGP_ADV_V4 out
    neighbor HE_IXPEER_V4 maximum-routes 0
    neighbor HE_IXPEER_V6 peer group
-   neighbor HE_IXPEER_V6 remote-as 6939
+   neighbor HE_IXPEER_V6 remote-as 65107
    neighbor HE_IXPEER_V6 remove-private-as
    neighbor HE_IXPEER_V6 update-source Port-Channel2.7
    neighbor HE_IXPEER_V6 description HE_IX_PEER_V6
@@ -1366,25 +1366,25 @@ router bgp 35793
    neighbor 10.2.254.2 peer group PEER-A-FW-01_V4
    neighbor 10.2.254.2 description PEER-A-FW-01_V4
    neighbor 10.3.254.5 peer group BB_V4
-   neighbor 10.3.254.5 description ams1-rt-01
+   neighbor 10.3.254.5 description dc03-rt-01
    neighbor 10.3.254.6 peer group BB_V4
    neighbor 10.3.254.6 description peer-b-rt-01
    neighbor 10.3.254.7 peer group BB_V4
    neighbor 10.3.254.7 description peer-a-rt-01
    neighbor 10.3.254.8 peer group BB_V4
-   neighbor 10.3.254.8 description cdg1-rt-01
+   neighbor 10.3.254.8 description dc04-rt-01
    neighbor 10.3.254.133 peer group BB_V4
-   neighbor 10.3.254.133 description ams1-rt-02
+   neighbor 10.3.254.133 description dc03-rt-02
    neighbor 10.3.254.134 peer group BB_V4
    neighbor 10.3.254.134 description peer-b-rt-02
    neighbor 10.3.254.136 peer group BB_V4
-   neighbor 10.3.254.136 description cdg1-rt-02
-   neighbor 198.51.100.220 peer group ARELION_ISP_V4
-   neighbor 198.51.100.220 description ARELION_ISP_V4
+   neighbor 10.3.254.136 description dc04-rt-02
+   neighbor 198.51.100.220 peer group TRANSITA_ISP_V4
+   neighbor 198.51.100.220 description TRANSITA_ISP_V4
    neighbor 192.0.2.159 peer group HE_IXPEER_V4
    neighbor 192.0.2.159 description HE_IXPEER_V4
-   neighbor 192.0.2.79 peer group AKAMAI_IXPEER_V4
-   neighbor 192.0.2.79 description AKAMAI_IXPEER_02_V4
+   neighbor 192.0.2.79 peer group CDNA_IXPEER_V4
+   neighbor 192.0.2.79 description CDNA_IXPEER_02_V4
    neighbor 198.51.100.122 peer group NLIX_IXRS_V4
    neighbor 198.51.100.122 description NLIX_IXRS_01_V4
    neighbor 192.0.2.225 peer group NLIX_IXRS_V4
@@ -1395,14 +1395,14 @@ router bgp 35793
    neighbor 203.0.113.148 description ZETNET_IXPEER_01_V4
    neighbor 192.0.2.68 peer group I3DNET_IXPEER_V4
    neighbor 192.0.2.68 description I3DNET_IXPEER_V4
-   neighbor 198.51.100.53 peer group ATOM86_IXPEER_V4
-   neighbor 198.51.100.53 description ATOM86_IXPEER_V4
+   neighbor 198.51.100.53 peer group PEERB_IXPEER_V4
+   neighbor 198.51.100.53 description PEERB_IXPEER_V4
    neighbor 198.51.100.158 peer group HETZNER_IXPEER_V4
    neighbor 198.51.100.158 description HETZNER_IXPEER_V4
    neighbor 198.51.100.11 peer group CLOUDFLARE_IXPEER_V4
    neighbor 198.51.100.11 description CLOUDFLARE_IXPEER_01_V4
-   neighbor 192.0.2.97 peer group AKAMAI_IXPEER_V4
-   neighbor 192.0.2.97 description AKAMAI_IXPEER_01_V4
+   neighbor 192.0.2.97 peer group CDNA_IXPEER_V4
+   neighbor 192.0.2.97 description CDNA_IXPEER_01_V4
    neighbor 192.0.2.110 peer group ZETNET_IXPEER_V4
    neighbor 192.0.2.110 description ZETNET_IXPEER_02_V4
    neighbor 192.0.2.38 peer group M247_IXPEER_V4
@@ -1417,8 +1417,8 @@ router bgp 35793
    neighbor 198.51.100.190 description AWS_IXPEER_01_V4
    neighbor 198.51.100.82 peer group AWS_IXPEER_V4
    neighbor 198.51.100.82 description AWS_IXPEER_02_V4
-   neighbor 203.0.113.241 peer group AKAMAI_IXPEER_V4
-   neighbor 203.0.113.241 description AKAMAI_IXPEER_04_V4
+   neighbor 203.0.113.241 peer group CDNA_IXPEER_V4
+   neighbor 203.0.113.241 description CDNA_IXPEER_04_V4
    neighbor 192.0.2.217 peer group SIPARTECH_IXPEER_V4
    neighbor 192.0.2.217 description SIPARTECH_IXPEER_V4
    neighbor 198.51.100.132 peer group TEAMBLUE_IXPEER_V4
@@ -1427,12 +1427,12 @@ router bgp 35793
    neighbor 2001:7f8:13::a500:6204:1 description ZETNET_IXPEER_01_V6
    neighbor 2001:7f8:13::a500:6204:2 peer group ZETNET_IXPEER_V6
    neighbor 2001:7f8:13::a500:6204:2 description ZETNET_IXPEER_02_V6
-   neighbor 2001:7f8:13::a500:6939:1 peer group HE_IXPEER_V6
-   neighbor 2001:7f8:13::a500:6939:1 description HE_IXPEER_V6
+   neighbor 2001:7f8:13::a500:65107:1 peer group HE_IXPEER_V6
+   neighbor 2001:7f8:13::a500:65107:1 description HE_IXPEER_V6
    neighbor 2001:7f8:13::a500:8309:1 peer group SIPARTECH_IXPEER_V6
    neighbor 2001:7f8:13::a500:8309:1 description SIPARTECH_IXPEER_V6
-   neighbor 2001:7f8:13::a500:8455:1 peer group ATOM86_IXPEER_V6
-   neighbor 2001:7f8:13::a500:8455:1 description ATOM86_IXPEER_V6
+   neighbor 2001:7f8:13::a500:65103:1 peer group PEERB_IXPEER_V6
+   neighbor 2001:7f8:13::a500:65103:1 description PEERB_IXPEER_V6
    neighbor 2001:7f8:13::a500:9009:2 peer group M247_IXPEER_V6
    neighbor 2001:7f8:13::a500:9009:2 description M247_IXPEER_01_V6
    neighbor 2001:7f8:13::a500:9009:3 peer group M247_IXPEER_V6
@@ -1447,12 +1447,12 @@ router bgp 35793
    neighbor 2001:7f8:13::a501:3335:4 description CLOUDFLARE_IXPEER_04_V6
    neighbor 2001:7f8:13::a501:6509:1 peer group AWS_IXPEER_V6
    neighbor 2001:7f8:13::a501:6509:1 description AWS_IXPEER_01_V6
-   neighbor 2001:7f8:13::a502:940:1 peer group AKAMAI_IXPEER_V6
-   neighbor 2001:7f8:13::a502:940:1 description AKAMAI_IXPEER_01_V6
-   neighbor 2001:7f8:13::a502:940:3 peer group AKAMAI_IXPEER_V6
-   neighbor 2001:7f8:13::a502:940:3 description AKAMAI_IXPEER_02_V6
-   neighbor 2001:7f8:13::a502:940:4 peer group AKAMAI_IXPEER_V6
-   neighbor 2001:7f8:13::a502:940:4 description AKAMAI_IXPEER_03_V6
+   neighbor 2001:7f8:13::a502:940:1 peer group CDNA_IXPEER_V6
+   neighbor 2001:7f8:13::a502:940:1 description CDNA_IXPEER_01_V6
+   neighbor 2001:7f8:13::a502:940:3 peer group CDNA_IXPEER_V6
+   neighbor 2001:7f8:13::a502:940:3 description CDNA_IXPEER_02_V6
+   neighbor 2001:7f8:13::a502:940:4 peer group CDNA_IXPEER_V6
+   neighbor 2001:7f8:13::a502:940:4 description CDNA_IXPEER_03_V6
    neighbor 2001:7f8:13::a502:4940:1 peer group HETZNER_IXPEER_V6
    neighbor 2001:7f8:13::a502:4940:1 description HETZNER_IXPEER_V6
    neighbor 2001:7f8:13::a503:4307:1 peer group NLIX_IXRS_V6
@@ -1463,20 +1463,20 @@ router bgp 35793
    neighbor 2001:7f8:13::a504:8185:1 description TEAMBLUE_NLIX_V6
    neighbor 2001:7f8:13::a504:9544:1 peer group I3DNET_IXPEER_V6
    neighbor 2001:7f8:13::a504:9544:1 description I3DNET_IXPEER_V6
-   neighbor 2001:2035:0:6ff::1 peer group ARELION_ISP_V6
-   neighbor 2001:2035:0:6ff::1 description ARELION_ISP_V6
+   neighbor 2001:2035:0:6ff::1 peer group TRANSITA_ISP_V6
+   neighbor 2001:2035:0:6ff::1 description TRANSITA_ISP_V6
    neighbor 2a07:7940:0:ffff:12::1 peer group BB_V6
    neighbor 2a07:7940:0:ffff:12::1 description peer-b-rt-01
    neighbor 2a07:7940:0:ffff:12::2 peer group BB_V6
    neighbor 2a07:7940:0:ffff:12::2 description peer-b-rt-02
    neighbor 2a07:7940:0:ffff:13::1 peer group BB_V6
-   neighbor 2a07:7940:0:ffff:13::1 description ams1-rt-01
+   neighbor 2a07:7940:0:ffff:13::1 description dc03-rt-01
    neighbor 2a07:7940:0:ffff:13::2 peer group BB_V6
-   neighbor 2a07:7940:0:ffff:13::2 description ams1-rt-02
+   neighbor 2a07:7940:0:ffff:13::2 description dc03-rt-02
    neighbor 2a07:7940:0:ffff:17::1 peer group BB_V6
-   neighbor 2a07:7940:0:ffff:17::1 description cdg1-rt-01
+   neighbor 2a07:7940:0:ffff:17::1 description dc04-rt-01
    neighbor 2a07:7940:0:ffff:17::2 peer group BB_V6
-   neighbor 2a07:7940:0:ffff:17::2 description cdg1-rt-02
+   neighbor 2a07:7940:0:ffff:17::2 description dc04-rt-02
    neighbor 2a07:7940:0:ffff:18::1 peer group BB_V6
    neighbor 2a07:7940:0:ffff:18::1 description peer-a-rt-02
    neighbor 2a07:7940:dc:18:52:101:0:3 peer group PEER-A-SW-01A_V6
@@ -1490,9 +1490,9 @@ router bgp 35793
    address-family ipv6
       neighbor 2001:7f8:13::a500:6204:1 activate
       neighbor 2001:7f8:13::a500:6204:2 activate
-      neighbor 2001:7f8:13::a500:6939:1 activate
+      neighbor 2001:7f8:13::a500:65107:1 activate
       neighbor 2001:7f8:13::a500:8309:1 activate
-      neighbor 2001:7f8:13::a500:8455:1 activate
+      neighbor 2001:7f8:13::a500:65103:1 activate
       neighbor 2001:7f8:13::a500:9009:2 activate
       neighbor 2001:7f8:13::a500:9009:3 activate
       neighbor 2001:7f8:13::a501:3335:1 activate
@@ -1564,9 +1564,9 @@ traffic-policies
    field-set ipv4 prefix eu9-acs1-servers
       203.0.113.144/32 203.0.113.27/32 192.0.2.229/32 198.51.100.221/32 203.0.113.49/32 198.51.100.38/32 198.51.100.186/32 203.0.113.202/32 198.51.100.43/32 198.51.100.200/32 192.0.2.245/32 203.0.113.151/32
    !
-   field-set ipv4 prefix fra2-acs2-servers
+   field-set ipv4 prefix dc02-acs2-servers
    !
-   field-set ipv4 prefix fra2-arp
+   field-set ipv4 prefix dc02-arp
       198.51.100.127/32 198.51.100.142/32 192.0.2.60/32 198.51.100.232/32 203.0.113.179/32 192.0.2.16/32 203.0.113.15/32 198.51.100.156/32 203.0.113.113/32 198.51.100.214/32
    !
    field-set ipv4 prefix peer-a-arp
@@ -1621,7 +1621,7 @@ traffic-policies
       2001:8c1:5840::/48 2001:1a68:37::/48 2001:1b28:410::/48 2401:a040:10::/48 2402:1c00:101::/48 2402:6c00:d003::/48 2405:ec00:fa03::/48 2a00:1728:48::/46 2a00:1a28:1154::/48 2a00:1a28:2411::/48 2a00:1f68:ff::/48 2a00:da60:b01::/48 2a01:288:400e::/48 2a01:ae20:851:4092::/64 2a02:480:3419::/48 2a02:a40:324::/48 2a02:2160:8001::/48 2a05:a900:100::/48 2a06:e8c0:a::/48 2a07:9300:8000::/48 2a0a:a142::/48 2c0f:1f00::/48
    !
    traffic-policy filter-internet-traffic-combined
-      counter accept-example-office-networks-v4 accept-example-office-networks-v6 accept-any-to-dr2-public-ip-net-v4 accept-any-to-dr2-public-ip-net-v6 accept-bgp-dst-v4 accept-bgp-dst-v6 accept-bgp-src-v4 accept-bgp-src-v6 accept-cross-datacenter-traffic-v4 accept-cross-datacenter-traffic-v6 accept-cross-datacenter-vpn-esp-v4 accept-cross-datacenter-vpn-udp-v4 accept-dns-server-v4 accept-dns-traffic-v4 accept-fra2-arp-to-peer-a-arp accept-icmp-to-example-prefixes-v4 accept-icmp-v6 accept-ntp-traffic-v4 accept-port-10000-10300-to-minidc-reverse-ssh-server-v4 accept-port-1194-to-example-prefixes-v4 accept-port-1194-to-example-prefixes-v6 accept-port-18443-19443-to-elk-on-prem-v4 accept-port-31032-31034-to-example-prefixes-v4 accept-port-31032-31034-to-fwag accept-port-443-to-example-lighthouse-gui-v4 accept-port-443-to-example-prefixes-v4 accept-port-443-to-example-prefixes-v6 accept-port-44445-to-example-prefixes-v4 accept-port-44445-to-example-prefixes-v6 accept-port-55555-to-example-prefixes-v4 accept-port-55555-to-example-prefixes-v6 accept-port-55556-to-example-prefixes-v4 accept-port-636-to-peer-c-security-01-v4 accept-port-7770-7800-to-example-prefixes-v4 accept-port-7770-7800-to-example-prefixes-v6 accept-port-80-to-example-prefixes-v4 accept-port-80-to-example-prefixes-v6 accept-port-8080-to-example-prefixes-v4 accept-port-8080-to-example-prefixes-v6 accept-port-8200-to-peer-a-vault accept-port-8443-to-example-prefixes-v4 accept-port-8443-to-example-prefixes-v6 accept-port-8444-to-example-prefixes-v4 accept-port-8444-to-example-prefixes-v6 accept-port-8800-8888-to-example-zta-v4 accept-port-9090-to-example-prefixes-v4 accept-port-9090-to-example-prefixes-v6 accept-ports-443-to-example-lighthouse-v4 accept-source-port-1194-to-example-prefixes-v4 accept-source-port-1194-to-example-prefixes-v6 accept-ssh-to-device-v4 accept-tcp-established-v4 accept-temp-pentester-access-DCN-5554 accept-tracert-udp-to-example-prefixes-v4 accept-tracert-udp-to-example-prefixes-v6 accept-traffic-to-ntp-servers-v4 accept-udp-port-44447-to-storage-test-poc-v4 allow-tcp-est-v6 block-not-allowed-traffic-from-dr2-customers-v4 discard-port-8443-to-example-lighthouse-api-v4 discard-ports-443-to-example-lighthouse-gui-v4 discard-unknown-v6 fra2-acs2-to-peer-a-acs1-ssh-temp-DCN-5452 longhaul-and-fra2-to-peer-a-ssh-temp reject-amplified-reflection-attack-v4 reject-amplified-reflection-attack-v6 ssh-explicit-denial ssh-explicit-denial-v4
+      counter accept-example-office-networks-v4 accept-example-office-networks-v6 accept-any-to-dr2-public-ip-net-v4 accept-any-to-dr2-public-ip-net-v6 accept-bgp-dst-v4 accept-bgp-dst-v6 accept-bgp-src-v4 accept-bgp-src-v6 accept-cross-datacenter-traffic-v4 accept-cross-datacenter-traffic-v6 accept-cross-datacenter-vpn-esp-v4 accept-cross-datacenter-vpn-udp-v4 accept-dns-server-v4 accept-dns-traffic-v4 accept-dc02-arp-to-peer-a-arp accept-icmp-to-example-prefixes-v4 accept-icmp-v6 accept-ntp-traffic-v4 accept-port-10000-10300-to-minidc-reverse-ssh-server-v4 accept-port-1194-to-example-prefixes-v4 accept-port-1194-to-example-prefixes-v6 accept-port-18443-19443-to-elk-on-prem-v4 accept-port-31032-31034-to-example-prefixes-v4 accept-port-31032-31034-to-fwag accept-port-443-to-example-lighthouse-gui-v4 accept-port-443-to-example-prefixes-v4 accept-port-443-to-example-prefixes-v6 accept-port-44445-to-example-prefixes-v4 accept-port-44445-to-example-prefixes-v6 accept-port-55555-to-example-prefixes-v4 accept-port-55555-to-example-prefixes-v6 accept-port-55556-to-example-prefixes-v4 accept-port-636-to-peer-c-security-01-v4 accept-port-7770-7800-to-example-prefixes-v4 accept-port-7770-7800-to-example-prefixes-v6 accept-port-80-to-example-prefixes-v4 accept-port-80-to-example-prefixes-v6 accept-port-8080-to-example-prefixes-v4 accept-port-8080-to-example-prefixes-v6 accept-port-8200-to-peer-a-vault accept-port-8443-to-example-prefixes-v4 accept-port-8443-to-example-prefixes-v6 accept-port-8444-to-example-prefixes-v4 accept-port-8444-to-example-prefixes-v6 accept-port-8800-8888-to-example-zta-v4 accept-port-9090-to-example-prefixes-v4 accept-port-9090-to-example-prefixes-v6 accept-ports-443-to-example-lighthouse-v4 accept-source-port-1194-to-example-prefixes-v4 accept-source-port-1194-to-example-prefixes-v6 accept-ssh-to-device-v4 accept-tcp-established-v4 accept-temp-pentester-access-DCN-5554 accept-tracert-udp-to-example-prefixes-v4 accept-tracert-udp-to-example-prefixes-v6 accept-traffic-to-ntp-servers-v4 accept-udp-port-44447-to-storage-test-poc-v4 allow-tcp-est-v6 block-not-allowed-traffic-from-dr2-customers-v4 discard-port-8443-to-example-lighthouse-api-v4 discard-ports-443-to-example-lighthouse-gui-v4 discard-unknown-v6 dc02-acs2-to-peer-a-acs1-ssh-temp-DCN-5452 longhaul-and-dc02-to-peer-a-ssh-temp reject-amplified-reflection-attack-v4 reject-amplified-reflection-attack-v6 ssh-explicit-denial ssh-explicit-denial-v4
       !
       match rule-0-accept-port-31032-31034-to-fwag ipv4
          destination prefix field-set global-example-fwag
@@ -2113,13 +2113,13 @@ traffic-policies
          actions
             count accept-port-8200-to-peer-a-vault
       !
-      match rule-fra2-acs2-to-peer-a-acs1-ssh-temp-DCN-5452 ipv4
-         source prefix field-set fra2-acs2-servers
+      match rule-dc02-acs2-to-peer-a-acs1-ssh-temp-DCN-5452 ipv4
+         source prefix field-set dc02-acs2-servers
          destination prefix field-set eu9-acs1-servers
          protocol tcp source port all destination port ssh
          !
          actions
-            count fra2-acs2-to-peer-a-acs1-ssh-temp-DCN-5452
+            count dc02-acs2-to-peer-a-acs1-ssh-temp-DCN-5452
       !
       match ipv4-all-default ipv4
          actions

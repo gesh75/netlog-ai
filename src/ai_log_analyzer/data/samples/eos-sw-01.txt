@@ -1,5 +1,5 @@
 ! Command: show running-config
-! device: got1-sw-03a (DCS-7050SX3-48YC8C, EOS-4.30.4M)
+! device: dc01-sw-03a (DCS-7050SX3-48YC8C, EOS-4.30.4M)
 !
 ! boot system flash:/EOS-4.30.4M-x86_64.swi
 !
@@ -33,10 +33,10 @@ service routing protocols model multi-agent
 logging vrf mgmt host 10.1.238.240
 logging vrf mgmt source-interface Management1
 !
-hostname got1-sw-03a
+hostname dc01-sw-03a
 !
 snmp-server engineID local 00c52c443d42
-snmp-server location GOT1
+snmp-server location DC01
 snmp-server local-interface Management1
 snmp-server view all iso included
 snmp-server group snmp_group_ro v3 priv read all
@@ -97,165 +97,165 @@ management api gnmi
 aaa authorization exec default local
 !
 interface Port-Channel1
-   description got1-sw-04
+   description dc01-sw-04
    switchport trunk allowed vlan 14,21-22
    switchport mode trunk
    mlag 1
 !
 interface Port-Channel2
-   description got1-sw-01
+   description dc01-sw-01
    mtu 9202
    switchport trunk allowed vlan 10,14,19-22,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 2
 !
 interface Port-Channel9
-   description got1-sw-03b
+   description dc01-sw-03b
    mtu 9202
    switchport mode trunk
    switchport trunk group MLAG-SW01AB
 !
 interface Port-Channel10
-   description got1-aci01-11
+   description dc01-aci01-11
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 10
 !
 interface Port-Channel11
-   description got1-aci01-12
+   description dc01-aci01-12
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 11
 !
 interface Port-Channel12
-   description got1-aci01-13
+   description dc01-aci01-13
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 12
 !
 interface Port-Channel13
-   description got1-aci01-14
+   description dc01-aci01-14
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 13
 !
 interface Port-Channel14
-   description got1-aci01-15
+   description dc01-aci01-15
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 14
 !
 interface Port-Channel15
-   description got1-aci01-16
+   description dc01-aci01-16
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 15
 !
 interface Port-Channel16
-   description got1-aci01-17
+   description dc01-aci01-17
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 16
 !
 interface Port-Channel17
-   description got1-aci01-18
+   description dc01-aci01-18
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 17
 !
 interface Port-Channel18
-   description got1-aci01-19
+   description dc01-aci01-19
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 18
 !
 interface Port-Channel19
-   description got1-aci01-20
+   description dc01-aci01-20
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 19
 !
 interface Port-Channel20
-   description got1-aci01-21
+   description dc01-aci01-21
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 20
 !
 interface Port-Channel21
-   description got1-aci01-22
+   description dc01-aci01-22
    mtu 9202
    switchport trunk allowed vlan 10,14,19-20,28,33-34,66,115,206,216,226
    switchport mode trunk
    mlag 21
 !
 interface Ethernet1
-   description got1-aci01-11
+   description dc01-aci01-11
    channel-group 10 mode active
    lacp timer fast
 !
 interface Ethernet2
-   description got1-aci01-12
+   description dc01-aci01-12
    channel-group 11 mode active
    lacp timer fast
 !
 interface Ethernet3
-   description got1-aci01-13
+   description dc01-aci01-13
    channel-group 12 mode active
    lacp timer fast
 !
 interface Ethernet4
-   description got1-aci01-14
+   description dc01-aci01-14
    channel-group 13 mode active
    lacp timer fast
 !
 interface Ethernet5
-   description got1-aci01-15
+   description dc01-aci01-15
    channel-group 14 mode active
    lacp timer fast
 !
 interface Ethernet6
-   description got1-aci01-16
+   description dc01-aci01-16
    channel-group 15 mode active
    lacp timer fast
 !
 interface Ethernet7
-   description got1-aci01-17
+   description dc01-aci01-17
    channel-group 16 mode active
    lacp timer fast
 !
 interface Ethernet8
-   description got1-aci01-18
+   description dc01-aci01-18
    channel-group 17 mode active
    lacp timer fast
 !
 interface Ethernet9
-   description got1-aci01-19
+   description dc01-aci01-19
    channel-group 18 mode active
    lacp timer fast
 !
 interface Ethernet10
-   description got1-aci01-20
+   description dc01-aci01-20
    channel-group 19 mode active
    lacp timer fast
 !
 interface Ethernet11
-   description got1-aci01-21
+   description dc01-aci01-21
    channel-group 20 mode active
    lacp timer fast
 !
 interface Ethernet12
-   description got1-aci01-22
+   description dc01-aci01-22
    channel-group 21 mode active
    lacp timer fast
 !
@@ -330,15 +330,15 @@ interface Ethernet46
 interface Ethernet47
 !
 interface Ethernet48
-   description got1-sw-04
+   description dc01-sw-04
    channel-group 1 mode active
 !
 interface Ethernet49/1
-   description got1-sw-03b
+   description dc01-sw-03b
    channel-group 9 mode active
 !
 interface Ethernet50/1
-   description got1-sw-03b
+   description dc01-sw-03b
    channel-group 9 mode active
 !
 interface Ethernet51/1
@@ -352,7 +352,7 @@ interface Ethernet54/1
 interface Ethernet55/1
 !
 interface Ethernet56/1
-   description got1-sw-01a
+   description dc01-sw-01a
    channel-group 2 mode active
    lacp timer fast
 !

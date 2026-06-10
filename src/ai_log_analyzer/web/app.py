@@ -40,8 +40,25 @@ from ai_log_analyzer.correlate import correlate_from_manager  # noqa: E402
 from ai_log_analyzer.device_triage import triage_from_manager  # noqa: E402
 
 STATIC_DIR = Path(__file__).parent / "static"
-SAMPLES_DIR = Path(__file__).resolve().parents[3] / "samples"
-SITES_DIR = Path(__file__).resolve().parents[3] / "sites"
+
+
+def _data_dir(env_var: str, name: str) -> Path:
+    """Resolve a bundled-data directory (samples/ or sites/).
+
+    Priority: explicit env override → packaged data (ships in the wheel, so
+    pip/Docker installs get the demo bundles too) → legacy repo-root layout.
+    """
+    override = os.environ.get(env_var, "")
+    if override:
+        return Path(override).expanduser()
+    packaged = Path(__file__).resolve().parents[1] / "data" / name
+    if packaged.is_dir():
+        return packaged
+    return Path(__file__).resolve().parents[3] / name
+
+
+SAMPLES_DIR = _data_dir("AI_LOG_ANALYZER_SAMPLES_DIR", "samples")
+SITES_DIR = _data_dir("AI_LOG_ANALYZER_SITES_DIR", "sites")
 
 
 # ── Security helpers ─────────────────────────────────────────────────────────

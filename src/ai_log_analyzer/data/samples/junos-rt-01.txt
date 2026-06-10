@@ -15,7 +15,7 @@ groups {
                         route-filter-list CORP_BGP_ADV_V4_PREFIXES;
                     }
                     then {
-                        as-path-prepend "35793 35793 35793 35793 35793";
+                        as-path-prepend "64900 64900 64900 64900 64900";
                         accept;
                     }
                 }
@@ -26,7 +26,7 @@ groups {
                         route-filter-list CORP_BGP_ADV_V6_PREFIXES;
                     }
                     then {
-                        as-path-prepend "35793 35793 35793 35793 35793";
+                        as-path-prepend "64900 64900 64900 64900 64900";
                         accept;
                     }
                 }
@@ -54,7 +54,7 @@ groups {
                         route-filter-list CORP_BGP_ADV_V4_PREFIXES;
                     }
                     then {
-                        as-path-prepend 35793;
+                        as-path-prepend 64900;
                         accept;
                     }
                 }
@@ -65,7 +65,7 @@ groups {
                         route-filter-list CORP_BGP_ADV_V4_PREFIXES;
                     }
                     then {
-                        as-path-prepend "35793 35793 35793 35793 35793";
+                        as-path-prepend "64900 64900 64900 64900 64900";
                         accept;
                     }
                 }
@@ -76,7 +76,7 @@ groups {
                         route-filter-list CORP_BGP_ADV_V6_PREFIXES;
                     }
                     then {
-                        as-path-prepend "35793 35793 35793 35793 35793";
+                        as-path-prepend "64900 64900 64900 64900 64900";
                         accept;
                     }
                 }
@@ -437,7 +437,7 @@ interfaces {
         }
     }
     et-0/1/4 {
-        description peer-a-ISP-Colt-447600952;
+        description peer-a-ISP-TransitB-447600952;
         unit 0 {
             family inet {
                 filter {
@@ -478,7 +478,7 @@ interfaces {
         }
     }
     et-0/1/7 {
-        description peer-a-rt-01-WL-cdg1-rt-02-LE-305718;
+        description peer-a-rt-01-WL-dc04-rt-02-LE-305718;
         mtu 9216;
         unit 0 {
             family inet {
@@ -1386,11 +1386,11 @@ policy-options {
             then reject;
         }
     }
-    policy-statement AKAMAI_BGP_RCV_V4 {
+    policy-statement CDNA_BGP_RCV_V4 {
         term generic-policy-part {
             from policy GENERIC_DIRECT_BGP_RCV_V4;
             then {
-                community REDACTED SET_TYPE_IX_AKAMAI;
+                community REDACTED SET_TYPE_IX_CDNA;
                 accept;
             }
         }
@@ -1398,11 +1398,11 @@ policy-options {
             then reject;
         }
     }
-    policy-statement AKAMAI_BGP_RCV_V6 {
+    policy-statement CDNA_BGP_RCV_V6 {
         term generic-policy-part {
             from policy GENERIC_DIRECT_BGP_RCV_V6;
             then {
-                community REDACTED SET_TYPE_IX_AKAMAI;
+                community REDACTED SET_TYPE_IX_CDNA;
                 accept;
             }
         }
@@ -1410,11 +1410,11 @@ policy-options {
             then reject;
         }
     }
-    policy-statement ATOM86_BGP_RCV_V4 {
+    policy-statement PEERB_BGP_RCV_V4 {
         term generic-policy-part {
             from policy GENERIC_DIRECT_BGP_RCV_V4;
             then {
-                community REDACTED SET_TYPE_IX_ATOM86;
+                community REDACTED SET_TYPE_IX_PEERB;
                 accept;
             }
         }
@@ -1422,11 +1422,11 @@ policy-options {
             then reject;
         }
     }
-    policy-statement ATOM86_BGP_RCV_V6 {
+    policy-statement PEERB_BGP_RCV_V6 {
         term generic-policy-part {
             from policy GENERIC_DIRECT_BGP_RCV_V6;
             then {
-                community REDACTED SET_TYPE_IX_ATOM86;
+                community REDACTED SET_TYPE_IX_PEERB;
                 accept;
             }
         }
@@ -1579,7 +1579,7 @@ policy-options {
                 community REDACTED MATCH_TYPE;
                 community REDACTED MATCH_ORIGIN;
                 community REDACTED MATCH_POLICY;
-                as-path-prepend "35793 35793 35793 35793 35793";
+                as-path-prepend "64900 64900 64900 64900 64900";
                 accept;
             }
         }
@@ -1596,7 +1596,7 @@ policy-options {
                 community REDACTED MATCH_TYPE;
                 community REDACTED MATCH_ORIGIN;
                 community REDACTED MATCH_POLICY;
-                as-path-prepend "35793 35793 35793 35793 35793";
+                as-path-prepend "64900 64900 64900 64900 64900";
                 accept;
             }
         }
@@ -1661,7 +1661,7 @@ policy-options {
                 community REDACTED MATCH_TYPE;
                 community REDACTED MATCH_ORIGIN;
                 community REDACTED MATCH_POLICY;
-                as-path-prepend "35793 35793 35793 35793 35793";
+                as-path-prepend "64900 64900 64900 64900 64900";
                 accept;
             }
         }
@@ -1678,7 +1678,7 @@ policy-options {
                 community REDACTED MATCH_TYPE;
                 community REDACTED MATCH_ORIGIN;
                 community REDACTED MATCH_POLICY;
-                as-path-prepend "35793 35793 35793 35793 35793";
+                as-path-prepend "64900 64900 64900 64900 64900";
                 accept;
             }
         }
@@ -1715,7 +1715,7 @@ policy-options {
             from policy GENERIC_ISP_BGP_RCV_V4;
             then next term;
         }
-        term reject-lumen-scrubbing-asn-203 {
+        term reject-transitc-scrubbing-asn-203 {
             from as-path orig-in-203;
             then reject;
         }
@@ -1735,7 +1735,7 @@ policy-options {
             from policy GENERIC_ISP_BGP_RCV_V6;
             then next term;
         }
-        term reject-lumen-scrubbing-asn-203 {
+        term reject-transitc-scrubbing-asn-203 {
             from as-path orig-in-203;
             then reject;
         }
@@ -2612,7 +2612,7 @@ policy-options {
                 community REDACTED MATCH_TYPE;
                 community REDACTED MATCH_ORIGIN;
                 community REDACTED MATCH_POLICY;
-                as-path-prepend "35793 35793 35793 35793 35793";
+                as-path-prepend "64900 64900 64900 64900 64900";
                 accept;
             }
         }
@@ -2629,7 +2629,7 @@ policy-options {
                 community REDACTED MATCH_TYPE;
                 community REDACTED MATCH_ORIGIN;
                 community REDACTED MATCH_POLICY;
-                as-path-prepend "35793 35793 35793 35793 35793";
+                as-path-prepend "64900 64900 64900 64900 64900";
                 accept;
             }
         }
@@ -2694,7 +2694,7 @@ policy-options {
                 community REDACTED MATCH_TYPE;
                 community REDACTED MATCH_ORIGIN;
                 community REDACTED MATCH_POLICY;
-                as-path-prepend "35793 35793 35793 35793 35793";
+                as-path-prepend "64900 64900 64900 64900 64900";
                 accept;
             }
         }
@@ -2711,7 +2711,7 @@ policy-options {
                 community REDACTED MATCH_TYPE;
                 community REDACTED MATCH_ORIGIN;
                 community REDACTED MATCH_POLICY;
-                as-path-prepend "35793 35793 35793 35793 35793";
+                as-path-prepend "64900 64900 64900 64900 64900";
                 accept;
             }
         }
@@ -3241,7 +3241,7 @@ policy-options {
     }
     community REDACTED {
         invert-match;
-        members "^35793:2101.*";
+        members "^64900:2101.*";
     }
     community REDACTED {
         invert-match;
@@ -3279,20 +3279,20 @@ policy-options {
         invert-match;
         members 2:1205;
     }
-    community REDACTED members 3356:2067;
-    community REDACTED members 3356:2066;
-    community REDACTED members 3356:2008;
+    community REDACTED members 65105:2067;
+    community REDACTED members 65105:2066;
+    community REDACTED members 65105:2008;
     community REDACTED members 33560:0;
-    community REDACTED members 3356:2065;
-    community REDACTED members 3356:2006;
-    community REDACTED members 3356:2010;
-    community REDACTED members 3356:2003;
-    community REDACTED members 3356:2064;
-    community REDACTED members 3356:2022;
-    community REDACTED members 3356:2001;
-    community REDACTED members 3356:2026;
-    community REDACTED members 3356:2012;
-    community REDACTED members 3356:2011;
+    community REDACTED members 65105:2065;
+    community REDACTED members 65105:2006;
+    community REDACTED members 65105:2010;
+    community REDACTED members 65105:2003;
+    community REDACTED members 65105:2064;
+    community REDACTED members 65105:2022;
+    community REDACTED members 65105:2001;
+    community REDACTED members 65105:2026;
+    community REDACTED members 65105:2012;
+    community REDACTED members 65105:2011;
     community REDACTED members [ 12076:50002 12076:51002 ];
     community REDACTED members [ 12076:50030 12076:51030 ];
     community REDACTED members [ 12076:50008 12076:51008 ];
@@ -3305,51 +3305,51 @@ policy-options {
     community REDACTED members [ 12076:50007 12076:51007 ];
     community REDACTED members [ 12076:50026 12076:51026 ];
     community REDACTED members [ 12076:50006 12076:51006 ];
-    community REDACTED members "^35793:.*";
-    community REDACTED members "^35793:.*";
-    community REDACTED members "^35793:2103.*";
-    community REDACTED members 35793:21031;
-    community REDACTED members "^35793:2104.*";
-    community REDACTED members 35793:21041;
-    community REDACTED members "^35793:1201.*";
-    community REDACTED members 35793:12011;
-    community REDACTED members "^35793:2101.*";
-    community REDACTED members 35793:21012;
-    community REDACTED members "^35793:1301.*";
-    community REDACTED members 35793:13011;
-    community REDACTED members 35793:13019;
-    community REDACTED members "^35793:1302.*";
-    community REDACTED members 35793:13021;
-    community REDACTED members "^35793:1104.*";
-    community REDACTED members 35793:11041;
-    community REDACTED members "^35793:2102.*";
-    community REDACTED members 35793:21021;
-    community REDACTED members "^35793:1305.*";
-    community REDACTED members 35793:13051;
-    community REDACTED members "^35793:3103.*";
-    community REDACTED members 35793:31031;
-    community REDACTED members "^35793:1202.*";
-    community REDACTED members 35793:12021;
-    community REDACTED members "^35793:1101.*";
-    community REDACTED members 35793:11011;
-    community REDACTED members 35793:11013;
-    community REDACTED members 35793:11014;
-    community REDACTED members 35793:11012;
-    community REDACTED members "^35793:1102.*";
-    community REDACTED members 35793:11021;
-    community REDACTED members "^35793:3101.*";
-    community REDACTED members 35793:31011;
-    community REDACTED members "^35793:1103.*";
-    community REDACTED members 35793:11031;
-    community REDACTED members "^35793:1105.*";
-    community REDACTED members 35793:11051;
-    community REDACTED members "^35793:3102.*";
-    community REDACTED members 35793:31021;
-    community REDACTED members 35793:31022;
-    community REDACTED members "^35793:1303.*";
-    community REDACTED members 35793:13031;
-    community REDACTED members "^35793:2105.*";
-    community REDACTED members 35793:21051;
+    community REDACTED members "^64900:.*";
+    community REDACTED members "^64900:.*";
+    community REDACTED members "^64900:2103.*";
+    community REDACTED members 64900:21031;
+    community REDACTED members "^64900:2104.*";
+    community REDACTED members 64900:21041;
+    community REDACTED members "^64900:1201.*";
+    community REDACTED members 64900:12011;
+    community REDACTED members "^64900:2101.*";
+    community REDACTED members 64900:21012;
+    community REDACTED members "^64900:1301.*";
+    community REDACTED members 64900:13011;
+    community REDACTED members 64900:13019;
+    community REDACTED members "^64900:1302.*";
+    community REDACTED members 64900:13021;
+    community REDACTED members "^64900:1104.*";
+    community REDACTED members 64900:11041;
+    community REDACTED members "^64900:2102.*";
+    community REDACTED members 64900:21021;
+    community REDACTED members "^64900:1305.*";
+    community REDACTED members 64900:13051;
+    community REDACTED members "^64900:3103.*";
+    community REDACTED members 64900:31031;
+    community REDACTED members "^64900:1202.*";
+    community REDACTED members 64900:12021;
+    community REDACTED members "^64900:1101.*";
+    community REDACTED members 64900:11011;
+    community REDACTED members 64900:11013;
+    community REDACTED members 64900:11014;
+    community REDACTED members 64900:11012;
+    community REDACTED members "^64900:1102.*";
+    community REDACTED members 64900:11021;
+    community REDACTED members "^64900:3101.*";
+    community REDACTED members 64900:31011;
+    community REDACTED members "^64900:1103.*";
+    community REDACTED members 64900:11031;
+    community REDACTED members "^64900:1105.*";
+    community REDACTED members 64900:11051;
+    community REDACTED members "^64900:3102.*";
+    community REDACTED members 64900:31021;
+    community REDACTED members 64900:31022;
+    community REDACTED members "^64900:1303.*";
+    community REDACTED members 64900:13031;
+    community REDACTED members "^64900:2105.*";
+    community REDACTED members 64900:21051;
     community REDACTED members "^3:.*";
     community REDACTED members "^3:1.*";
     community REDACTED members [ "^2:12.*" "^3:12.*" ];
@@ -3380,7 +3380,7 @@ policy-options {
     community REDACTED members "^9:0$";
     community REDACTED members 9:174;
     community REDACTED members 9:3257;
-    community REDACTED members 9:3356;
+    community REDACTED members 9:65105;
     community REDACTED members "^1:.*";
     community REDACTED members "^1:2.*";
     community REDACTED members "^1:5.*";
@@ -3392,49 +3392,49 @@ policy-options {
     community REDACTED members "^1:51.*";
     community REDACTED members "^1:1010.*";
     community REDACTED members 202:202;
-    community REDACTED members "^35793:2103.*";
-    community REDACTED members 35793:21031;
-    community REDACTED members "^35793:2104.*";
-    community REDACTED members 35793:21041;
-    community REDACTED members "^35793:1201.*";
-    community REDACTED members 35793:12011;
-    community REDACTED members "^35793:2101.*";
-    community REDACTED members 35793:21012;
-    community REDACTED members "^35793:1301.*";
-    community REDACTED members 35793:13011;
-    community REDACTED members 35793:13019;
-    community REDACTED members "^35793:1302.*";
-    community REDACTED members 35793:13021;
-    community REDACTED members "^35793:1104.*";
-    community REDACTED members 35793:11041;
-    community REDACTED members "^35793:2102.*";
-    community REDACTED members 35793:21021;
-    community REDACTED members "^35793:1305.*";
-    community REDACTED members 35793:13051;
-    community REDACTED members "^35793:3103.*";
-    community REDACTED members 35793:31031;
-    community REDACTED members "^35793:1202.*";
-    community REDACTED members 35793:12021;
-    community REDACTED members "^35793:1101.*";
-    community REDACTED members 35793:11011;
-    community REDACTED members 35793:11013;
-    community REDACTED members 35793:11014;
-    community REDACTED members 35793:11012;
-    community REDACTED members "^35793:1102.*";
-    community REDACTED members 35793:11021;
-    community REDACTED members "^35793:3101.*";
-    community REDACTED members 35793:31011;
-    community REDACTED members "^35793:1103.*";
-    community REDACTED members 35793:11031;
-    community REDACTED members "^35793:1105.*";
-    community REDACTED members 35793:11051;
-    community REDACTED members "^35793:3102.*";
-    community REDACTED members 35793:31021;
-    community REDACTED members 35793:31022;
-    community REDACTED members "^35793:1303.*";
-    community REDACTED members 35793:13031;
-    community REDACTED members "^35793:2105.*";
-    community REDACTED members 35793:21051;
+    community REDACTED members "^64900:2103.*";
+    community REDACTED members 64900:21031;
+    community REDACTED members "^64900:2104.*";
+    community REDACTED members 64900:21041;
+    community REDACTED members "^64900:1201.*";
+    community REDACTED members 64900:12011;
+    community REDACTED members "^64900:2101.*";
+    community REDACTED members 64900:21012;
+    community REDACTED members "^64900:1301.*";
+    community REDACTED members 64900:13011;
+    community REDACTED members 64900:13019;
+    community REDACTED members "^64900:1302.*";
+    community REDACTED members 64900:13021;
+    community REDACTED members "^64900:1104.*";
+    community REDACTED members 64900:11041;
+    community REDACTED members "^64900:2102.*";
+    community REDACTED members 64900:21021;
+    community REDACTED members "^64900:1305.*";
+    community REDACTED members 64900:13051;
+    community REDACTED members "^64900:3103.*";
+    community REDACTED members 64900:31031;
+    community REDACTED members "^64900:1202.*";
+    community REDACTED members 64900:12021;
+    community REDACTED members "^64900:1101.*";
+    community REDACTED members 64900:11011;
+    community REDACTED members 64900:11013;
+    community REDACTED members 64900:11014;
+    community REDACTED members 64900:11012;
+    community REDACTED members "^64900:1102.*";
+    community REDACTED members 64900:11021;
+    community REDACTED members "^64900:3101.*";
+    community REDACTED members 64900:31011;
+    community REDACTED members "^64900:1103.*";
+    community REDACTED members 64900:11031;
+    community REDACTED members "^64900:1105.*";
+    community REDACTED members 64900:11051;
+    community REDACTED members "^64900:3102.*";
+    community REDACTED members 64900:31021;
+    community REDACTED members 64900:31022;
+    community REDACTED members "^64900:1303.*";
+    community REDACTED members 64900:13031;
+    community REDACTED members "^64900:2105.*";
+    community REDACTED members 64900:21051;
     community REDACTED members 2:1200;
     community REDACTED members 2:1201;
     community REDACTED members 2:1210;
@@ -3447,7 +3447,7 @@ policy-options {
     community REDACTED members 9:0;
     community REDACTED members 9:174;
     community REDACTED members 9:3257;
-    community REDACTED members 9:3356;
+    community REDACTED members 9:65105;
     community REDACTED members 1:2;
     community REDACTED members 1:6002;
     community REDACTED members 1:50;
@@ -3839,7 +3839,7 @@ firewall {
                     discard;
                 }
             }
-            term fra2-to-peer-a-ssh-temp {
+            term dc02-to-peer-a-ssh-temp {
                 from {
                     source-address {
                         198.51.100.99/32;
@@ -3851,7 +3851,7 @@ firewall {
                     destination-port ssh;
                 }
                 then {
-                    count fra2-to-peer-a-ssh-temp;
+                    count dc02-to-peer-a-ssh-temp;
                     accept;
                 }
             }
@@ -4584,7 +4584,7 @@ firewall {
                     accept;
                 }
             }
-            term accept-port-ssh-to-fra20-jump-server {
+            term accept-port-ssh-to-dc06-jump-server {
                 from {
                     destination-address {
                         192.0.2.42/32;
@@ -4594,7 +4594,7 @@ firewall {
                     destination-port ssh;
                 }
                 then {
-                    count accept-port-ssh-to-fra20-jump-server;
+                    count accept-port-ssh-to-dc06-jump-server;
                     accept;
                 }
             }
@@ -5198,7 +5198,7 @@ routing-options {
         }
     }
     router-id 10.3.254.7;
-    autonomous-system 35793;
+    autonomous-system 64900;
     graceful-restart;
     static {
         route 0.0.0.0/0 {
@@ -5296,11 +5296,11 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:1900:5:2:2::1a79 {
-                description "Colt HSIP Transit 447600952 v6";
+                description "TransitB HSIP Transit 447600952 v6";
                 local-address 2001:1900:5:2:2::1a7a;
-                peer-as 3356;
+                peer-as 65105;
             }
         }
         group COLT_ISP_V4 {
@@ -5314,11 +5314,11 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.102 {
-                description "Colt HSIP Transit 447600952 v4";
+                description "TransitB HSIP Transit 447600952 v4";
                 local-address 203.0.113.185;
-                peer-as 3356;
+                peer-as 65105;
             }
         }
         group MSFT_PEER_V4 {
@@ -5332,7 +5332,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 198.51.100.90 {
                 description "Microsoft v4 PNI";
                 local-address 198.51.100.166;
@@ -5350,7 +5350,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2a01:111:2000:1::2046 {
                 description "Microsoft v6 PNI";
                 local-address 2a01:111:2000:1::2045;
@@ -5368,7 +5368,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.122 {
                 description "Equinix MLPE Route Collector";
                 local-address 198.51.100.24;
@@ -5386,7 +5386,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8:bd::6:5517:1 {
                 description "Equinix MLPE Route Collector V6";
                 local-address 2001:7f8:bd::3:5793:1;
@@ -5404,7 +5404,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 198.51.100.33 {
                 description "Equinix MLPE Route Server 01";
                 local-address 198.51.100.24;
@@ -5427,7 +5427,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8:bd::2:4115:1 {
                 description "Equinix MLPE Route Server 01 V6";
                 local-address 2001:7f8:bd::3:5793:1;
@@ -5449,16 +5449,16 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.105 {
                 description "Hurricane Electric v4 Peer 01 via MLPE";
                 local-address 198.51.100.24;
-                peer-as 6939;
+                peer-as 65107;
             }
             neighbor 203.0.113.165 {
                 description "Hurricane Electric v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
-                peer-as 6939;
+                peer-as 65107;
             }
         }
         group HE_IXPEER_V6 {
@@ -5471,16 +5471,16 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
-            neighbor 2001:7f8:bd::6939:1 {
+            local-as 64900;
+            neighbor 2001:7f8:bd::65107:1 {
                 description "Hurricane Electric v6 Peer 01 via MLPE";
                 local-address 2001:7f8:bd::3:5793:1;
-                peer-as 6939;
+                peer-as 65107;
             }
             neighbor 2001:7f8::1b1b:0:1 {
                 description "Hurricane Electric v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
-                peer-as 6939;
+                peer-as 65107;
             }
         }
         group CLOUDFLARE_IXPEER_V4 {
@@ -5494,7 +5494,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.199 {
                 description "CLOUDFLARE v4 Peer 01 via MLPE";
                 local-address 198.51.100.24;
@@ -5524,7 +5524,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8:bd::1:3335:1 {
                 description "CLOUDFLARE v6 Peer 01 via MLPE";
                 local-address 2001:7f8:bd::3:5793:1;
@@ -5555,7 +5555,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             graceful-restart {
                 restart-time 300;
             }
@@ -5593,7 +5593,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             graceful-restart {
                 restart-time 300;
             }
@@ -5628,7 +5628,7 @@ protocols {
             }
             export PEER-A-FW-01_BGP_ADV_V4;
             peer-as 4200042001;
-            local-as 35793;
+            local-as 64900;
             neighbor 10.2.254.0 {
                 description peer-a-fw-01;
                 local-address 10.2.254.1;
@@ -5641,7 +5641,7 @@ protocols {
                 unicast;
             }
             export PEER-A-SW-01_BGP_ADV_V6;
-            local-as 35793;
+            local-as 64900;
             multipath {
                 multiple-as;
             }
@@ -5663,7 +5663,7 @@ protocols {
                 unicast;
             }
             export PEER-A-SW-01_BGP_ADV_V4;
-            local-as 35793;
+            local-as 64900;
             multipath {
                 multiple-as;
             }
@@ -5689,7 +5689,7 @@ protocols {
                 all;
             }
             peer-as 6695;
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.85 {
                 description "DE-CIX v4 Route server 01";
                 local-address 198.51.100.134;
@@ -5710,7 +5710,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::1a27:5051:c09d {
                 description "DECIX v6 Route server 01";
                 local-address 2001:7f8::8bd1:0:1;
@@ -5732,16 +5732,16 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.106 {
-                description "AWS v4 Peer 01 via DECIX";
+                description "CLOUDA v4 Peer 01 via DECIX";
                 local-address 198.51.100.134;
-                peer-as 16509;
+                peer-as 65104;
             }
             neighbor 192.0.2.35 {
-                description "AWS v4 Peer 02 via DECIX";
+                description "CLOUDA v4 Peer 02 via DECIX";
                 local-address 198.51.100.134;
-                peer-as 16509;
+                peer-as 65104;
             }
         }
         group AWS_IXPEER_V6 {
@@ -5754,16 +5754,16 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::407d:0:1 {
-                description "AWS v6 Peer 01 via DECIX";
+                description "CLOUDA v6 Peer 01 via DECIX";
                 local-address 2001:7f8::8bd1:0:1;
-                peer-as 16509;
+                peer-as 65104;
             }
             neighbor 2001:7f8::407d:0:2 {
-                description "AWS v6 Peer 01 via DECIX";
+                description "CLOUDA v6 Peer 01 via DECIX";
                 local-address 2001:7f8::8bd1:0:1;
-                peer-as 16509;
+                peer-as 65104;
             }
         }
         group ETISALAT_IXPEER_V4 {
@@ -5776,7 +5776,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.87 {
                 description "Etisalat v4 via DECIX";
                 local-address 198.51.100.134;
@@ -5793,7 +5793,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::2306:0:1 {
                 description "Etisalat v6 via DECIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -5810,16 +5810,16 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.224 {
-                description "Colt v4 Peer 01 via DECIX";
+                description "TransitB v4 Peer 01 via DECIX";
                 local-address 198.51.100.134;
-                peer-as 8220;
+                peer-as 65106;
             }
             neighbor 198.51.100.253 {
-                description "Colt v4 Peer 02 via DECIX";
+                description "TransitB v4 Peer 02 via DECIX";
                 local-address 198.51.100.134;
-                peer-as 8220;
+                peer-as 65106;
             }
         }
         group COLT_IXPEER_V6 {
@@ -5832,21 +5832,21 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::201c:0:1 {
-                description "Colt v6 Peer 01 via DECIX";
+                description "TransitB v6 Peer 01 via DECIX";
                 local-address 2001:7f8::8bd1:0:1;
-                peer-as 8220;
+                peer-as 65106;
             }
             neighbor 2001:7f8::201c:0:2 {
-                description "Colt v6 Peer 02 via DECIX";
+                description "TransitB v6 Peer 02 via DECIX";
                 local-address 2001:7f8::8bd1:0:1;
-                peer-as 8220;
+                peer-as 65106;
             }
         }
-        group AKAMAI_IXPEER_V4 {
+        group CDNA_IXPEER_V4 {
             type external;
-            import AKAMAI_BGP_RCV_V4;
+            import CDNA_BGP_RCV_V4;
             family inet {
                 unicast;
             }
@@ -5854,26 +5854,26 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.198 {
-                description "Akamai v4 Peer 01 via DECIX";
+                description "CdnA v4 Peer 01 via DECIX";
                 local-address 198.51.100.134;
-                peer-as 20940;
+                peer-as 65102;
             }
             neighbor 192.0.2.213 {
-                description "Akamai v4 Peer 02 via DECIX";
+                description "CdnA v4 Peer 02 via DECIX";
                 local-address 198.51.100.134;
-                peer-as 20940;
+                peer-as 65102;
             }
             neighbor 198.51.100.198 {
-                description "Akamai v4 Peer 03 via DECIX";
+                description "CdnA v4 Peer 03 via DECIX";
                 local-address 198.51.100.134;
-                peer-as 20940;
+                peer-as 65102;
             }
         }
-        group AKAMAI_IXPEER_V6 {
+        group CDNA_IXPEER_V6 {
             type external;
-            import AKAMAI_BGP_RCV_V6;
+            import CDNA_BGP_RCV_V6;
             family inet6 {
                 unicast;
             }
@@ -5881,21 +5881,21 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::51cc:0:28 {
-                description "Akamai v6 Peer 01 via DECIX";
+                description "CdnA v6 Peer 01 via DECIX";
                 local-address 2001:7f8::8bd1:0:1;
-                peer-as 20940;
+                peer-as 65102;
             }
             neighbor 2001:7f8::51cc:0:168 {
-                description "Akamai v6 Peer 02 via DECIX";
+                description "CdnA v6 Peer 02 via DECIX";
                 local-address 2001:7f8::8bd1:0:1;
-                peer-as 20940;
+                peer-as 65102;
             }
             neighbor 2001:7f8::51cc:1:168 {
-                description "Akamai v6 Peer 03 via DECIX";
+                description "CdnA v6 Peer 03 via DECIX";
                 local-address 2001:7f8::8bd1:0:1;
-                peer-as 20940;
+                peer-as 65102;
             }
         }
         group FASTWEB_IXPEER_V4 {
@@ -5908,7 +5908,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.58 {
                 description "FASTWEB v4 Peer 01 via DECIX";
                 local-address 198.51.100.134;
@@ -5925,7 +5925,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::324a:0:1 {
                 description "FASTWEB v6 Peer 01 via DECIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -5942,7 +5942,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.90 {
                 description "Exponential-E v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -5959,7 +5959,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::625c:0:1 {
                 description "Exponential-E v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -5976,7 +5976,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.128 {
                 description "Hetzner v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6003,7 +6003,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::616c:0:1 {
                 description "Hetzner v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6030,7 +6030,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.123 {
                 description "FreenetDE v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6047,7 +6047,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::1536:0:1 {
                 description "FreenetDE v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6064,7 +6064,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.254 {
                 description "Bahnhof v4 Peer 01 via AMS-IX";
                 local-address 198.51.100.134;
@@ -6081,7 +6081,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::2119:0:1 {
                 description "Bahnhof v6 Peer 01 via AMS-IX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6098,7 +6098,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.133 {
                 description "TKRZ v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6115,7 +6115,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::a4c8:0:1 {
                 description "TKRZ v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6132,7 +6132,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.206 {
                 description "Windtre v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6154,7 +6154,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::4f3:0:1 {
                 description "Windtre v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6176,7 +6176,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.17 {
                 description "Manda v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6193,7 +6193,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::20ad:0:1 {
                 description "Manda v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6210,7 +6210,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.107 {
                 description "Telefonica v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6232,7 +6232,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::1a95:0:1 {
                 description "Telefonica v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6244,9 +6244,9 @@ protocols {
                 peer-as 6805;
             }
         }
-        group ATOM86_IXPEER_V4 {
+        group PEERB_IXPEER_V4 {
             type external;
-            import ATOM86_BGP_RCV_V4;
+            import PEERB_BGP_RCV_V4;
             family inet {
                 unicast;
             }
@@ -6254,16 +6254,16 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.214 {
-                description "ATOM86 v4 Peer 01 via DE-CIX";
+                description "PEERB v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
-                peer-as 8455;
+                peer-as 65103;
             }
         }
-        group ATOM86_IXPEER_V6 {
+        group PEERB_IXPEER_V6 {
             type external;
-            import ATOM86_BGP_RCV_V6;
+            import PEERB_BGP_RCV_V6;
             family inet6 {
                 unicast;
             }
@@ -6271,11 +6271,11 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::2107:0:1 {
-                description "ATOM86 v6 Peer 01 via DE-CIX";
+                description "PEERB v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
-                peer-as 8455;
+                peer-as 65103;
             }
         }
         group M247_IXPEER_V4 {
@@ -6288,7 +6288,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 198.51.100.100 {
                 description "M247 v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6305,7 +6305,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::2331:0:1 {
                 description "M247 v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6322,7 +6322,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.135 {
                 description "i3D v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6339,7 +6339,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::c188:0:1 {
                 description "i3D v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6357,7 +6357,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.215 {
                 description "DU v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6375,7 +6375,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::3dba:0:1 {
                 description "DU v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6392,7 +6392,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.169 {
                 description "Clara.net v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6414,7 +6414,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::20ea:0:1 {
                 description "Clara.net v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6436,7 +6436,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.115 {
                 description "Bouygues Telecom v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6453,7 +6453,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::1522:0:1 {
                 description "Bouygues Telecom v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6470,7 +6470,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.149 {
                 description "CELLCOM v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6493,7 +6493,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::690:194:47 {
                 description "CELLCOM v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6516,7 +6516,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.128 {
                 description "FreePro v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6533,7 +6533,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::783d:0:1 {
                 description "FreePro v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6550,7 +6550,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.226 {
                 description "Quickline v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6567,7 +6567,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::3cf0:0:1 {
                 description "Quickline v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6584,7 +6584,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.13 {
                 description "Sipartech v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6601,7 +6601,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::2075:0:1 {
                 description "Sipartech v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6618,7 +6618,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.62 {
                 description "LINK 11 v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6640,7 +6640,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::8605:0:1 {
                 description "LINK 11 v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6663,7 +6663,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 198.51.100.9 {
                 description "DFN v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6686,7 +6686,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::2a8:0:1 {
                 description "DFN v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6708,7 +6708,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.226 {
                 description "NETGLOBAL v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6725,7 +6725,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::c48c:0:1 {
                 description "NETGLOBAL v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6742,7 +6742,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 198.51.100.194 {
                 description "1-X v4 Peer via MLPE";
                 local-address 198.51.100.24;
@@ -6759,7 +6759,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8:bd::5:263:1 {
                 description "1-X v6 Peer  via MLPE";
                 local-address 2001:7f8:bd::3:5793:1;
@@ -6776,7 +6776,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.93 {
                 description "Vianova v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6793,7 +6793,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::5240:0:1 {
                 description "Vianova v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6808,7 +6808,7 @@ protocols {
             }
             export PEER-A-NTW-INFRA-01_BGP_ADV_V4;
             peer-as 4202254003;
-            local-as 35793;
+            local-as 64900;
             neighbor 10.2.249.5 {
                 description peer-a-ntw-infra-01;
                 local-address 10.2.249.4;
@@ -6822,13 +6822,13 @@ protocols {
                 unicast;
             }
             export BB_BGP_ADV_V4;
-            peer-as 35793;
-            local-as 35793;
+            peer-as 64900;
+            local-as 64900;
             multipath {
                 multiple-as;
             }
             neighbor 10.3.254.5 {
-                description ams1-rt-01;
+                description dc03-rt-01;
                 local-address 10.3.254.7;
             }
             neighbor 10.3.254.6 {
@@ -6836,11 +6836,11 @@ protocols {
                 local-address 10.3.254.7;
             }
             neighbor 10.3.254.8 {
-                description cdg1-rt-01;
+                description dc04-rt-01;
                 local-address 10.3.254.7;
             }
             neighbor 10.3.254.133 {
-                description ams1-rt-02;
+                description dc03-rt-02;
                 local-address 10.3.254.7;
             }
             neighbor 10.3.254.134 {
@@ -6852,7 +6852,7 @@ protocols {
                 local-address 10.3.254.7;
             }
             neighbor 10.3.254.136 {
-                description cdg1-rt-02;
+                description dc04-rt-02;
                 local-address 10.3.254.7;
             }
         }
@@ -6864,8 +6864,8 @@ protocols {
                 unicast;
             }
             export BB_BGP_ADV_V6;
-            peer-as 35793;
-            local-as 35793;
+            peer-as 64900;
+            local-as 64900;
             multipath {
                 multiple-as;
             }
@@ -6878,19 +6878,19 @@ protocols {
                 local-address 2a07:7940:0:ffff:18::1;
             }
             neighbor 2a07:7940:0:ffff:13::1 {
-                description ams1-rt-01;
+                description dc03-rt-01;
                 local-address 2a07:7940:0:ffff:18::1;
             }
             neighbor 2a07:7940:0:ffff:13::2 {
-                description ams1-rt-02;
+                description dc03-rt-02;
                 local-address 2a07:7940:0:ffff:18::1;
             }
             neighbor 2a07:7940:0:ffff:17::1 {
-                description cdg1-rt-01;
+                description dc04-rt-01;
                 local-address 2a07:7940:0:ffff:18::1;
             }
             neighbor 2a07:7940:0:ffff:17::2 {
-                description cdg1-rt-02;
+                description dc04-rt-02;
                 local-address 2a07:7940:0:ffff:18::1;
             }
             neighbor 2a07:7940:0:ffff:18::2 {
@@ -6908,7 +6908,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.152 {
                 description "Oracle v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6925,7 +6925,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::7c9a:0:1 {
                 description "Oracle v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6942,7 +6942,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.138 {
                 description "ZETNET v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6959,7 +6959,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::626e:0:1 {
                 description "ZETNET v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -6976,7 +6976,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.8 {
                 description "MEO v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -6993,7 +6993,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::21d1:0:1 {
                 description "MEO v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -7010,7 +7010,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.27 {
                 description "Ooredoo v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -7027,7 +7027,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::224d:0:1 {
                 description "Ooredoo v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -7044,7 +7044,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 192.0.2.117 {
                 description "OTE v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -7061,7 +7061,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::31a9:0:1 {
                 description "OTE v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -7078,7 +7078,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 198.51.100.77 {
                 description "BEZEQ v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -7100,7 +7100,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::2167:0:1 {
                 description "BEZEQ v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -7122,7 +7122,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.171 {
                 description "Init7 v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -7144,7 +7144,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::32e6:0:1 {
                 description "Init7 v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
@@ -7167,7 +7167,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 203.0.113.207 {
                 description "A1 Telekom v4 Peer 01 via DE-CIX";
                 local-address 198.51.100.134;
@@ -7185,7 +7185,7 @@ protocols {
             remove-private {
                 all;
             }
-            local-as 35793;
+            local-as 64900;
             neighbor 2001:7f8::20ff:0:1 {
                 description "A1 Telekom v6 Peer 01 via DE-CIX";
                 local-address 2001:7f8::8bd1:0:1;
