@@ -4,7 +4,9 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
-## [Unreleased]
+## [0.3.0] - 2026-06-10
+
+First PyPI release: `pip install netlog-ai`. Headline features: cross-source correlation + per-device triage (12 MCP tools), alert webhooks, streaming analyze (flat memory at any log size), 2.3× faster classification, fully air-gapped UI, self-contained wheels.
 
 ### Tests
 
