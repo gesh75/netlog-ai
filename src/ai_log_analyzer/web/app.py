@@ -26,7 +26,7 @@ from functools import wraps  # noqa: E402
 from flask import Flask, abort, jsonify, request, send_from_directory  # noqa: E402
 from flask_cors import CORS  # noqa: E402
 
-from ai_log_analyzer import llm  # noqa: E402
+from ai_log_analyzer import __version__, llm  # noqa: E402
 from ai_log_analyzer.adapters import frr, network_tool  # noqa: E402
 from ai_log_analyzer.adapters.file import parse_lines  # noqa: E402
 from ai_log_analyzer.analyzer import analyze, analyze_site, optimize_config  # noqa: E402
@@ -47,6 +47,27 @@ SITES_DIR = Path(__file__).resolve().parents[3] / "sites"
 # ── Security helpers ─────────────────────────────────────────────────────────
 
 API_TOKEN: str = os.environ.get("AI_LOG_ANALYZER_API_TOKEN", "")
+
+# Roots that POST /api/analyze {source:"file"} may read from. Colon-separated
+# env override; default = home + /var/log + the repo checkout. Confines the
+# unauthenticated file-ingest path so an exposed port can't read /etc/* etc.
+FILE_ROOTS: list[Path] = [
+    Path(p).expanduser().resolve()
+    for p in os.environ.get(
+        "AI_LOG_ANALYZER_FILE_ROOTS",
+        f"{Path.home()}:/var/log:{Path(__file__).resolve().parents[3]}",
+    ).split(":")
+    if p.strip()
+]
+
+
+def _path_allowed(p: Path) -> bool:
+    """True when the resolved path sits under one of FILE_ROOTS."""
+    try:
+        resolved = p.resolve()
+    except OSError:
+        return False
+    return any(resolved.is_relative_to(root) for root in FILE_ROOTS)
 
 
 class BadCommand(ValueError):
@@ -160,9 +181,10 @@ def create_app() -> Flask:
     # ── Cache headers for static HTML/JS/CSS ──────────────────────────────
     # The UI is a single-page Flask app — we ship layout/JS fixes by editing
     # index.html and app.js directly. Browsers cache these by default, which
-    # means users see a stale UI until they hard-refresh. Force revalidation
-    # on every request for the text assets; binary assets (images, video) are
-    # still cached normally.
+    # means users see a stale UI until they hard-refresh. `no-cache` (without
+    # `no-store`) forces revalidation via If-None-Match on every request, so
+    # Flask's ETag answers 304 and the ~200KB of text assets are only
+    # re-downloaded when they actually change. Binary assets stay cached.
     @app.after_request
     def _add_no_cache_for_text_assets(response):
         path = (request.path or "").lower()
@@ -171,9 +193,7 @@ def create_app() -> Flask:
                 or path.endswith(".js")
                 or path.endswith(".css")
                 or path.endswith(".json")):
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     # ── UI ────────────────────────────────────────────────────────────────
@@ -186,13 +206,19 @@ def create_app() -> Flask:
     def health():
         return jsonify({
             "ok": True,
-            "version": "0.2.0",
+            "version": __version__,
             "network_tool_available": network_tool.is_available(),
         })
 
     @app.route("/api/llm/status", methods=["GET"])
     def llm_status():
-        return jsonify(llm.get_state())
+        state = llm.get_state()
+        # last_errors carries upstream HTTP error bodies — useful in the UI,
+        # but on a token-protected deployment don't hand it to anonymous
+        # callers. Dev mode (no token) keeps full output for the dashboard.
+        if API_TOKEN and request.headers.get("X-API-Token", "") != API_TOKEN:
+            state = {k: v for k, v in state.items() if k != "last_errors"}
+        return jsonify(state)
 
     @app.route("/api/llm/provider", methods=["POST"])
     @require_api_token
@@ -587,7 +613,12 @@ def create_app() -> Flask:
 
         elif source == "file":
             path = body.get("path", "")
-            p = Path(path) if path else None
+            p = Path(path).expanduser() if path else None
+            if p and not _path_allowed(p):
+                return jsonify({
+                    "error": "Path outside allowed roots "
+                             "(set AI_LOG_ANALYZER_FILE_ROOTS to extend)",
+                }), 403
             if not p or not p.exists():
                 return jsonify({"error": f"Path not found: {path}"}), 404
             from ai_log_analyzer.adapters.file import (
