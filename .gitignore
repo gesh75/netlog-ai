@@ -28,3 +28,6 @@ node_modules/
 
 # Lint caches
 .ruff_cache/
+
+# Local-only data (lab captures, drafts) — never packaged or committed
+local-data/
