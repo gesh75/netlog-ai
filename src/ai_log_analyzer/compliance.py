@@ -166,7 +166,7 @@ def _evaluate_rule(text: str, rule: dict[str, Any]) -> tuple[bool, str]:
     any_pats = rule.get("must_match_any", [])
     if any_pats:
         if not any(re.search(p, text, re.M | re.I) for p in any_pats):
-            return False, f"None of the required patterns matched"
+            return False, "None of the required patterns matched"
 
     return True, "ok"
 

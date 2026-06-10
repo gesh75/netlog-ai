@@ -26,12 +26,6 @@ def to_ansible_playbook(
         cmds = ["# No platform-specific commands found in the finding"]
 
     hosts_block = ", ".join(hostnames) or "all"
-    module = {
-        "junos": "junipernetworks.junos.junos_command",
-        "eos":   "arista.eos.eos_config",
-        "frr":   "ansible.builtin.shell",
-    }.get(platform_hint.lower(), "ansible.builtin.shell")
-
     if platform_hint.lower() == "frr":
         task_body = "      ansible.builtin.shell: |\n" + indent("\n".join(cmds), "        ")
     elif platform_hint.lower() == "eos":

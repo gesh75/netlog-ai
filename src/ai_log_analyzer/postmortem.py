@@ -6,7 +6,6 @@ like, automatically check every other device for the same fingerprint.
 from __future__ import annotations
 
 import re
-from typing import Iterable
 
 
 def search_fleet(

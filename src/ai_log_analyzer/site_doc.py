@@ -611,7 +611,7 @@ def render_site_doc(
     out.append(f"- **Inferred Country/Region:** {country}")
     out.append(f"- **Network Devices in this bundle:** {len(profiles)}")
     funcs = Counter(p.function_code for p in profiles)
-    out.append(f"- **Device functions:** "
+    out.append("- **Device functions:** "
                + ", ".join(f"{n}× `{f}`" for f, n in funcs.most_common()))
     out.append("")
     out.append("> _Facility metadata (rack count, exact address, contact) is not derivable from sanitized configs — pull from NetBox or DCIM for production reports._")
@@ -790,12 +790,12 @@ def _executive_summary(site: str, profiles: list[DeviceProfile],
     lines: list[str] = []
     lines.append(f"🏢 **Site Status:** ACTIVE — {len(profiles)} devices ({dict(by_role)})")
     lines.append("")
-    lines.append(f"🎯 **Priority Classification:** "
+    lines.append("🎯 **Priority Classification:** "
                  + ("**Tier 1** (full firewall + multiple switches)"
                     if by_role.get("firewall", 0) >= 1 and by_role.get("switch", 0) >= 4
                     else "**Tier 2** (limited size)"))
     lines.append("")
-    lines.append(f"📊 **Infrastructure Overview:**")
+    lines.append("📊 **Infrastructure Overview:**")
     lines.append(f"- {by_role.get('firewall', 0)} firewall(s), "
                  f"{by_role.get('router', 0)} router(s), "
                  f"{by_role.get('switch', 0)} switch(es)")
@@ -998,7 +998,7 @@ def _bgp_routing_section(profiles: list[DeviceProfile], isps: list) -> list[str]
     out: list[str] = []
     if not total:
         return ["_No BGP neighbors detected across the site._"]
-    out.append(f"### 8.1 BGP Footprint")
+    out.append("### 8.1 BGP Footprint")
     out.append("")
     out.append(f"- **Total BGP neighbor configurations:** {total}")
     out.append(f"- **Devices with BGP:** {sum(1 for p in profiles if p.bgp_neighbors)}")

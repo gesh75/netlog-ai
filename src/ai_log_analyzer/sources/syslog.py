@@ -19,7 +19,7 @@ from typing import Iterable
 
 from ai_log_analyzer.adapters.file import parse_lines
 from ai_log_analyzer.classifier import LogEvent
-from ai_log_analyzer.sources.base import LogSource, SourceConfig, SourceError, registry
+from ai_log_analyzer.sources.base import SourceConfig, SourceError, registry
 
 log = logging.getLogger(__name__)
 
