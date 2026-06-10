@@ -6,6 +6,25 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Distribution & data privacy (wave 3)
+
+- **Wheels are now self-contained**: `samples/`, `sites/`, and the entire web UI
+  ship as package data (`ai_log_analyzer/data/`, `web/static/`). Previously a
+  pip-installed netlog-ai had **no UI and no demo data** (package-data was never
+  configured); Docker images booted to an empty sites list. Top-level `samples/`
+  and `sites/` remain as symlinks for checkout workflows;
+  `AI_LOG_ANALYZER_SAMPLES_DIR` / `AI_LOG_ANALYZER_SITES_DIR` override.
+- **Release pipeline**: pushing a `v*` tag builds sdist+wheel, smoke-tests that
+  the wheel carries data + UI, publishes to PyPI via trusted publishing, and
+  cuts a GitHub release (`.github/workflows/release.yml`).
+- **Samples fully re-pseudonymized**: the RIR-assigned local ASN, seven real
+  peer ASNs, transit/CDN/IXP provider names, a real circuit ID, and six real
+  site codes were replaced with private-range ASNs and neutral identifiers —
+  guarded by a regression test so they can't reappear.
+- **Air-gapped UI**: cytoscape/elkjs/cytoscape-elk are vendored into
+  `web/static/vendor/` (the topology tab previously needed 2.3MB from a CDN);
+  a test asserts the UI loads no external scripts.
+
 ### Security
 
 - **Closed the `analyze_site()` sanitize bypass** — site-wide cross-device analysis

@@ -53,6 +53,10 @@ netlog-ai      = "ai_log_analyzer.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# Demo bundles ship in the wheel so pip/Docker installs boot with data
+ai_log_analyzer = ["data/samples/*", "data/sites/**/*", "web/static/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
