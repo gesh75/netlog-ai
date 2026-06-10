@@ -290,7 +290,7 @@ def _query_unix_socket(sock_path: str, api_path: str, payload: dict) -> Optional
         if b"Transfer-Encoding: chunked" in resp:
             lines = body_bytes.split(b"\r\n")
             body_bytes = b"".join(
-                l for l in lines if l and not all(c in b"0123456789abcdefABCDEF" for c in l)
+                ln for ln in lines if ln and not all(c in b"0123456789abcdefABCDEF" for c in ln)
             )
         data = json.loads(body_bytes.strip())
         return _extract_openai_text(data)

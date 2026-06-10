@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Iterable
 
 from ai_log_analyzer import llm
 from ai_log_analyzer.sanitize import sanitize

@@ -11,12 +11,12 @@ If graphviz `dot` is installed, can also render to PNG/SVG.
 """
 from __future__ import annotations
 
+import ipaddress as _ip
 import re
 import shutil
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Iterable
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -173,7 +173,6 @@ _EOS_VLAN_SUBNET = re.compile(
 )
 
 # Public IP detection — anything outside RFC1918 / link-local / loopback
-import ipaddress as _ip
 
 
 def _is_public_ip(ip: str) -> bool:
@@ -621,7 +620,7 @@ def build_site_dot(
             lines.append('        flow2_sw [label="Mgmt Switch\\n' +
                           f'VLAN {mgmt_vlans[0].vlan_id}", fillcolor="#66cc66"];')
             if fws:
-                lines.append(f'        flow2_fw [label="Firewall\\nMgmt Zone", fillcolor="#ff6666", shape=component];')
+                lines.append('        flow2_fw [label="Firewall\\nMgmt Zone", fillcolor="#ff6666", shape=component];')
                 lines.append('        flow2_sw -> flow2_fw [color="#cc9900"];')
                 lines.append('        flow2_dev [label="Network\\nDevices", shape=box3d, fillcolor="#ffcc99"];')
                 lines.append('        flow2_fw -> flow2_dev [color="#cc9900"];')

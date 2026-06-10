@@ -17,9 +17,8 @@ import html
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -32,7 +31,7 @@ def to_markdown_site(result: dict) -> str:
     site = result.get("site_id", "(site)")
     out.append(f"# Site Analysis: {site}")
     out.append("")
-    out.append(f"_Generated {datetime.utcnow().isoformat(timespec='seconds')}Z_  ")
+    out.append(f"_Generated {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')}Z_  ")
     out.append(f"_LLM: {'on' if result.get('llm_powered') else 'rule-based'}_")
     out.append("")
     out.append(f"**Maturity score:** {result.get('site_score', 0)}/100")
@@ -99,7 +98,7 @@ def to_markdown_optimize(result: dict) -> str:
     out: list[str] = []
     out.append(f"# Device Optimization Report: {result.get('hostname', '(device)')}")
     out.append("")
-    out.append(f"_Generated {datetime.utcnow().isoformat(timespec='seconds')}Z_  ")
+    out.append(f"_Generated {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')}Z_  ")
     out.append(f"_Platform: {result.get('platform', '?')}  |  "
                f"LLM: {'on' if result.get('llm_powered') else 'rule-based'}_")
     out.append("")
@@ -165,7 +164,7 @@ def to_html_site(result: dict, mermaid_diagram: str | None = None) -> str:
     site = result.get("site_id", "(site)")
     findings = result.get("cross_device_findings") or []
     topo = result.get("topology") or {}
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     findings_html = []
     for i, f in enumerate(findings, 1):

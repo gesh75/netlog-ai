@@ -214,7 +214,7 @@ def test_scrub_placeholders_passthrough_when_no_placeholders():
 @pytest.mark.unit
 def test_executive_summary_llm_prompt_anchors_hostnames(monkeypatch):
     """The LLM call must receive an ALLOWED_HOSTNAMES line and real device names."""
-    from ai_log_analyzer import analyzer, llm
+    from ai_log_analyzer import llm
     from ai_log_analyzer.analyzer import ActionItem, _executive_summary
 
     captured = {}

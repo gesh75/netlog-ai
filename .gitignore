@@ -25,3 +25,6 @@ Thumbs.db
 out/
 frames/
 node_modules/
+
+# Lint caches
+.ruff_cache/
