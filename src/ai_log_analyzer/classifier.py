@@ -81,6 +81,87 @@ _COMPILED: list[tuple[re.Pattern[str], str, str, str]] = [
     (re.compile(p, re.IGNORECASE), s, c, d) for (p, s, c, d) in _KB_PATTERNS
 ]
 
+# ── Fast-path literal gate ───────────────────────────────────────────────
+# In real syslog the vast majority of lines match no KB pattern, yet each one
+# paid all ~75 regex scans. The gate below extracts, from every pattern's
+# parse tree, a set of literal keywords such that a line CANNOT match the
+# pattern without containing one of them. A cheap str-in scan over those
+# keywords then decides whether the ordered regex loop needs to run at all.
+# Patterns where no literal can be proven stay in an always-checked list, so
+# the gate is sound by construction and self-maintains as rules are added.
+
+try:  # Python 3.11+ moved sre_parse under re._parser
+    from re import _parser as _sre_parse  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover - Python 3.10
+    import sre_parse as _sre_parse  # type: ignore[import-not-found]
+
+
+def _guaranteed_literals(parsed) -> set[str] | None:
+    """Lowercase literals, ≥1 of which appears in any match; None = no proof."""
+    best: set[str] | None = None
+    runs: list[str] = []
+    run: list[str] = []
+
+    def _flush() -> None:
+        if run:
+            runs.append("".join(run))
+            run.clear()
+
+    def _prefer(cur: set[str] | None, new: set[str] | None) -> set[str] | None:
+        if not new: return cur
+        if cur is None: return new
+        return new if len(new) < len(cur) else cur
+
+    for op, av in parsed:
+        name = op.name
+        if name == "LITERAL":
+            run.append(chr(av).lower())
+            continue
+        _flush()
+        if name == "SUBPATTERN":  # av = (group, add_flags, del_flags, sub)
+            best = _prefer(best, _guaranteed_literals(av[3]))
+        elif name == "BRANCH":  # av = (None, [alternatives])
+            union: set[str] = set()
+            for alt in av[1]:
+                alt_lits = _guaranteed_literals(alt)
+                if not alt_lits:
+                    union = set()
+                    break
+                union |= alt_lits
+            best = _prefer(best, union)
+        elif name in ("MAX_REPEAT", "MIN_REPEAT"):  # av = (min, max, item)
+            if av[0] >= 1:  # only required (non-optional) repeats guarantee
+                best = _prefer(best, _guaranteed_literals(av[2]))
+        # IN / ANY / AT / NOT_LITERAL etc. prove nothing — skip
+    _flush()
+
+    solid = [r for r in runs if len(r) >= 3] or runs
+    if solid:
+        return {max(solid, key=len)}
+    return best
+
+
+_KEYWORDS: tuple[str, ...]
+_UNGUARDED: list[tuple[re.Pattern[str], str, str, str]] = []
+_kw: set[str] = set()
+for _i, (_p, _s, _c, _d) in enumerate(_KB_PATTERNS):
+    try:
+        _lits = _guaranteed_literals(_sre_parse.parse(_p))
+    except Exception:  # unparseable construct — never skip this pattern
+        _lits = None
+    # Literals under 3 chars match almost every line and would neuter the
+    # gate — such patterns go to the always-checked list instead.
+    if _lits and all(len(_l) >= 3 for _l in _lits):
+        _kw |= _lits
+    else:
+        _UNGUARDED.append(_COMPILED[_i])
+# Prune redundant keywords: if k2 is a substring of k1, any line containing
+# k1 also contains k2 — k2 alone suffices for the gate.
+_KEYWORDS = tuple(sorted(
+    k for k in _kw
+    if not any(other != k and other in k for other in _kw)
+))
+
 # ANSI/VT100 terminal escape sequences — systemd, journald, FRR vtysh, and
 # any source piping colored output leaks these into the message field.
 # Pattern covers CSI (\x1b[...m), OSC (\x1b]...\x07), and SGR-style codes.
@@ -181,7 +262,13 @@ def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], 
         combined = f"{ev.appname} {clean_message}".lower()
         sev, cat, desc = "info", "other", ""
 
-        for pattern, p_sev, p_cat, p_desc in _COMPILED:
+        # Literal gate: no keyword → only the unproven patterns can possibly
+        # match (their relative order is preserved, so precedence holds).
+        if any(k in combined for k in _KEYWORDS):
+            candidates = _COMPILED
+        else:
+            candidates = _UNGUARDED
+        for pattern, p_sev, p_cat, p_desc in candidates:
             if pattern.search(combined):
                 sev, cat, desc = p_sev, p_cat, p_desc
                 break
