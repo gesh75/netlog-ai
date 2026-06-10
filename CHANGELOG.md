@@ -6,6 +6,18 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Performance
+
+- **Streaming analyze — flat memory at any input size.** `analyze()` now
+  consumes any iterable in a single bounded pass (per-severity top-300 heaps,
+  action-item groups bounded by the KB table, per-device counters). Measured
+  on a 100MB syslog: **651MB → 40MB peak RSS** (16×), identical results.
+  `classifier.iter_classify()` is the new lazy building block;
+  `classify_events()` keeps its sorted/materialized contract. The web file
+  route and the CLI both pass generators end-to-end; the web route gains a
+  size guard (`AI_LOG_ANALYZER_MAX_FILE_MB`, default 200 — CPU must fit the
+  HTTP worker timeout; the CLI streams multi-GB files without limit).
+
 ### Added
 
 - **Alert webhooks** — analyses that find events at/above a severity threshold
