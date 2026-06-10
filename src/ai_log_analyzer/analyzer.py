@@ -728,9 +728,13 @@ def analyze_site(
         cfg = d.get("config_text") or ""
         if not cfg:
             continue
-        trimmed = cfg[:PER_DEVICE_CHARS]
-        if len(cfg) > PER_DEVICE_CHARS:
-            trimmed += f"\n... [config truncated, original {len(cfg)} chars] ..."
+        # CRITICAL: same belt-and-suspenders as optimize_config — site bundles
+        # can carry live-fetched or user-supplied raw configs, so scrub secrets
+        # + PII here before anything reaches an external LLM.
+        safe_cfg, _ = sanitize(cfg, mask_pii=True)
+        trimmed = safe_cfg[:PER_DEVICE_CHARS]
+        if len(safe_cfg) > PER_DEVICE_CHARS:
+            trimmed += f"\n... [config truncated, original {len(safe_cfg)} chars] ..."
         block = (
             f"\n\n========== DEVICE: {d['hostname']} ==========\n"
             f"FUNCTION: {d.get('function', 'unknown')}  |  PLATFORM: {d.get('platform', 'unknown')}\n"

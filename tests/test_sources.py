@@ -54,6 +54,15 @@ class _StubSource:
         self._closed = True
 
 
+@pytest.fixture(autouse=True)
+def _isolated_stub_registration():
+    """Register 'stub-test' for every test and clean up the shared registry
+    singleton afterwards — keeps tests order-independent (xdist/-k safe)."""
+    registry.register("stub-test", _StubSource.from_config)
+    yield
+    registry._factories.pop("stub-test", None)
+
+
 @pytest.mark.unit
 def test_stub_source_satisfies_protocol():
     cfg = SourceConfig(id="s1", type="stub", url="http://x")

@@ -20,7 +20,9 @@ from importlib.metadata import (
 )
 
 try:
-    __version__: str = _pkg_version("ai-log-analyzer")
+    # The distribution is named "netlog-ai" (pyproject [project].name); the
+    # old "ai-log-analyzer" lookup never matched and always hit the fallback.
+    __version__: str = _pkg_version("netlog-ai")
 except _PkgNFE:
     __version__ = "0.2.0"  # fallback for non-installed / editable dev checkouts
 

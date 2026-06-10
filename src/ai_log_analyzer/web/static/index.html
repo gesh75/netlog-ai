@@ -9,11 +9,8 @@
 <meta name="description" content="AI-powered network log analyzer with cross-device correlation, BGP/OSPF health scoring, and LLM-assisted incident playbooks.">
 <!-- Local-only tool: keep out of any accidental search-engine crawl if the port is exposed -->
 <meta name="robots" content="noindex, nofollow">
-<!-- D3 CDN preconnect — opens TCP+TLS 100–200ms earlier so the deferred D3
-     script downloads faster on first paint. `crossorigin` matches the script's
-     CORS mode (D3 is served with permissive CORS). -->
-<link rel="preconnect" href="https://d3js.org" crossorigin>
-<link rel="dns-prefetch" href="https://d3js.org">
+<!-- CDN preconnect — opens TCP+TLS 100–200ms earlier so the deferred
+     topology scripts download faster on first paint. -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <!-- PWA: when added to iOS / Android home screen, launch full-screen with status bar tinted to match the dark theme -->
@@ -1603,15 +1600,20 @@
   </section>
 </main>
 
-<!-- `defer` keeps execution order (D3 → cytoscape → elkjs → cytoscape-elk → app.js)
+<!-- `defer` keeps execution order (cytoscape → elkjs → cytoscape-elk → app.js)
      while letting the parser work uninterrupted. All scripts run after
      DOMContentLoaded, which the app's init handler already expects.
-     - D3 is still used for a few small renderers; cytoscape is the topology engine.
+     - cytoscape is the topology engine (D3 was dropped — app.js never used it).
      - elkjs must load before cytoscape-elk (which registers the adapter). -->
-<script src="https://d3js.org/d3.v7.min.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/cytoscape-elk@2.2.0/dist/cytoscape-elk.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js" defer
+        integrity="sha384-H3uzGzTfGHUAumB8+s4GEdfFwzAceN9wCCndN8AXubWKFIPuBSWKKtWDx7RhSf/z"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js" defer
+        integrity="sha384-KO35c6PFq7tFxAEx6FtATwL9vOBOmCzQYr7GM0iTr3oO22s7Jc9OkclOH4AV7jwK"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-elk@2.2.0/dist/cytoscape-elk.js" defer
+        integrity="sha384-2kn1Dn9ABocPd1Sy3vo1Df4fl4mW7zyR9V15SruidezT1rmZL5i8b/BAFMBNddKT"
+        crossorigin="anonymous"></script>
 <script src="app.js" defer></script>
 </body>
 </html>
