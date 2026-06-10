@@ -6,6 +6,33 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Security
+
+- **Closed the `analyze_site()` sanitize bypass** — site-wide cross-device analysis
+  sent raw `config_text` to the LLM provider; it now routes every device config
+  through `sanitize(mask_pii=True)` like the other LLM paths, locked in by a
+  regression test (`tests/test_site_sanitize.py`).
+- **Confined `POST /api/analyze {source:"file"}`** to allowlisted roots
+  (home + `/var/log` + the checkout; override with `AI_LOG_ANALYZER_FILE_ROOTS`).
+  Previously any reachable caller could read arbitrary files via the API.
+- `GET /api/llm/status` no longer exposes `last_errors` (upstream error bodies) to
+  anonymous callers when an API token is configured.
+- CDN `<script>` tags now carry Subresource Integrity hashes.
+
+### Changed
+
+- **Anthropic prompt caching**: system prompts are sent with
+  `cache_control: ephemeral` — repeat analyses bill cached input at ~10% price.
+- Static text assets use `Cache-Control: no-cache` (ETag revalidation → 304s)
+  instead of `no-store` re-downloading ~200KB per page view.
+- Dropped the unused D3 bundle (280KB on every page load; `app.js` never used it).
+- Version is reported from package metadata (fixed the `ai-log-analyzer` →
+  `netlog-ai` distribution-name mismatch that pinned `/api/health` to a hardcoded
+  fallback); `pyproject.toml` bumped to 0.2.0 to match.
+- Added `CONTRIBUTING.md` (the README already linked it; the file didn't exist).
+- `tests/test_sources.py` no longer depends on test execution order
+  (registry registration is now a per-test fixture). Suite: 237 → 246 tests.
+
 ### Added — DCN AI Intelligence port (cross-source correlation + per-device triage)
 
 Four capabilities harvested from the legacy DCN AI Intelligence tool and re-targeted

@@ -202,7 +202,15 @@ def _query_claude(system_prompt: str, user_prompt: str, max_tokens: int) -> Opti
             json={
                 "model": _state["anthropic_model"],
                 "max_tokens": max_tokens,
-                "system": system_prompt,
+                # cache_control: the static system prompts are re-sent on every
+                # analysis call — marking them ephemeral lets the API serve them
+                # from prompt cache at ~10% of input price on repeat calls.
+                # Ignored harmlessly below the model's cacheable minimum.
+                "system": [{
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }],
                 "messages": [{"role": "user", "content": user_prompt}],
             },
             timeout=int(_state["timeout"]),
