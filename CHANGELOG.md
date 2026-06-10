@@ -4,6 +4,11 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
+## [0.3.1] - 2026-06-10
+
+- UI header version badge is now populated live from `/api/health` (the 0.3.0
+  wheel shipped a hardcoded "v0.2" badge; the static value is only a fallback).
+
 ## [0.3.0] - 2026-06-10
 
 First PyPI release: `pip install netlog-ai`. Headline features: cross-source correlation + per-device triage (12 MCP tools), alert webhooks, streaming analyze (flat memory at any log size), 2.3× faster classification, fully air-gapped UI, self-contained wheels.
