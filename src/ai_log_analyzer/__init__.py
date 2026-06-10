@@ -24,7 +24,7 @@ try:
     # old "ai-log-analyzer" lookup never matched and always hit the fallback.
     __version__: str = _pkg_version("netlog-ai")
 except _PkgNFE:
-    __version__ = "0.2.0"  # fallback for non-installed / editable dev checkouts
+    __version__ = "0.3.0"  # fallback for non-installed / editable dev checkouts
 
 
 # ── Env bootstrap (MUST run before submodule imports) ────────────────────────
