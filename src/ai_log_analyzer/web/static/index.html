@@ -9,10 +9,8 @@
 <meta name="description" content="AI-powered network log analyzer with cross-device correlation, BGP/OSPF health scoring, and LLM-assisted incident playbooks.">
 <!-- Local-only tool: keep out of any accidental search-engine crawl if the port is exposed -->
 <meta name="robots" content="noindex, nofollow">
-<!-- CDN preconnect — opens TCP+TLS 100–200ms earlier so the deferred
-     topology scripts download faster on first paint. -->
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<!-- Topology libraries are vendored locally (static/vendor/) — the tool is
+     local-first and must work fully air-gapped, so no CDN dependencies. -->
 <!-- PWA: when added to iOS / Android home screen, launch full-screen with status bar tinted to match the dark theme -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1604,16 +1602,12 @@
      while letting the parser work uninterrupted. All scripts run after
      DOMContentLoaded, which the app's init handler already expects.
      - cytoscape is the topology engine (D3 was dropped — app.js never used it).
-     - elkjs must load before cytoscape-elk (which registers the adapter). -->
-<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js" defer
-        integrity="sha384-H3uzGzTfGHUAumB8+s4GEdfFwzAceN9wCCndN8AXubWKFIPuBSWKKtWDx7RhSf/z"
-        crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js" defer
-        integrity="sha384-KO35c6PFq7tFxAEx6FtATwL9vOBOmCzQYr7GM0iTr3oO22s7Jc9OkclOH4AV7jwK"
-        crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/cytoscape-elk@2.2.0/dist/cytoscape-elk.js" defer
-        integrity="sha384-2kn1Dn9ABocPd1Sy3vo1Df4fl4mW7zyR9V15SruidezT1rmZL5i8b/BAFMBNddKT"
-        crossorigin="anonymous"></script>
+     - elkjs must load before cytoscape-elk (which registers the adapter).
+     - vendored locally (cytoscape@3.30.4, elkjs@0.9.3, cytoscape-elk@2.2.0)
+       so the topology tab works fully air-gapped. -->
+<script src="vendor/cytoscape.min.js" defer></script>
+<script src="vendor/elk.bundled.js" defer></script>
+<script src="vendor/cytoscape-elk.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>

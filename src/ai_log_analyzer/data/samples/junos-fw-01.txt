@@ -487,7 +487,7 @@ security {
             policy ntw-advpn-to-ntw-vlan14 {
                 description DCN-970;
                 match {
-                    source-address fra2-ntw-mon-01;
+                    source-address dc02-ntw-mon-01;
                     destination-address 10.1.42.0/24;
                     application [ tcp-port-32767 junos-ping snmp udp-ports-33434-33534 ];
                 }
@@ -1182,7 +1182,7 @@ security {
                 address 10.1.144.0/24 10.1.144.0/24;
                 address 10.1.0.0/16 10.1.0.0/16;
                 address peer-b-ntw-win-01 10.1.251.149/32;
-                address iad1-ntw-win-01 10.1.253.149/32;
+                address dc05-ntw-win-01 10.1.253.149/32;
                 address peer-b-ntw-device42 10.1.251.42/32;
                 address peer-c-ntw-smaster01 10.1.238.200/32;
                 address peer-c-ntw-term-01 10.1.238.201/32;
@@ -1227,7 +1227,7 @@ security {
                     10.2.200.32/27;
                 }
                 address 10.3.249.0/24 10.3.249.0/24;
-                address fra2-ntw-mon-01 10.1.247.240/32;
+                address dc02-ntw-mon-01 10.1.247.240/32;
             }
             interfaces {
                 st0.1 {
@@ -1253,22 +1253,22 @@ security {
                 }
                 address 10.5.0.0/16 10.5.0.0/16;
                 address peer-a-ntw-infra-01-enp1s0f1 10.2.249.5/32;
-                address ams1-ntw-infra-01-enp1s0f1 10.2.249.13/32;
+                address dc03-ntw-infra-01-enp1s0f1 10.2.249.13/32;
                 address peer-b-ntw-infra-01-enp1s0f1 10.2.249.21/32;
-                address cdg1-ntw-infra-01-enp1s0f1 10.2.249.29/32;
+                address dc04-ntw-infra-01-enp1s0f1 10.2.249.29/32;
                 address peer-a-ntw-infra-01-enp1s0f0 10.2.249.7/32;
-                address ams1-ntw-infra-01-enp1s0f0 10.2.249.15/32;
+                address dc03-ntw-infra-01-enp1s0f0 10.2.249.15/32;
                 address peer-b-ntw-infra-01-enp1s0f0 10.2.249.23/32;
-                address cdg1-ntw-infra-01-enp1s0f0 10.2.249.31/32;
+                address dc04-ntw-infra-01-enp1s0f0 10.2.249.31/32;
                 address-set cybernet-infra-servers {
                     address peer-a-ntw-infra-01-enp1s0f1;
-                    address ams1-ntw-infra-01-enp1s0f1;
+                    address dc03-ntw-infra-01-enp1s0f1;
                     address peer-b-ntw-infra-01-enp1s0f1;
-                    address cdg1-ntw-infra-01-enp1s0f1;
+                    address dc04-ntw-infra-01-enp1s0f1;
                     address peer-a-ntw-infra-01-enp1s0f0;
-                    address ams1-ntw-infra-01-enp1s0f0;
+                    address dc03-ntw-infra-01-enp1s0f0;
                     address peer-b-ntw-infra-01-enp1s0f0;
-                    address cdg1-ntw-infra-01-enp1s0f0;
+                    address dc04-ntw-infra-01-enp1s0f0;
                 }
             }
             interfaces {
@@ -1342,7 +1342,7 @@ security {
                 address 10.1.144.0/24 10.1.144.0/24;
                 address 10.1.0.0/16 10.1.0.0/16;
                 address peer-b-ntw-win-01 10.1.251.149/32;
-                address iad1-ntw-win-01 10.1.253.149/32;
+                address dc05-ntw-win-01 10.1.253.149/32;
                 address peer-b-ntw-device42 10.1.251.42/32;
                 address peer-c-ntw-smaster01 10.1.238.200/32;
                 address peer-c-ntw-term-01 10.1.238.201/32;
@@ -2925,7 +2925,7 @@ protocols {
             type external;
             import PEER-A-RT-01-02_BGP_RCV_V4;
             export PEER-A-RT-01-02_BGP_ADV_V4;
-            peer-as 35793;
+            peer-as 64900;
             local-as 4200042001;
             neighbor 10.2.254.1 {
                 local-address 10.2.254.0;

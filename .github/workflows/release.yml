@@ -1,0 +1,67 @@
+name: Release
+
+# Publishes to PyPI via trusted publishing (no API token in secrets).
+# One-time setup on pypi.org: project "netlog-ai" → Publishing → add
+# GitHub publisher: owner=gesh75, repo=netlog-ai, workflow=release.yml,
+# environment=pypi. Then: git tag v0.2.0 && git push origin v0.2.0
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: |
+          pip install build
+          python -m build
+      - name: Smoke-test the wheel ships demo data + UI
+        run: |
+          pip install dist/*.whl
+          python -c "
+          import pathlib, ai_log_analyzer.web.app as a
+          assert pathlib.Path(a.SAMPLES_DIR, '_manifest.json').is_file(), a.SAMPLES_DIR
+          assert any(pathlib.Path(a.SITES_DIR).iterdir()), a.SITES_DIR
+          assert pathlib.Path(a.STATIC_DIR, 'vendor', 'cytoscape.min.js').is_file()
+          print('wheel data OK')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Create GitHub release with artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --notes "See [CHANGELOG.md](https://github.com/gesh75/netlog-ai/blob/main/CHANGELOG.md)."

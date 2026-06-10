@@ -1692,7 +1692,7 @@ protocols {
                 unicast;
             }
             export BB_BGP_ADV_V4;
-            peer-as 35793;
+            peer-as 64900;
             local-as 4200042101;
             multipath {
                 multiple-as;
@@ -1709,7 +1709,7 @@ protocols {
                 unicast;
             }
             export BB_BGP_ADV_V6;
-            peer-as 35793;
+            peer-as 64900;
             local-as 4200042101;
             multipath {
                 multiple-as;
@@ -1726,7 +1726,7 @@ protocols {
                 unicast;
             }
             export BB_BGP_ADV_V4;
-            peer-as 35793;
+            peer-as 64900;
             local-as 4200042101;
             multipath {
                 multiple-as;
@@ -1743,7 +1743,7 @@ protocols {
                 unicast;
             }
             export BB_BGP_ADV_V6;
-            peer-as 35793;
+            peer-as 64900;
             local-as 4200042101;
             multipath {
                 multiple-as;
