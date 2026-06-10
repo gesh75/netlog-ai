@@ -26,7 +26,7 @@ from functools import wraps  # noqa: E402
 from flask import Flask, abort, jsonify, request, send_from_directory  # noqa: E402
 from flask_cors import CORS  # noqa: E402
 
-from ai_log_analyzer import __version__, llm  # noqa: E402
+from ai_log_analyzer import __version__, llm, webhooks  # noqa: E402
 from ai_log_analyzer.adapters import frr, network_tool  # noqa: E402
 from ai_log_analyzer.adapters.file import parse_lines  # noqa: E402
 from ai_log_analyzer.analyzer import analyze, analyze_site, optimize_config  # noqa: E402
@@ -666,7 +666,9 @@ def create_app() -> Flask:
             return jsonify({"error": "No events ingested from source"}), 404
 
         result = analyze(events, use_llm=use_llm)
-        return jsonify(result.to_dict())
+        result_dict = result.to_dict()
+        webhooks.notify_analysis(result_dict, source)
+        return jsonify(result_dict)
 
     # ── Live CLI execution: DCN_Network_Tool SSH first, docker-exec fallback ──
     @app.route("/api/run", methods=["POST"])
@@ -874,7 +876,9 @@ def create_app() -> Flask:
             return jsonify({"ok": True, "count": 0, "result": None,
                             "message": "no events in window"})
         result = analyze(events, use_llm=_parse_bool(body.get("use_llm", True), default=True))
-        return jsonify({"ok": True, "count": len(events), "result": result.to_dict()})
+        result_dict = result.to_dict()
+        webhooks.notify_analysis(result_dict, f"source:{source_id}")
+        return jsonify({"ok": True, "count": len(events), "result": result_dict})
 
     @app.route("/api/correlate", methods=["POST"])
     @require_api_token
