@@ -6,6 +6,14 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Tests
+
+- **LLM transport + fallback-chain coverage** (llm.py 54% → 69%): provider
+  fallback order, claude-only no-fallback contract, prompt-caching payload,
+  per-provider error recording, `<think>`-block cleaning — all with a network
+  tripwire so no test can ever hit the real (paid) Anthropic API. Suite
+  278 → 294.
+
 ### Performance
 
 - **Streaming analyze — flat memory at any input size.** `analyze()` now
