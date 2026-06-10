@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from typing import Iterable
 
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.sources.base import LogSource, SourceConfig, SourceError, registry

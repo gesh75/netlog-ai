@@ -64,3 +64,7 @@ markers = [
 [tool.ruff]
 line-length = 110
 target-version = "py310"
+
+[tool.ruff.lint]
+# E701/E702: compact one-line guards (`if x: return y`) are the established style here
+ignore = ["E701", "E702"]

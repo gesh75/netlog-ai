@@ -19,7 +19,6 @@ import requests
 
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.sources.base import (
-    LogSource,
     SourceConfig,
     SourceError,
     SourceTimeoutError,
