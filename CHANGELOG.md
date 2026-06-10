@@ -6,6 +6,16 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Performance
+
+- **Classifier literal gate: 2.3× faster classification** (1.2 → 2.7 MB/s on the
+  sample corpus, identical results). Guaranteed literal keywords are extracted
+  from each KB pattern's parse tree at import; lines containing none of them
+  (the vast majority of real syslog) skip the ordered 75-regex loop entirely.
+  Sound by construction — patterns with no provable literal stay always-checked —
+  and self-maintaining as KB rules are added. Equivalence + invariants pinned by
+  `tests/test_classifier_gate.py`.
+
 ### Distribution & data privacy (wave 3)
 
 - **Wheels are now self-contained**: `samples/`, `sites/`, and the entire web UI
