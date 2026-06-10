@@ -21,6 +21,7 @@ try:
 except ImportError:
     pass
 
+import itertools  # noqa: E402
 from functools import wraps  # noqa: E402
 
 from flask import Flask, abort, jsonify, request, send_from_directory  # noqa: E402
@@ -76,6 +77,12 @@ FILE_ROOTS: list[Path] = [
     ).split(":")
     if p.strip()
 ]
+
+
+# Web-route cap for single-file analysis. Streaming keeps memory bounded at
+# any size, but classification CPU (~2.7 MB/s) must finish inside the HTTP
+# worker timeout (120s) — bigger files belong on the CLI, which has no timeout.
+MAX_FILE_MB: float = float(os.environ.get("AI_LOG_ANALYZER_MAX_FILE_MB", "200"))
 
 
 def _path_allowed(p: Path) -> bool:
@@ -652,18 +659,34 @@ def create_app() -> Flask:
                     return jsonify({
                         "error": f"No files matching {pattern!r} in {path}",
                     }), 404
-                events = list(parse_directory(p, pattern=pattern,
-                                              recursive=recursive))
+                # Generator — analyze() streams it in bounded memory
+                events = parse_directory(p, pattern=pattern, recursive=recursive)
             elif p.is_file():
-                events = list(parse_file(p))
+                size_mb = p.stat().st_size / 1_048_576
+                if size_mb > MAX_FILE_MB:
+                    return jsonify({
+                        "error": f"File is {size_mb:.0f}MB — over the "
+                                 f"{MAX_FILE_MB:.0f}MB web limit (HTTP worker "
+                                 "timeout). Use the CLI for huge files: "
+                                 "ai-log-analyzer analyze --file <path>, or "
+                                 "raise AI_LOG_ANALYZER_MAX_FILE_MB.",
+                    }), 413
+                # Generator — analyze() streams it in bounded memory
+                events = parse_file(p)
             else:
                 return jsonify({"error": f"Path is neither file nor dir: {path}"}), 400
 
         else:
             return jsonify({"error": f"Unknown source: {source}"}), 400
 
-        if not events:
+        # Empty check that works for lists and generators alike: pull the
+        # first event, then chain it back in front of the stream.
+        event_iter = iter(events)
+        try:
+            first = next(event_iter)
+        except StopIteration:
             return jsonify({"error": "No events ingested from source"}), 404
+        events = itertools.chain([first], event_iter)
 
         result = analyze(events, use_llm=use_llm)
         result_dict = result.to_dict()

@@ -1,18 +1,19 @@
 """High-level analysis pipeline: classify → phased action items → health → exec summary."""
 from __future__ import annotations
 
+import heapq
 import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
 from ai_log_analyzer import kb, llm
 from ai_log_analyzer.classifier import (
     SEV_ORDER,
     ClassifiedEvent,
     LogEvent,
-    classify_events,
+    iter_classify,
 )
 from ai_log_analyzer.sanitize import sanitize
 
@@ -333,30 +334,46 @@ def _try_parse_json(text: str) -> dict | None:
 # Action item aggregation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_action_items(events: list[ClassifiedEvent], llm_top_n: int = 3) -> list[ActionItem]:
+def _group_actionable(e: ClassifiedEvent, seen: dict, seq: int) -> None:
+    """Fold one classified event into the action-item groups (streaming-safe).
+
+    Groups are keyed by (severity, description) — bounded by the KB rule
+    table, so memory stays O(rules) however large the input. Each group keeps
+    the 5 NEWEST sample messages via a bounded min-heap keyed on (ts, -seq).
+    """
+    if e.severity not in ("critical", "high", "medium"):
+        return
+    # Recovery events go in the timeline, not in action items
+    if e.description in _RECOVERY_DESCRIPTIONS:
+        return
+    key = (e.severity, e.description)
+    bucket = seen.setdefault(key, {
+        "severity": e.severity,
+        "category": e.category,
+        "description": e.description,
+        "count": 0,
+        "devices": set(),
+        "msg_heap": [],
+    })
+    bucket["count"] += 1
+    if e.hostname:
+        bucket["devices"].add(e.hostname)
+    entry = (e.timestamp, -seq, e.message[:300])
+    if len(bucket["msg_heap"]) < 5:
+        heapq.heappush(bucket["msg_heap"], entry)
+    elif entry > bucket["msg_heap"][0]:
+        heapq.heapreplace(bucket["msg_heap"], entry)
+
+
+def build_action_items(events: Iterable[ClassifiedEvent], llm_top_n: int = 3) -> list[ActionItem]:
     """Deduplicate events into action items, run LLM only on top-N priority items."""
     seen: dict[tuple[str, str], dict] = {}
-    for e in events:
-        if e.severity not in ("critical", "high", "medium"):
-            continue
-        # Recovery events go in the timeline, not in action items
-        if e.description in _RECOVERY_DESCRIPTIONS:
-            continue
-        key = (e.severity, e.description)
-        bucket = seen.setdefault(key, {
-            "severity": e.severity,
-            "category": e.category,
-            "description": e.description,
-            "count": 0,
-            "devices": set(),
-            "messages": [],
-        })
-        bucket["count"] += 1
-        if e.hostname:
-            bucket["devices"].add(e.hostname)
-        if len(bucket["messages"]) < 5:
-            bucket["messages"].append(e.message[:300])
+    for seq, e in enumerate(events):
+        _group_actionable(e, seen, seq)
+    return _finalize_action_items(seen, llm_top_n)
 
+
+def _finalize_action_items(seen: dict, llm_top_n: int = 3) -> list[ActionItem]:
     sorted_keys = sorted(
         seen.keys(),
         key=lambda k: (SEV_ORDER.get(k[0], 5), -seen[k]["count"]),
@@ -366,12 +383,14 @@ def build_action_items(events: list[ClassifiedEvent], llm_top_n: int = 3) -> lis
     for idx, key in enumerate(sorted_keys):
         b = seen[key]
         devices = sorted(b["devices"])[:10]
+        # Heap → newest-first message list (ts desc, then arrival order)
+        messages = [m for _, _, m in sorted(b["msg_heap"], reverse=True)]
         deep = deep_analyze(
             category=b["category"],
             description=b["description"],
             devices=devices,
             count=b["count"],
-            sample_messages=b["messages"],
+            sample_messages=messages,
             skip_llm=(idx >= llm_top_n),
         )
         items.append(ActionItem(
@@ -380,7 +399,7 @@ def build_action_items(events: list[ClassifiedEvent], llm_top_n: int = 3) -> lis
             description=b["description"],
             count=b["count"],
             devices=devices,
-            sample_messages=b["messages"][:3],
+            sample_messages=messages[:3],
             deep_analysis=deep,
         ))
     return items
@@ -390,23 +409,31 @@ def build_action_items(events: list[ClassifiedEvent], llm_top_n: int = 3) -> lis
 # Top devices, executive summary
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _extract_top_devices(events: list[ClassifiedEvent], limit: int = 20) -> list[dict]:
-    by_host: dict[str, dict] = {}
-    for e in events:
-        if not e.hostname:
-            continue
-        bucket = by_host.setdefault(e.hostname, {
-            "hostname": e.hostname, "total": 0,
-            "critical": 0, "high": 0, "medium": 0, "categories": {},
-        })
-        bucket["total"] += 1
-        if e.severity in ("critical", "high", "medium"):
-            bucket[e.severity] += 1
-        bucket["categories"][e.category] = bucket["categories"].get(e.category, 0) + 1
+def _count_device(e: ClassifiedEvent, by_host: dict) -> None:
+    """Fold one event into per-device counters (streaming-safe, O(devices))."""
+    if not e.hostname:
+        return
+    bucket = by_host.setdefault(e.hostname, {
+        "hostname": e.hostname, "total": 0,
+        "critical": 0, "high": 0, "medium": 0, "categories": {},
+    })
+    bucket["total"] += 1
+    if e.severity in ("critical", "high", "medium"):
+        bucket[e.severity] += 1
+    bucket["categories"][e.category] = bucket["categories"].get(e.category, 0) + 1
 
+
+def _finalize_top_devices(by_host: dict, limit: int = 20) -> list[dict]:
     rows = list(by_host.values())
     rows.sort(key=lambda r: (-r["critical"], -r["high"], -r["total"]))
     return rows[:limit]
+
+
+def _extract_top_devices(events: Iterable[ClassifiedEvent], limit: int = 20) -> list[dict]:
+    by_host: dict[str, dict] = {}
+    for e in events:
+        _count_device(e, by_host)
+    return _finalize_top_devices(by_host, limit)
 
 
 def _executive_summary(
@@ -475,17 +502,60 @@ def _executive_summary(
     return bullets, False
 
 
-def analyze(events: list[LogEvent], use_llm: bool = True, llm_top_n: int = 3) -> AnalysisResult:
+def _aggregate_stream(
+    classified: Iterable[ClassifiedEvent], top_k: int = 300,
+) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict]:
+    """Single bounded pass over a classified stream.
+
+    Memory is O(top_k + KB rules + devices) regardless of input size — this
+    is what lets analyze() handle multi-GB syslog without materializing it.
+    Per-severity heaps keyed on (timestamp, -seq) keep the newest top_k
+    events of each severity; finalization reproduces classify_events()'
+    ordering exactly (severity rank, then timestamp desc, then arrival).
+    """
+    sev_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    cat_counts: dict[str, int] = {}
+    buckets: dict[str, list] = {sev: [] for sev in SEV_ORDER}
+    groups: dict[tuple[str, str], dict] = {}
+    by_host: dict[str, dict] = {}
+
+    for seq, e in enumerate(classified):
+        sev_counts[e.severity] = sev_counts.get(e.severity, 0) + 1
+        cat_counts[e.category] = cat_counts.get(e.category, 0) + 1
+        _group_actionable(e, groups, seq)
+        _count_device(e, by_host)
+        heap = buckets.setdefault(e.severity, [])
+        entry = (e.timestamp, -seq, e)
+        if len(heap) < top_k:
+            heapq.heappush(heap, entry)
+        elif entry[:2] > heap[0][:2]:
+            heapq.heapreplace(heap, entry)
+
+    top_events: list[ClassifiedEvent] = []
+    for sev in sorted(buckets, key=lambda s: SEV_ORDER.get(s, 5)):
+        top_events.extend(
+            e for _, _, e in sorted(buckets[sev], key=lambda t: t[:2], reverse=True)
+        )
+        if len(top_events) >= top_k:
+            break
+    return top_events[:top_k], sev_counts, cat_counts, groups, by_host
+
+
+def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3) -> AnalysisResult:
     """End-to-end pipeline: classify → action items → score → executive summary.
 
-    Thread-safe: never mutates global llm state. `use_llm=False` is enforced by
-    forcing `llm_top_n=0` and disabling the LLM-powered exec summary path.
+    Accepts any iterable of LogEvents — pass a generator (e.g. parse_file())
+    and the whole pipeline runs in bounded memory, never holding the full
+    event list. Thread-safe: never mutates global llm state. `use_llm=False`
+    is enforced by forcing `llm_top_n=0` and disabling the LLM exec summary.
     """
-    classified, sev_counts, cat_counts = classify_events(events)
+    top_events, sev_counts, cat_counts, groups, by_host = _aggregate_stream(
+        iter_classify(events)
+    )
 
     effective_llm = use_llm and llm.is_enabled()
-    action_items = build_action_items(
-        classified,
+    action_items = _finalize_action_items(
+        groups,
         llm_top_n=llm_top_n if effective_llm else 0,
     )
     score, grade, grade_label = health_score(sev_counts)
@@ -495,13 +565,13 @@ def analyze(events: list[LogEvent], use_llm: bool = True, llm_top_n: int = 3) ->
     )
 
     any_llm = summary_llm or any(a.deep_analysis.get("llm_powered") for a in action_items)
-    top_devices = _extract_top_devices(classified)
+    top_devices = _finalize_top_devices(by_host)
 
     return AnalysisResult(
         score=score, grade=grade, grade_label=grade_label,
         severity_counts=sev_counts, category_counts=cat_counts,
         action_items=action_items, top_devices=top_devices,
-        classified_events=classified[:300],
+        classified_events=top_events,
         executive_summary=summary,
         llm_powered=any_llm,
         generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import sys
 
@@ -17,21 +18,26 @@ def cmd_serve(_args: argparse.Namespace) -> int:
 
 
 def cmd_analyze(args: argparse.Namespace) -> int:
-    events: list = []
+    # Chain lazy iterators — analyze() streams them, so multi-GB files run in
+    # bounded memory (the web route caps size; the CLI is the big-file path).
+    streams: list = []
     if args.frr:
         for c in args.frr:
-            events.extend(frr.frr_docker_logs(c, tail=args.tail))
+            streams.append(frr.frr_docker_logs(c, tail=args.tail))
     if args.file:
         for path in args.file:
-            events.extend(parse_file(path))
+            streams.append(parse_file(path))
     if args.stdin:
-        events.extend(parse_lines(sys.stdin.readlines()))
+        streams.append(parse_lines(sys.stdin.readlines()))
 
-    if not events:
+    event_iter = itertools.chain.from_iterable(streams)
+    try:
+        first = next(event_iter)
+    except StopIteration:
         print("error: no input — pass --frr, --file, or --stdin", file=sys.stderr)
         return 2
 
-    result = analyze(events, use_llm=not args.no_llm)
+    result = analyze(itertools.chain([first], event_iter), use_llm=not args.no_llm)
     print(json.dumps(result.to_dict(), indent=2))
     return 0
 

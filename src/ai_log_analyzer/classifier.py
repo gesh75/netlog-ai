@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Iterable, Iterator
 
 # (regex, severity, category, description) — first match wins.
 # Patterns tested against f"{appname} {message}".lower()
@@ -245,16 +245,13 @@ def _action_for(sev: str, cat: str) -> str:
     return _DEFAULT_ACTIONS.get((sev, cat), "Review and investigate as needed")
 
 
-def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int]]:
-    """Classify a stream of LogEvents.
+def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
+    """Classify a stream of LogEvents lazily, one at a time.
 
-    Returns: (sorted classified events, severity_counts, category_counts).
-    Sort order: critical → high → medium → low → info, then by timestamp desc.
+    Pure streaming: no sorting, no counting, O(1) memory regardless of input
+    size. Building block for analyze()'s single-pass aggregation; use
+    classify_events() when you need the sorted list + counters.
     """
-    classified: list[ClassifiedEvent] = []
-    sev_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-    cat_counts: dict[str, int] = {}
-
     for ev in events:
         # Strip ANSI escapes once at the boundary — catches systemd green-OK
         # markers, FRR vtysh color codes, and any colorized adapter output.
@@ -281,7 +278,7 @@ def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], 
         if ev.severity_raw.lower() in ("crit", "emerg", "alert") and sev == "info":
             sev = "high"
 
-        classified.append(ClassifiedEvent(
+        yield ClassifiedEvent(
             timestamp=ev.timestamp,
             hostname=ev.hostname.split(".")[0] if ev.hostname else "",
             appname=ev.appname,
@@ -292,9 +289,26 @@ def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], 
             action=_action_for(sev, cat),
             message=clean_message[:500],
             sample_message=clean_message[:200],
-        ))
-        sev_counts[sev] = sev_counts.get(sev, 0) + 1
-        cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        )
+
+
+def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int]]:
+    """Classify a stream of LogEvents.
+
+    Returns: (sorted classified events, severity_counts, category_counts).
+    Sort order: critical → high → medium → low → info, then by timestamp desc.
+
+    Materializes the full list — fine for bounded inputs (API fetches, lab
+    logs). For huge files, analyze() streams via iter_classify() instead.
+    """
+    classified: list[ClassifiedEvent] = []
+    sev_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    cat_counts: dict[str, int] = {}
+
+    for ce in iter_classify(events):
+        classified.append(ce)
+        sev_counts[ce.severity] = sev_counts.get(ce.severity, 0) + 1
+        cat_counts[ce.category] = cat_counts.get(ce.category, 0) + 1
 
     # Stable sort: pass 1 sorts newest first by ISO timestamp; pass 2 buckets by severity.
     classified.sort(key=lambda e: e.timestamp, reverse=True)
