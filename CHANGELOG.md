@@ -6,6 +6,21 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **Alert webhooks** — analyses that find events at/above a severity threshold
+  fire a webhook: Slack incoming-webhook or generic JSON POST
+  (`AI_LOG_ANALYZER_WEBHOOK_URL` / `_MIN_SEVERITY` / `_FORMAT`). Wired into
+  `POST /api/analyze` and per-source analysis; delivery is best-effort (5s
+  timeout, failures logged, never breaks the analysis response).
+
+### Repository
+
+- **History rewritten** (2026-06-10): pre-pseudonymization identifiers scrubbed
+  from all historical sample blobs, and 21MB of demo videos purged from history
+  (now release assets on `media-2026-06`). Clone pack: 26MB → 3.4MB. Old clones
+  must be re-cloned or hard-reset.
+
 ### Performance
 
 - **Classifier literal gate: 2.3× faster classification** (1.2 → 2.7 MB/s on the
