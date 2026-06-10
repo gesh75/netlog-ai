@@ -48,7 +48,7 @@
 
 ## Posting checklist
 
-1. **Upload `docs/demo.mp4`** as native LinkedIn video (NOT a YouTube/Vimeo link — native ranks higher)
+1. **Upload [`demo.mp4`](https://github.com/gesh75/netlog-ai/releases/download/media-2026-06/demo.mp4)** as native LinkedIn video (NOT a YouTube/Vimeo link — native ranks higher)
 2. **Paste the post body** from above
 3. **Click Post**
 4. **Immediately drop the comment text** from the section above — this is the click-target for the URL
@@ -76,9 +76,9 @@
 
 | File | Size | Use |
 |------|------|-----|
-| `demo.mp4` | 9.0 MB | **LinkedIn upload** (H.264, 1920×1080, faststart, no audio) |
-| `demo.webm` | 9.5 MB | GitHub README inline + Mastodon |
-| `demo-720p.webm` | 3.8 MB | Lightweight embed (1280×720 VP9) |
+| [`demo.mp4`](https://github.com/gesh75/netlog-ai/releases/download/media-2026-06/demo.mp4) | 9.0 MB | **LinkedIn upload** (H.264, 1920×1080, faststart, no audio) |
+| [`demo.webm`](https://github.com/gesh75/netlog-ai/releases/download/media-2026-06/demo.webm) | 9.5 MB | GitHub README inline + Mastodon |
+| [`demo-720p.webm`](https://github.com/gesh75/netlog-ai/releases/download/media-2026-06/demo-720p.webm) | 3.8 MB | Lightweight embed (1280×720 VP9) |
 | `demo-poster.png` | 348 KB | LinkedIn thumbnail + README hero |
 
 ---
