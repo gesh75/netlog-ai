@@ -21,9 +21,15 @@ analyze()'s single streaming pass at any input size.
 """
 from __future__ import annotations
 
+import json
+import logging
+import os
 import re
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Masking rules applied before tokenization, most specific first.
 # Every mask becomes a fixed token so it can't split template shapes.
@@ -72,6 +78,7 @@ class TemplateCluster:
     hosts: set[str] = field(default_factory=set)
     sample: str = ""              # first raw (masked) example, for the UI
     severity_hint: str = "info"   # promoted if the shape smells like an error
+    is_new: bool = False          # never seen in any prior run (needs a store)
 
     @property
     def template(self) -> str:
@@ -85,6 +92,7 @@ class TemplateCluster:
             "host_count": len(self.hosts),
             "sample": self.sample,
             "severity_hint": self.severity_hint,
+            "is_new": self.is_new,
         }
 
 
@@ -174,10 +182,11 @@ class TemplateMiner:
         return len(self._clusters)
 
     def top(self, n: int = 10, errorish_first: bool = True) -> list[TemplateCluster]:
-        """Highest-signal clusters: error-smelling shapes first, then by volume."""
+        """Highest-signal clusters: error-smelling shapes first, never-seen
+        shapes next within each band, then by volume."""
         clusters = list(self._clusters.values())
         if errorish_first:
-            clusters.sort(key=lambda c: (c.severity_hint == "info", -c.count))
+            clusters.sort(key=lambda c: (c.severity_hint == "info", not c.is_new, -c.count))
         else:
             clusters.sort(key=lambda c: -c.count)
         return clusters[:n]
@@ -188,5 +197,80 @@ class TemplateMiner:
         return {
             "total_unclassified": sum(c.count for c in self._clusters.values()),
             "template_count": self.cluster_count,
+            "new_template_count": sum(1 for c in self._clusters.values() if c.is_new),
             "top_templates": [c.to_dict() for c in top],
         }
+
+
+class TemplateStore:
+    """On-disk memory of every template shape seen in prior runs.
+
+    Backs the highest-signal AIOps event — "this message shape has NEVER been
+    seen before" — across analysis runs. The store is a flat JSON list of
+    template strings, FIFO-bounded so it can't grow without limit. Wildcard
+    merging can rename a template between runs, so matching is exact-string
+    and deliberately conservative: a renamed shape reports as new once, then
+    settles.
+    """
+
+    def __init__(self, path: str | Path, max_entries: int = 20_000) -> None:
+        self.path = Path(path).expanduser()
+        self.max_entries = max_entries
+        self._templates: OrderedDict[str, None] = OrderedDict()
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.is_file():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("template store unreadable (%s) — starting fresh", exc)
+            return
+        if isinstance(data, list):
+            for t in data[-self.max_entries:]:
+                if isinstance(t, str):
+                    self._templates[t] = None
+
+    def __contains__(self, template: str) -> bool:
+        return template in self._templates
+
+    def __len__(self) -> int:
+        return len(self._templates)
+
+    def mark_and_update(self, miner: TemplateMiner) -> int:
+        """Flag never-before-seen clusters as `is_new`, absorb this run's
+        templates into the store, and return the new-template count."""
+        new_count = 0
+        for cluster in miner._clusters.values():
+            t = cluster.template
+            if t not in self._templates:
+                cluster.is_new = True
+                new_count += 1
+            self._templates[t] = None
+        while len(self._templates) > self.max_entries:
+            self._templates.popitem(last=False)
+        return new_count
+
+    def save(self) -> None:
+        """Persist atomically; failures are logged, never raised — a broken
+        store must not break an analysis run."""
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+            tmp.write_text(json.dumps(list(self._templates)), encoding="utf-8")
+            tmp.replace(self.path)
+        except OSError as exc:
+            logger.warning("could not persist template store to %s: %s", self.path, exc)
+
+
+def apply_template_store(miner: TemplateMiner) -> None:
+    """Opt-in cross-run persistence: when AI_LOG_ANALYZER_TEMPLATE_STORE
+    names a path, mark this run's never-seen-before templates and update the
+    store. No env var → no-op (single-run behaviour unchanged)."""
+    store_path = os.environ.get("AI_LOG_ANALYZER_TEMPLATE_STORE", "")
+    if not store_path or miner.cluster_count == 0:
+        return
+    store = TemplateStore(store_path)
+    store.mark_and_update(miner)
+    store.save()

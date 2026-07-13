@@ -785,8 +785,9 @@ function render(r) {
         const hostLabel = t.host_count > 3
           ? `${t.host_count}: ${t.hosts.slice(0, 3).join(", ")}…`
           : t.hosts.join(", ");
+        const flags = (t.severity_hint !== "info" ? "⚠" : "") + (t.is_new ? " 🆕" : "");
         const tr = el("tr", { className: t.severity_hint !== "info" ? "sev-row-medium" : "" },
-          el("td", { text: t.severity_hint !== "info" ? "⚠" : "" }),
+          el("td", { text: flags.trim() }),
           el("td", {}, el("span", { className: "row-msg", text: t.template })),
           el("td", { text: String(t.count) }),
           el("td", { text: hostLabel }),

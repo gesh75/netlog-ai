@@ -98,7 +98,8 @@ def test_to_dict_shape():
     assert d["total_unclassified"] == 1
     assert d["template_count"] == 1
     t = d["top_templates"][0]
-    assert set(t) == {"template", "count", "hosts", "host_count", "sample", "severity_hint"}
+    assert set(t) == {"template", "count", "hosts", "host_count", "sample",
+                      "severity_hint", "is_new"}
     assert t["hosts"] == ["r1"]
 
 
@@ -119,6 +120,64 @@ def test_analyze_surfaces_unknown_patterns():
     assert up["total_unclassified"] == 20
     assert up["template_count"] == 1
     assert "<n>" in up["top_templates"][0]["template"]
+
+
+def test_template_store_flags_new_templates_across_runs(tmp_path):
+    from ai_log_analyzer.patterns import TemplateStore
+
+    store_path = tmp_path / "templates.json"
+
+    # Run 1: everything is new.
+    m1 = TemplateMiner()
+    m1.add("thermal envelope exceeded on chip 3")
+    store = TemplateStore(store_path)
+    assert store.mark_and_update(m1) == 1
+    assert m1.top(1)[0].is_new is True
+    store.save()
+
+    # Run 2: same shape → known; a different shape → new.
+    m2 = TemplateMiner()
+    m2.add("thermal envelope exceeded on chip 7")   # same masked template
+    m2.add("gravity plating desynchronized")        # brand new
+    store2 = TemplateStore(store_path)
+    assert store2.mark_and_update(m2) == 1
+    by_template = {c.template: c for c in m2.top(10)}
+    assert by_template["thermal envelope exceeded on chip <n>"].is_new is False
+    assert by_template["gravity plating desynchronized"].is_new is True
+
+
+def test_template_store_bounded_and_corrupt_file_tolerated(tmp_path):
+    from ai_log_analyzer.patterns import TemplateStore
+
+    corrupt = tmp_path / "bad.json"
+    corrupt.write_text("{not json")
+    store = TemplateStore(corrupt)          # must not raise
+    assert len(store) == 0
+
+    small = TemplateStore(tmp_path / "small.json", max_entries=3)
+    m = TemplateMiner()
+    for i in range(6):
+        m.add(f"unique{i} standalone shape number{i} alpha")
+    small.mark_and_update(m)
+    assert len(small) <= 3
+
+
+def test_apply_template_store_via_env(tmp_path, monkeypatch):
+    from ai_log_analyzer.analyzer import analyze
+    from ai_log_analyzer.classifier import LogEvent
+
+    store_path = tmp_path / "store.json"
+    monkeypatch.setenv("AI_LOG_ANALYZER_TEMPLATE_STORE", str(store_path))
+
+    events = [LogEvent(timestamp="2026-01-01T00:00:00", hostname="r1",
+                       appname="zapd", severity_raw="info",
+                       message="ionizer array recalibrated spontaneously")]
+    r1 = analyze(iter(events), use_llm=False)
+    assert r1.unknown_patterns["new_template_count"] == 1
+    assert store_path.is_file()
+
+    r2 = analyze(iter(events), use_llm=False)
+    assert r2.unknown_patterns["new_template_count"] == 0
 
 
 def test_analyze_kb_matched_events_not_mined():

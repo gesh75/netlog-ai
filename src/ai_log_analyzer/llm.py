@@ -1,4 +1,4 @@
-"""Pluggable LLM client with three providers:
+"""Pluggable LLM client with four providers:
 
   - "ollama"      : Ollama native API (gemma3 / qwen2.5-coder / llama3.2) — preferred local
   - "local"       : Docker Model Runner (OpenAI-compatible) via TCP or Unix socket
