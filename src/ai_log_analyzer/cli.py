@@ -48,6 +48,58 @@ def cmd_containers(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_demo(args: argparse.Namespace) -> int:
+    """Zero-setup demo: analyze a deterministic synthetic incident storyline.
+
+    --serve additionally starts the web UI with a local syslog listener and a
+    feeder thread replaying the storyline, so the Live Tail panel streams
+    events in real time — no lab or devices needed.
+    """
+    import os
+
+    from ai_log_analyzer.adapters.file import parse_lines
+    from ai_log_analyzer.demo import generate_demo_lines, start_udp_feeder
+
+    lines = generate_demo_lines()
+    result = analyze(parse_lines(lines), use_llm=args.llm)
+
+    d = result.to_dict()
+    print(f"Demo storyline : {len(lines)} synthetic log lines, 6 devices, 4 vendor dialects")
+    print(f"Health score   : {d['score']}/100 (grade {d['grade']} — {d['grade_label']})")
+    print(f"Fabric stability: {d['stability']['fabric_score']}/100")
+    print()
+    print("Executive summary:")
+    for b in d["executive_summary"]:
+        print(f"  • {b}")
+    print()
+    print("Top action items:")
+    for a in d["action_items"][:5]:
+        devs = ", ".join(a["devices"][:3])
+        print(f"  [{a['severity'].upper():8}] {a['description']} ({a['count']}× on {devs})")
+    up = d["unknown_patterns"]
+    if up["top_templates"]:
+        print()
+        print(f"Unknown patterns ({up['template_count']} templates from {up['total_unclassified']} unmatched lines):")
+        for t in up["top_templates"][:3]:
+            flag = "⚠ " if t["severity_hint"] != "info" else "  "
+            print(f"  {flag}{t['count']:>3}× {t['template'][:90]}")
+
+    if not args.serve:
+        print("\nRun `ai-log-analyzer demo --serve` to watch this stream live in the UI.")
+        return 0
+
+    port = int(os.environ.get("NETLOG_DEMO_SYSLOG_PORT", "5514"))
+    os.environ.setdefault("NETLOG_SOURCE_demo_TYPE", "syslog")
+    os.environ.setdefault("NETLOG_SOURCE_demo_URL", "udp://127.0.0.1")
+    os.environ.setdefault("NETLOG_SOURCE_demo_PORT", str(port))
+    os.environ.setdefault("NETLOG_SOURCE_demo_BIND", "127.0.0.1")
+    start_udp_feeder(port)
+    print(f"\nDemo feeder streaming to udp://127.0.0.1:{port} — open the UI,")
+    print("expand '🔴 Live Tail' in the Logs tab, pick source 'demo', press Start.")
+    serve_main()
+    return 0
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
     """Score playbook quality with the LLM-as-Judge harness.
 
@@ -124,6 +176,11 @@ def main() -> None:
 
     cp = sub.add_parser("containers", help="List running FRR lab containers")
     cp.set_defaults(func=cmd_containers)
+
+    dp = sub.add_parser("demo", help="Zero-setup demo: synthetic incident storyline through the full pipeline")
+    dp.add_argument("--serve", action="store_true", help="Also start the web UI with a live syslog feeder (Live Tail demo)")
+    dp.add_argument("--llm", action="store_true", help="Use the configured LLM (default: rule-based KB, fully offline)")
+    dp.set_defaults(func=cmd_demo)
 
     ep = sub.add_parser("eval", help="Score playbook quality (LLM-as-Judge; KB self-test by default)")
     ep.add_argument("--file", help="Saved /api/analyze JSON result to score (default: score the built-in KB)")

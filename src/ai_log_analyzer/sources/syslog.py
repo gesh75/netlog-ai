@@ -43,6 +43,7 @@ class SyslogListenerSource:
             raise SourceError(f"Unsupported syslog proto {self.proto!r}")
         capacity = int(config.extra.get("buffer_size", _DEFAULT_BUFFER_SIZE))
         self._buffer: deque[str] = deque(maxlen=capacity)
+        self._total_ingested = 0  # monotonic — cursor base for fetch_new()
         self._lock = threading.Lock()
         self._sock: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -71,6 +72,22 @@ class SyslogListenerSource:
             if host_filter and ev.hostname and host_filter not in ev.hostname:
                 continue
             yield ev
+
+    def fetch_new(self, cursor: int, limit: int = 1000) -> tuple[list[LogEvent], int]:
+        """Incremental read for live tailing: lines ingested since `cursor`.
+
+        Returns (events, new_cursor). The cursor is the listener's monotonic
+        ingest counter — pass 0 the first time (or the previous new_cursor),
+        and lines that scrolled out of the ring buffer between polls are
+        skipped rather than duplicated.
+        """
+        with self._lock:
+            total = self._total_ingested
+            n_new = min(total - cursor, len(self._buffer))
+            lines = list(self._buffer)[-n_new:] if n_new > 0 else []
+        if limit and len(lines) > limit:
+            lines = lines[-int(limit):]
+        return list(parse_lines(lines, default_host="syslog")), total
 
     def close(self) -> None:
         self._stop.set()
@@ -154,6 +171,7 @@ class SyslogListenerSource:
             return
         with self._lock:
             self._buffer.append(line)
+            self._total_ingested += 1
 
 
 registry.register("syslog", SyslogListenerSource.from_config)

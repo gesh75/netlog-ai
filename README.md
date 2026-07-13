@@ -15,7 +15,7 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-338%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-369%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
 > 📓 Recent changes — cross-source correlation + per-device triage (MCP tools **and** Device-tab UI) — are in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -66,7 +66,10 @@ Tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
 | 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly as agent tools |
 | 🔗 **Cross-source correlation** | **Device tab** → *Correlate Sources*: scans every registered source and tags each host `confirmed` (flagged by ≥ 2 sources) or `suspected` (1) in a sortable, severity-coded table |
 | 🔬 **Per-device triage** | **Device tab** → *Triage Device*: one host's verdict + 0–100 health score, severity histogram, top processes, and deduped error patterns in a single panel |
-| 🔎 **Classify** | 50+ regex patterns across Junos, EOS, FRR, IOS, RFC-3164/5424 — plus your own rules via `AI_LOG_ANALYZER_CUSTOM_RULES` / `POST /api/rules` |
+| 🔎 **Classify** | 70+ regex patterns across Junos, EOS, FRR, **Cisco IOS-XE, NX-OS, Nokia SR Linux**, RFC-3164/5424 — each event carries a confidence score; add your own rules via `AI_LOG_ANALYZER_CUSTOM_RULES` / `POST /api/rules` |
+| 🔴 **Live tail** | Real-time SSE stream of classified events from any syslog listener source — zero polling, zero build step, server-side severity filter, its own UI panel |
+| ↻ **Incident memory** | `AI_LOG_ANALYZER_INCIDENT_STORE` journals every run locally; action items get "seen 3× before (last Jul 5)" recurrence badges and `/api/incidents/similar?q=` answers "have we seen this before?" |
+| 🎬 **Demo mode** | `ai-log-analyzer demo` — zero-setup synthetic incident storyline through the full pipeline; `--serve` adds a live feeder so Live Tail streams it in real time |
 | 🔭 **Unknown patterns** | Lines no rule matched are template-mined (Drain-style, zero deps): variables masked, shapes clustered, error-smelling templates ranked first — novel failure modes surface instead of vanishing as `info` noise. Set `AI_LOG_ANALYZER_TEMPLATE_STORE` for cross-run memory: shapes never seen in any prior run get flagged 🆕 |
 | 🧭 **Prioritize** | Deduped action items, ranked by severity × count, recovery events excluded |
 | 📶 **Fabric stability** | Per-device flap detection (interface/BGP/OSPF/LAG/VPN down↔up oscillation), event-rate bursts vs the device's own baseline, trend + heuristic 24h risk band — in `/api/analyze` and its own UI panel |
@@ -112,6 +115,10 @@ docker logs my-router 2>&1 | ai-log-analyzer analyze --stdin
 ai-log-analyzer eval                 # heuristic, offline
 ai-log-analyzer eval --use-llm       # blend a real LLM judge
 ai-log-analyzer eval --file result.json --min-score 7   # CI gate
+
+# Zero-setup demo (synthetic incident storyline; --serve adds live streaming)
+ai-log-analyzer demo
+ai-log-analyzer demo --serve
 
 # Run the full test suite
 pytest --cov=src --cov-report=term-missing
@@ -328,6 +335,8 @@ src/ai_log_analyzer/
   patterns.py          Drain-lite template miner for lines no rule matched
   stability.py         Flap/burst/trend scoring + 24h risk per device
   judge.py             LLM-as-Judge playbook quality scoring (eval CLI)
+  memory.py            Incident journal — recurrence badges + similarity search
+  demo.py              Synthetic incident storyline + live feeder (demo CLI)
   kb.py                Rule-based deep-analysis KB (fallback when LLM is off)
   llm.py               Docker Model Runner (TCP + UDS) + Anthropic Claude
   analyzer.py          End-to-end pipeline: classify → actions → score → summary
@@ -360,6 +369,8 @@ src/ai_log_analyzer/
 | `GET`  | `/api/sites` | List bundled site bundles |
 | `POST` | `/api/analyze` | Full pipeline — see request shapes below (response includes `unknown_patterns`: mined templates of unmatched lines) |
 | `GET`  | `/api/rules` | Built-in rule count + registered custom classification rules |
+| `GET`  | `/api/tail/<source_id>` | SSE live stream of classified events (`?min_severity=`, `?token=` on tokened deployments) |
+| `GET`  | `/api/incidents/similar` | Free-text search over the local incident journal (`?q=`, needs `AI_LOG_ANALYZER_INCIDENT_STORE`) |
 | `POST` | `/api/rules` | Add custom rules at runtime — `{"rules": [{"pattern", "severity", "category", "description"}]}` |
 | `POST` | `/api/optimize` | Device-level config audit + patches |
 | `POST` | `/api/optimize/site` | Cross-device site analysis |
@@ -407,7 +418,7 @@ src/ai_log_analyzer/
 
 ## Tested & accessible
 
-- **338 unit + integration tests** (pytest)
+- **369 unit + integration tests** (pytest)
 - Frontend audited across 8 review rounds:
   - WCAG-AA: `:focus-visible` rings, `aria-live` regions, `role=tablist/tab/tabpanel`, skip-to-main link, `prefers-reduced-motion` fallback
   - Responsive ≤ 1100px, PWA-ready (`theme-color`, `mobile-web-app-capable`, SVG favicon)
@@ -418,9 +429,11 @@ src/ai_log_analyzer/
 ## Roadmap
 
 - [ ] Multi-site comparison view (delta between two sites)
-- [ ] Real-time tail mode (websocket stream of new events)
+- [x] Real-time tail mode — SSE stream (`/api/tail/<source>`) + Live Tail UI panel
 - [x] Slack / generic-JSON alert webhooks per severity threshold (`AI_LOG_ANALYZER_WEBHOOK_URL` — see `.env.example`)
-- [ ] More vendor adapters (Nokia SR Linux, Cisco IOS-XE, Cumulus NCLU)
+- [x] More vendor coverage — Cisco IOS-XE + NX-OS + Nokia SR Linux classifier patterns (Cumulus NCLU still open)
+- [x] Incident memory — local journal with recurrence badges + `/api/incidents/similar`
+- [x] One-command demo mode (`ai-log-analyzer demo [--serve]`)
 - [ ] Snapshot / replay analysis runs for regression testing
 - [x] Custom classification rules — JSON file (`AI_LOG_ANALYZER_CUSTOM_RULES`) + runtime `POST /api/rules`; UI editor still open
 - [x] Unknown-pattern template mining — Drain-style clustering of unmatched lines, surfaced in UI/API/MCP

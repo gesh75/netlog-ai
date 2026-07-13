@@ -1217,6 +1217,27 @@
           </div>
         </div>
       </details>
+
+      <details class="side-section">
+        <summary>🔴 Live Tail</summary>
+        <div class="side-section-body">
+          <label for="tail-source">Syslog source</label>
+          <select id="tail-source" aria-label="Live tail source"></select>
+          <label for="tail-min-sev">Minimum severity</label>
+          <select id="tail-min-sev" aria-label="Live tail minimum severity">
+            <option value="info">info (everything)</option>
+            <option value="low">low</option>
+            <option value="medium" selected>medium</option>
+            <option value="high">high</option>
+            <option value="critical">critical</option>
+          </select>
+          <button id="tail-btn" class="secondary" aria-label="Start or stop live tail">▶ Start Live Tail</button>
+          <div class="hint" style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45;">
+            Streams classified events from a registered <code style="background:var(--bg-2);padding:0 4px;border-radius:3px;">syslog</code>
+            listener source in real time (SSE — no polling, no build step).
+          </div>
+        </div>
+      </details>
     </div>
 
     <!-- ─── Tab 2: Device Optimization ─── -->
@@ -1436,6 +1457,19 @@
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+
+    <div class="panel" id="live-panel" style="display:none;">
+      <h2>🔴 Live Tail <span class="h2-count" id="live-count"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Classified events streaming in real time from the selected syslog source. Newest first; the view keeps the last 200 events.</p>
+      <div class="events-scroll-cap">
+        <table id="live-table">
+          <thead>
+            <tr><th>Severity</th><th>Time</th><th>Device</th><th>Category</th><th>Description</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="panel" id="stability-panel" style="display:none;">
