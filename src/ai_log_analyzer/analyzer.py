@@ -65,9 +65,10 @@ class ActionItem:
     devices: list[str]
     sample_messages: list[str]
     deep_analysis: dict[str, Any] = field(default_factory=dict)
+    recurrence: dict[str, Any] | None = None  # history from the incident store
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "severity": self.severity,
             "category": self.category,
             "description": self.description,
@@ -76,6 +77,9 @@ class ActionItem:
             "sample_messages": self.sample_messages,
             "deep_analysis": self.deep_analysis,
         }
+        if self.recurrence:
+            d["recurrence"] = self.recurrence
+        return d
 
 
 @dataclass
@@ -590,6 +594,16 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
 
     any_llm = summary_llm or any(a.deep_analysis.get("llm_powered") for a in action_items)
     top_devices = _finalize_top_devices(by_host)
+    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    # Opt-in incident memory: stamp each action item with its recurrence
+    # history from prior runs, then journal this run (env-gated, local-only).
+    from ai_log_analyzer.memory import get_store
+    store = get_store()
+    if store is not None:
+        for a in action_items:
+            a.recurrence = store.recurrence(a.description)
+        store.record([a.to_dict() for a in action_items], generated_at)
 
     return AnalysisResult(
         score=score, grade=grade, grade_label=grade_label,
@@ -598,7 +612,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
         classified_events=top_events,
         executive_summary=summary,
         llm_powered=any_llm,
-        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        generated_at=generated_at,
         unknown_patterns=miner.to_dict(top_n=10),
         stability=tracker.report(),
     )
