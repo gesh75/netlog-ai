@@ -76,7 +76,7 @@ def test_aggregate_stream_is_bounded():
                 message=f"job {i} completed",
             )
 
-    top, sev, cat, groups, by_host, miner = _aggregate_stream(iter_classify(synth(20_000)), top_k=300)
+    top, sev, cat, groups, by_host, miner, tracker = _aggregate_stream(iter_classify(synth(20_000)), top_k=300)
     assert sev["info"] == 20_000
     assert len(top) <= 300
     assert len(by_host) == 7
@@ -84,6 +84,10 @@ def test_aggregate_stream_is_bounded():
     # 20k unmatched lines share one shape once numbers are masked → 1 template
     assert miner.cluster_count <= 2
     assert miner.to_dict()["total_unclassified"] == 20_000
+    # stability tracker stays bounded too: 7 hosts, capped buckets each
+    report = tracker.report()
+    assert report["device_count"] == 7
+    assert all(len(s.buckets) <= 512 for s in tracker._devices.values())
 
 
 # ── web size guard + generator path ─────────────────────────────────────────

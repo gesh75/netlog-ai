@@ -4,9 +4,28 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
-## [Unreleased]
+## [0.4.0] - 2026-07-13
 
 ### Added
+
+- **Fabric stability engine** (`stability.py`) — per-device flap detection
+  (down↔up oscillation of interfaces / BGP peers / OSPF neighbors / LAG
+  members / VPN tunnels), event-rate burst detection against each device's
+  own baseline, rising/stable/falling trend, and a deterministic 24h risk
+  band. Surfaces as `stability` in `/api/analyze` + MCP and a **📶 Fabric
+  Stability** panel in the UI (worst devices first, actionable
+  recommendations). Streaming-safe: O(devices × entity classes) memory,
+  minute-prefix bucketing with arrival-order fallback so unreliable syslog
+  timestamps can't break it.
+- **LLM-as-Judge playbook scoring** (`judge.py` + `ai-log-analyzer eval`) —
+  scores generated playbooks 0–10 on actionability / safety / grounding /
+  completeness with a deterministic heuristic core (empty playbooks can't
+  ace safety "by absence"; disruptive commands without context are
+  penalized; R1/SW2-style placeholder names hurt grounding). Optional
+  `--use-llm` blends a real LLM judge via the configured provider, falling
+  back silently. `eval` self-tests every rule-based KB playbook by default,
+  scores a saved analyze result with `--file`, and `--min-score` makes it a
+  CI quality gate.
 
 - **Unknown-pattern template mining** (`patterns.py`) — every line the regex KB
   can't match is mined into templates with a dependency-free Drain-style
