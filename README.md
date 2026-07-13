@@ -15,7 +15,7 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-294%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-325%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
 > 📓 Recent changes — cross-source correlation + per-device triage (MCP tools **and** Device-tab UI) — are in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -66,7 +66,8 @@ Tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
 | 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly as agent tools |
 | 🔗 **Cross-source correlation** | **Device tab** → *Correlate Sources*: scans every registered source and tags each host `confirmed` (flagged by ≥ 2 sources) or `suspected` (1) in a sortable, severity-coded table |
 | 🔬 **Per-device triage** | **Device tab** → *Triage Device*: one host's verdict + 0–100 health score, severity histogram, top processes, and deduped error patterns in a single panel |
-| 🔎 **Classify** | 50+ regex patterns across Junos, EOS, FRR, IOS, RFC-3164/5424 |
+| 🔎 **Classify** | 50+ regex patterns across Junos, EOS, FRR, IOS, RFC-3164/5424 — plus your own rules via `AI_LOG_ANALYZER_CUSTOM_RULES` / `POST /api/rules` |
+| 🔭 **Unknown patterns** | Lines no rule matched are template-mined (Drain-style, zero deps): variables masked, shapes clustered, error-smelling templates ranked first — novel failure modes surface instead of vanishing as `info` noise. Set `AI_LOG_ANALYZER_TEMPLATE_STORE` for cross-run memory: shapes never seen in any prior run get flagged 🆕 |
 | 🧭 **Prioritize** | Deduped action items, ranked by severity × count, recovery events excluded |
 | 🧠 **Deep analyze** | Top-N items get an LLM-written root-cause + risk + remediation playbook |
 | 🛡️ **Sanitize-first** | Every config/log payload is scrubbed (`$6$`, `$9$`, SSH keys, SNMP, RADIUS, public IPs) before LLM call |
@@ -111,10 +112,11 @@ pytest --cov=src --cov-report=term-missing
 
 ## Configure the LLM
 
-Three providers, switchable at runtime from the UI dropdown — or via env / API:
+Four providers, switchable at runtime from the UI dropdown — or via env / API:
 
 | Mode          | Order |
 |---------------|-------|
+| `ollama`      | Ollama native API on `:11434` (default; `OLLAMA_URL` / `OLLAMA_MODEL`) |
 | `local`       | Local Docker Model Runner → falls back to Claude if `ANTHROPIC_API_KEY` is set |
 | `claude`      | Claude first → falls back to local |
 | `claude-only` | Claude only, no fallback |
@@ -315,7 +317,8 @@ flowchart TB
 
 ```
 src/ai_log_analyzer/
-  classifier.py        50+ regex patterns + severity/category lookup
+  classifier.py        50+ regex patterns + severity/category lookup + custom rules
+  patterns.py          Drain-lite template miner for lines no rule matched
   kb.py                Rule-based deep-analysis KB (fallback when LLM is off)
   llm.py               Docker Model Runner (TCP + UDS) + Anthropic Claude
   analyzer.py          End-to-end pipeline: classify → actions → score → summary
@@ -346,7 +349,9 @@ src/ai_log_analyzer/
 | `POST` | `/api/llm/toggle` | `{"enabled": true\|false}` |
 | `GET`  | `/api/lab/containers` | Running FRR-lab container names |
 | `GET`  | `/api/sites` | List bundled site bundles |
-| `POST` | `/api/analyze` | Full pipeline — see request shapes below |
+| `POST` | `/api/analyze` | Full pipeline — see request shapes below (response includes `unknown_patterns`: mined templates of unmatched lines) |
+| `GET`  | `/api/rules` | Built-in rule count + registered custom classification rules |
+| `POST` | `/api/rules` | Add custom rules at runtime — `{"rules": [{"pattern", "severity", "category", "description"}]}` |
 | `POST` | `/api/optimize` | Device-level config audit + patches |
 | `POST` | `/api/optimize/site` | Cross-device site analysis |
 | `POST` | `/api/optimize/site-wide/<id>` | Strategic maturity scoring + phased roadmap |
@@ -385,14 +390,15 @@ src/ai_log_analyzer/
   - SNMP communities, RADIUS / TACACS+ keys
   - IPsec pre-shared keys
   - Public IPv4 addresses (mapped to RFC-5737 doc prefixes for the LLM context)
-- **Localhost bind by default** — set `ANALYZER_HOST=0.0.0.0` to expose; the server warns if you bind publicly without an `API_TOKEN`.
-- **API-token gate** — set `API_TOKEN=...` to require `Authorization: Bearer ...` on every POST.
-- **CORS allow-list** — `ANALYZER_CORS_ORIGINS=https://a.com,https://b.com`.
+- **Localhost bind by default** — set `ANALYZER_HOST=0.0.0.0` to expose; the server warns if you bind publicly without an API token.
+- **API-token gate** — set `AI_LOG_ANALYZER_API_TOKEN=...` to require the token on every POST, supplied as either `X-API-Token: <token>` or `Authorization: Bearer <token>`.
+- **CORS allow-list** — `AI_LOG_ANALYZER_CORS_ORIGINS=https://a.com,https://b.com`.
+- **File-ingest confinement** — `AI_LOG_ANALYZER_FILE_ROOTS=~:/var/log` bounds what `{source:"file"}` may read.
 - **No telemetry** — outbound calls go only to (a) the LLM provider you select and (b) the local Docker socket if you analyze FRR-lab containers.
 
 ## Tested & accessible
 
-- **294 unit + integration tests** (pytest)
+- **325 unit + integration tests** (pytest)
 - Frontend audited across 8 review rounds:
   - WCAG-AA: `:focus-visible` rings, `aria-live` regions, `role=tablist/tab/tabpanel`, skip-to-main link, `prefers-reduced-motion` fallback
   - Responsive ≤ 1100px, PWA-ready (`theme-color`, `mobile-web-app-capable`, SVG favicon)
@@ -407,7 +413,10 @@ src/ai_log_analyzer/
 - [x] Slack / generic-JSON alert webhooks per severity threshold (`AI_LOG_ANALYZER_WEBHOOK_URL` — see `.env.example`)
 - [ ] More vendor adapters (Nokia SR Linux, Cisco IOS-XE, Cumulus NCLU)
 - [ ] Snapshot / replay analysis runs for regression testing
-- [ ] Custom rule editor in the UI
+- [x] Custom classification rules — JSON file (`AI_LOG_ANALYZER_CUSTOM_RULES`) + runtime `POST /api/rules`; UI editor still open
+- [x] Unknown-pattern template mining — Drain-style clustering of unmatched lines, surfaced in UI/API/MCP
+- [x] Cross-run template persistence — `AI_LOG_ANALYZER_TEMPLATE_STORE` flags never-before-seen shapes (🆕)
+- [ ] Per-template volume anomaly detection (sudden rate spike/drop per device)
 
 ## Contributing
 

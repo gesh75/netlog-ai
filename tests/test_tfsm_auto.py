@@ -22,6 +22,16 @@ if not tfsm_auto.is_available():
     pytest.skip("tfsm-fire not installed (install with: pip install netlog-ai[parse])",
                 allow_module_level=True)
 
+# The template DB is a third-party download (upstream GitHub raw file). When
+# upstream is unreachable or has restructured (404), the adapter degrades to
+# no-match by design — skip the end-to-end tests rather than fail CI on an
+# external outage. Point TFSM_DB_URL at a mirror or TFSM_DB_PATH at a local
+# copy to re-enable them.
+if tfsm_auto._get_engine() is None:
+    pytest.skip("tfsm_fire template DB unavailable (upstream download failed — "
+                "set TFSM_DB_URL/TFSM_DB_PATH to a mirror or local copy)",
+                allow_module_level=True)
+
 
 # ---------------------------------------------------------------------------
 # Canned device output fixtures. These are intentionally short and well-formed

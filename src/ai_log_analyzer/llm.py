@@ -1,4 +1,4 @@
-"""Pluggable LLM client with three providers:
+"""Pluggable LLM client with four providers:
 
   - "ollama"      : Ollama native API (gemma3 / qwen2.5-coder / llama3.2) — preferred local
   - "local"       : Docker Model Runner (OpenAI-compatible) via TCP or Unix socket
@@ -45,7 +45,7 @@ _state: dict[str, object] = {
     "enabled":            os.environ.get("LLM_ENABLED", "true").lower() == "true",
     # Ollama (native API)
     "ollama_url":         os.environ.get("OLLAMA_URL", "http://localhost:11434"),
-    "ollama_model":       os.environ.get("OLLAMA_MODEL", "gemma4:latest"),
+    "ollama_model":       os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:latest"),
     # Docker Model Runner (OpenAI-compatible)
     "local_url":          os.environ.get("MODEL_RUNNER_URL", "http://localhost:12434"),
     "local_model":        os.environ.get("LLM_MODEL", "ai/qwen3:latest"),
@@ -152,7 +152,7 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> Option
 # ── Ollama native API ────────────────────────────────────────────────────────
 
 def _query_ollama(system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
-    """Ollama native /api/chat — supports `think:false` for gemma4/qwen3."""
+    """Ollama native /api/chat — supports `think:false` for thinking models (qwen3 etc.)."""
     url = f"{str(_state['ollama_url']).rstrip('/')}/api/chat"
     payload = {
         "model": _state["ollama_model"],

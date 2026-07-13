@@ -4,6 +4,67 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- **Unknown-pattern template mining** (`patterns.py`) — every line the regex KB
+  can't match is mined into templates with a dependency-free Drain-style
+  streaming clusterer (variables masked as `<ip>/<mac>/<hex>/<if>/<n>/<ts>`,
+  similar shapes merged into `<*>` wildcards, LRU-bounded memory). The
+  analyzer surfaces the top templates — error-smelling shapes ranked first —
+  as `unknown_patterns` in `/api/analyze`, the MCP `analyze_logs` tool, and a
+  new **🔭 Unknown Patterns** panel in the UI. Novel failure modes no longer
+  vanish as `info` noise.
+- **Custom classification rules** — operators can extend/override the built-in
+  KB: a JSON rules file loaded at startup (`AI_LOG_ANALYZER_CUSTOM_RULES`) and
+  a runtime API (`GET/POST /api/rules`). Custom rules are checked before the
+  built-in patterns, so a known-noise event can be demoted or a site-specific
+  failure promoted.
+- **Cross-run template persistence** — set `AI_LOG_ANALYZER_TEMPLATE_STORE`
+  to a path and the miner remembers every template shape across runs
+  (FIFO-bounded JSON store, atomic writes, corrupt-file tolerant). Templates
+  never seen in *any* prior run are flagged `is_new` (🆕 in the UI panel,
+  `new_template_count` in the API) — the classic AIOps early-warning signal.
+- **Coverage wave for phases 0–12 leftovers** — `reports.py` (MD/CSV/HTML
+  exporters), `runbook.py` (Ansible/netmiko generation + command extraction),
+  `topology.py` (build/exports/finding overlay), and the previously untested
+  web routes `/api/report`, `/api/runbook`, `/api/topology`, plus the
+  validation paths of `/api/diff` and `/api/copilot`. Suite 294 → 325 tests.
+
+### Security
+
+- **Log lines now pass the sanitize gate before LLM calls.** `deep_analyze()`
+  sent raw sample log lines (and severity-promoted raw descriptions) to the
+  LLM unsanitized — configs were always scrubbed but logs were not,
+  contradicting the sanitize-before-LLM guarantee. Both are now scrubbed, as
+  is the executive-summary item list.
+- **`/api/sources/<id>/test` and `/api/sources/<id>/fetch` now require the API
+  token** — they were the only POST data routes missing the auth gate.
+- **`Authorization: Bearer <token>` accepted** everywhere `X-API-Token` is
+  (the README documented Bearer; the code only accepted the custom header).
+
+### Fixed
+
+- **MCP server finds bundled sites on pip installs** — `list_sites` /
+  `analyze_site` resolved only the repo-root `sites/` symlink and returned
+  empty from a `pip install netlog-ai[mcp]` wheel; now uses the same
+  env-override → packaged-data → repo-root resolution as the web app.
+- **`/api/optimize/site` no longer mislabels device platforms on mixed-vendor
+  sites** — it stamped every device with the manifest-level vendor string
+  (e.g. `multi (Nokia SRL + Arista cEOS + FRR)`); it now uses the shared
+  loader that keeps per-device `platform`.
+- **Syslog connector `fetch()` is idempotent** — it used to drain the ring
+  buffer, so a correlate → triage sequence on the same source saw zero events
+  on the second call. It now snapshots; the deque's `maxlen` bounds memory.
+- **Default Ollama model corrected** to `qwen2.5-coder:latest` (was
+  `gemma4:latest`, which doesn't exist, breaking the out-of-box default
+  provider).
+- Env-configured sources no longer leak `verify_tls`/`timeout_seconds` into
+  `extra`; `.env.example` and README now document the real security env vars
+  (`AI_LOG_ANALYZER_API_TOKEN`, `AI_LOG_ANALYZER_CORS_ORIGINS`,
+  `ANALYZER_HOST`, `AI_LOG_ANALYZER_FILE_ROOTS`) and the `ollama` provider.
+
 ## [0.3.1] - 2026-06-10
 
 - UI header version badge is now populated live from `/api/health` (the 0.3.0

@@ -98,9 +98,20 @@ class BadCommand(ValueError):
     """Raised when /api/run receives a command we won't translate to argv."""
 
 
-def require_api_token(fn):
-    """Require X-API-Token header when AI_LOG_ANALYZER_API_TOKEN is set.
+def _token_supplied() -> str:
+    """The API token from the request, from either accepted header form."""
+    supplied = request.headers.get("X-API-Token", "")
+    if not supplied:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            supplied = auth[len("Bearer "):].strip()
+    return supplied
 
+
+def require_api_token(fn):
+    """Require the API token when AI_LOG_ANALYZER_API_TOKEN is set.
+
+    Accepted as `X-API-Token: <token>` or `Authorization: Bearer <token>`.
     When the env var is empty (dev mode + bound to 127.0.0.1) this decorator
     is a no-op. Once set, every mutating route must present the token.
     """
@@ -108,8 +119,7 @@ def require_api_token(fn):
     def wrapper(*args, **kwargs):
         if not API_TOKEN:
             return fn(*args, **kwargs)
-        supplied = request.headers.get("X-API-Token", "")
-        if supplied != API_TOKEN:
+        if _token_supplied() != API_TOKEN:
             abort(401)
         return fn(*args, **kwargs)
     return wrapper
@@ -240,7 +250,7 @@ def create_app() -> Flask:
         # last_errors carries upstream HTTP error bodies — useful in the UI,
         # but on a token-protected deployment don't hand it to anonymous
         # callers. Dev mode (no token) keeps full output for the dashboard.
-        if API_TOKEN and request.headers.get("X-API-Token", "") != API_TOKEN:
+        if API_TOKEN and _token_supplied() != API_TOKEN:
             state = {k: v for k, v in state.items() if k != "last_errors"}
         return jsonify(state)
 
@@ -259,6 +269,36 @@ def create_app() -> Flask:
         body = request.get_json(silent=True) or {}
         enabled = bool(body.get("enabled", True))
         return jsonify({"ok": True, "enabled": llm.set_enabled(enabled)})
+
+    # ── Classification rules ──────────────────────────────────────────────
+    @app.route("/api/rules", methods=["GET"])
+    def api_rules_list():
+        """Built-in rule count + the operator's custom classification rules."""
+        from ai_log_analyzer import classifier as _clf
+        return jsonify({
+            "builtin_count": len(_clf._KB_PATTERNS),
+            "custom": _clf.custom_rules(),
+        })
+
+    @app.route("/api/rules", methods=["POST"])
+    @require_api_token
+    def api_rules_add():
+        """Register custom classification rules at runtime (non-persistent).
+
+        Body: {"rules": [{"pattern": "...", "severity": "high",
+                          "category": "...", "description": "..."}]}
+        Persist across restarts by putting the same list in a JSON file and
+        pointing AI_LOG_ANALYZER_CUSTOM_RULES at it.
+        """
+        from ai_log_analyzer import classifier as _clf
+        body = request.get_json(silent=True) or {}
+        rules = body.get("rules")
+        if not isinstance(rules, list) or not rules:
+            return jsonify({"error": "body must be {\"rules\": [...]} with ≥1 rule"}), 400
+        added, errors = _clf.add_custom_rules(rules)
+        status = 200 if added else 400
+        return jsonify({"added": added, "errors": errors,
+                        "custom_total": len(_clf.custom_rules())}), status
 
     # ── Inventory ─────────────────────────────────────────────────────────
     @app.route("/api/lab/containers", methods=["GET"])
@@ -561,26 +601,15 @@ def create_app() -> Flask:
         safe = "".join(c for c in site_id if c.isalnum() or c in "-_").lower()
         if safe != site_id.lower():
             return jsonify({"error": "invalid site id"}), 400
-        site_dir = SITES_DIR / safe
-        manifest_path = site_dir / "manifest.json"
-        if not manifest_path.is_file():
-            return jsonify({"error": f"site bundle not found: {safe}"}), 404
         if not llm.get_state()["enabled"]:
             return jsonify({"error": "LLM is disabled — site analysis needs LLM"}), 400
 
-        import json as _json
-        manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
-        devices: list[dict] = []
-        for d in manifest.get("devices", []):
-            fpath = site_dir / d["file"]
-            if not fpath.is_file():
-                continue
-            devices.append({
-                "hostname": d.get("hostname", fpath.stem),
-                "function": d.get("function", "unknown"),
-                "platform": manifest.get("vendor", "junos").lower(),
-                "config_text": fpath.read_text(encoding="utf-8", errors="replace"),
-            })
+        # Shared loader keeps per-device platform intact — the old inline loop
+        # stamped every device with the manifest-level vendor string, which is
+        # wrong on mixed-vendor sites (e.g. "multi (Nokia SRL + Arista cEOS…)").
+        devices, _manifest = _load_site_devices(safe)
+        if devices is None:
+            return jsonify({"error": f"site bundle not found: {safe}"}), 404
         if not devices:
             return jsonify({"error": "no device configs found in bundle"}), 404
 
@@ -851,10 +880,12 @@ def create_app() -> Flask:
         return jsonify({"ok": removed})
 
     @app.route("/api/sources/<source_id>/test", methods=["POST"])
+    @require_api_token
     def api_sources_test(source_id: str):
         return jsonify(source_manager.healthcheck(source_id))
 
     @app.route("/api/sources/<source_id>/fetch", methods=["POST"])
+    @require_api_token
     def api_sources_fetch(source_id: str):
         """Pull a batch of events from a registered source. Body:
         {since_seconds, limit, host_filter}."""

@@ -335,6 +335,11 @@ def test_syslog_udp_listener_receives_messages():
         assert "ospf" in joined
         # Hostname should be parsed out from the RFC3164 frame
         assert any(e.hostname == "fra4-fw-01" for e in events)
+        # fetch() must be idempotent like every other connector — a second
+        # call (e.g. correlate → triage on the same source) sees the same
+        # events instead of an emptied buffer.
+        events_again = list(src.fetch(since_seconds=60, limit=100))
+        assert len(events_again) == len(events)
     finally:
         src.close()
 
