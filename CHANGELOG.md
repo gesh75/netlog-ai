@@ -20,7 +20,17 @@ loose semantic versioning.
   KB: a JSON rules file loaded at startup (`AI_LOG_ANALYZER_CUSTOM_RULES`) and
   a runtime API (`GET/POST /api/rules`). Custom rules are checked before the
   built-in patterns, so a known-noise event can be demoted or a site-specific
-  failure promoted. Suite 294 → 308 tests.
+  failure promoted.
+- **Cross-run template persistence** — set `AI_LOG_ANALYZER_TEMPLATE_STORE`
+  to a path and the miner remembers every template shape across runs
+  (FIFO-bounded JSON store, atomic writes, corrupt-file tolerant). Templates
+  never seen in *any* prior run are flagged `is_new` (🆕 in the UI panel,
+  `new_template_count` in the API) — the classic AIOps early-warning signal.
+- **Coverage wave for phases 0–12 leftovers** — `reports.py` (MD/CSV/HTML
+  exporters), `runbook.py` (Ansible/netmiko generation + command extraction),
+  `topology.py` (build/exports/finding overlay), and the previously untested
+  web routes `/api/report`, `/api/runbook`, `/api/topology`, plus the
+  validation paths of `/api/diff` and `/api/copilot`. Suite 294 → 325 tests.
 
 ### Security
 

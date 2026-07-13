@@ -15,7 +15,7 @@ from ai_log_analyzer.classifier import (
     LogEvent,
     iter_classify,
 )
-from ai_log_analyzer.patterns import TemplateMiner
+from ai_log_analyzer.patterns import TemplateMiner, apply_template_store
 from ai_log_analyzer.sanitize import sanitize
 
 
@@ -568,6 +568,9 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
     top_events, sev_counts, cat_counts, groups, by_host, miner = _aggregate_stream(
         iter_classify(events)
     )
+    # Opt-in cross-run persistence: flags templates never seen in ANY prior
+    # run (AI_LOG_ANALYZER_TEMPLATE_STORE) — the classic AIOps early-warning.
+    apply_template_store(miner)
 
     effective_llm = use_llm and llm.is_enabled()
     action_items = _finalize_action_items(
