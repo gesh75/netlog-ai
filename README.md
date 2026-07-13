@@ -15,7 +15,7 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-325%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-338%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
 > 📓 Recent changes — cross-source correlation + per-device triage (MCP tools **and** Device-tab UI) — are in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -69,6 +69,8 @@ Tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
 | 🔎 **Classify** | 50+ regex patterns across Junos, EOS, FRR, IOS, RFC-3164/5424 — plus your own rules via `AI_LOG_ANALYZER_CUSTOM_RULES` / `POST /api/rules` |
 | 🔭 **Unknown patterns** | Lines no rule matched are template-mined (Drain-style, zero deps): variables masked, shapes clustered, error-smelling templates ranked first — novel failure modes surface instead of vanishing as `info` noise. Set `AI_LOG_ANALYZER_TEMPLATE_STORE` for cross-run memory: shapes never seen in any prior run get flagged 🆕 |
 | 🧭 **Prioritize** | Deduped action items, ranked by severity × count, recovery events excluded |
+| 📶 **Fabric stability** | Per-device flap detection (interface/BGP/OSPF/LAG/VPN down↔up oscillation), event-rate bursts vs the device's own baseline, trend + heuristic 24h risk band — in `/api/analyze` and its own UI panel |
+| ⚖️ **LLM-as-Judge** | `ai-log-analyzer eval` scores playbooks 0–10 on actionability/safety/grounding/completeness — heuristic core, optional real LLM judge, `--min-score` CI gate |
 | 🧠 **Deep analyze** | Top-N items get an LLM-written root-cause + risk + remediation playbook |
 | 🛡️ **Sanitize-first** | Every config/log payload is scrubbed (`$6$`, `$9$`, SSH keys, SNMP, RADIUS, public IPs) before LLM call |
 | 📈 **Health score** | Weighted formula → 0–100 + A/B/C/D/F + sparkline trend |
@@ -105,6 +107,11 @@ ai-log-analyzer containers
 ai-log-analyzer analyze --frr r1 r2 --no-llm | jq .score
 ai-log-analyzer analyze --file /var/log/syslog
 docker logs my-router 2>&1 | ai-log-analyzer analyze --stdin
+
+# Score playbook quality (LLM-as-Judge; KB self-test by default)
+ai-log-analyzer eval                 # heuristic, offline
+ai-log-analyzer eval --use-llm       # blend a real LLM judge
+ai-log-analyzer eval --file result.json --min-score 7   # CI gate
 
 # Run the full test suite
 pytest --cov=src --cov-report=term-missing
@@ -319,6 +326,8 @@ flowchart TB
 src/ai_log_analyzer/
   classifier.py        50+ regex patterns + severity/category lookup + custom rules
   patterns.py          Drain-lite template miner for lines no rule matched
+  stability.py         Flap/burst/trend scoring + 24h risk per device
+  judge.py             LLM-as-Judge playbook quality scoring (eval CLI)
   kb.py                Rule-based deep-analysis KB (fallback when LLM is off)
   llm.py               Docker Model Runner (TCP + UDS) + Anthropic Claude
   analyzer.py          End-to-end pipeline: classify → actions → score → summary
@@ -398,7 +407,7 @@ src/ai_log_analyzer/
 
 ## Tested & accessible
 
-- **325 unit + integration tests** (pytest)
+- **338 unit + integration tests** (pytest)
 - Frontend audited across 8 review rounds:
   - WCAG-AA: `:focus-visible` rings, `aria-live` regions, `role=tablist/tab/tabpanel`, skip-to-main link, `prefers-reduced-motion` fallback
   - Responsive ≤ 1100px, PWA-ready (`theme-color`, `mobile-web-app-capable`, SVG favicon)
@@ -416,7 +425,8 @@ src/ai_log_analyzer/
 - [x] Custom classification rules — JSON file (`AI_LOG_ANALYZER_CUSTOM_RULES`) + runtime `POST /api/rules`; UI editor still open
 - [x] Unknown-pattern template mining — Drain-style clustering of unmatched lines, surfaced in UI/API/MCP
 - [x] Cross-run template persistence — `AI_LOG_ANALYZER_TEMPLATE_STORE` flags never-before-seen shapes (🆕)
-- [ ] Per-template volume anomaly detection (sudden rate spike/drop per device)
+- [x] Fabric stability scoring — flap/burst/trend detection + 24h risk band per device
+- [x] LLM-as-Judge playbook quality scoring (`ai-log-analyzer eval`, CI-gate ready)
 
 ## Contributing
 

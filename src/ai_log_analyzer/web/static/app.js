@@ -770,6 +770,39 @@ function render(r) {
     aTbody.appendChild(tr);
   });
 
+  // Fabric stability (flaps, bursts, 24h risk)
+  const stab = r.stability || {};
+  const stabPanel = $("stability-panel");
+  if (stabPanel) {
+    const devs = stab.devices || [];
+    if (devs.length) {
+      stabPanel.style.display = "block";
+      $("stability-score").textContent = `(fabric ${stab.fabric_score}/100 · ${stab.device_count} devices)`;
+      const sTbody = $("stability-table").querySelector("tbody");
+      clear(sTbody);
+      devs.slice(0, 15).forEach((d) => {
+        const riskClass = d.risk_24h === "high" ? "sev-row-critical"
+          : d.risk_24h === "medium" ? "sev-row-medium" : "";
+        const flapLabel = d.flaps
+          ? `${d.flaps}× ${d.flapping_entity || ""}`.trim() : "—";
+        const trendIcon = d.trend === "rising" ? "↗" : d.trend === "falling" ? "↘" : "→";
+        sTbody.appendChild(el("tr", { className: riskClass },
+          el("td", { text: d.hostname }),
+          el("td", { text: String(d.score) }),
+          el("td", { text: flapLabel }),
+          el("td", { text: d.burst_ratio > 1 ? `${d.burst_ratio}×` : "—" }),
+          el("td", { text: `${trendIcon} ${d.trend}` }),
+          el("td", { text: d.risk_24h.toUpperCase() }),
+        ));
+      });
+      const recs = $("stability-recs");
+      clear(recs);
+      (stab.recommendations || []).forEach((t) => recs.appendChild(el("li", { text: t })));
+    } else {
+      stabPanel.style.display = "none";
+    }
+  }
+
   // Unknown patterns (mined templates of lines no KB rule matched)
   const up = r.unknown_patterns || {};
   const upTemplates = up.top_templates || [];
