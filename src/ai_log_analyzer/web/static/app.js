@@ -760,9 +760,16 @@ function render(r) {
   clear(aTbody);
   r.action_items.forEach((item) => {
     const devLabel = `${item.devices.length}: ${item.devices.slice(0, 3).join(", ")}`;
+    // Incident-memory recurrence: "this exact issue appeared N times before"
+    const rec = item.recurrence;
+    const descCell = rec && rec.count
+      ? el("td", {}, document.createTextNode(item.description + " "),
+          el("span", { className: "row-msg",
+            text: `↻ seen ${rec.count}× before (last ${String(rec.last_seen || "").slice(0, 10)})` }))
+      : el("td", { text: item.description });
     const tr = el("tr", { className: "action" },
       el("td", {}, sevBadge(item.severity)),
-      el("td", { text: item.description }),
+      descCell,
       el("td", { text: String(item.count) }),
       el("td", { text: devLabel }),
     );
@@ -2653,6 +2660,67 @@ function hideIdleStateIfAnyPanelVisible() {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
+// ── Live Tail (SSE) ──────────────────────────────────────────────────────────
+let _tailES = null;
+let _tailCount = 0;
+
+async function loadTailSources() {
+  const sel = $("tail-source");
+  if (!sel) return;
+  try {
+    const data = await fetchJSON("/api/sources");
+    clear(sel);
+    (data.sources || []).filter((s) => s.type === "syslog").forEach((s) => {
+      sel.appendChild(el("option", { text: s.id }));
+      sel.lastChild.value = s.id;
+    });
+    if (!sel.options.length) {
+      sel.appendChild(el("option", { text: "(no syslog sources registered)" }));
+      sel.lastChild.value = "";
+    }
+  } catch { /* sources API unavailable — leave empty */ }
+}
+
+function stopLiveTail() {
+  if (_tailES) { _tailES.close(); _tailES = null; }
+  const btn = $("tail-btn");
+  if (btn) btn.textContent = "▶ Start Live Tail";
+}
+
+function toggleLiveTail() {
+  if (_tailES) { stopLiveTail(); return; }
+  const src = $("tail-source").value;
+  if (!src) { setStatus("Register a syslog source first (Device tab → Sources)."); return; }
+  const minSev = $("tail-min-sev").value;
+  const panel = $("live-panel");
+  panel.style.display = "block";
+  const idle = $("idle-state");
+  if (idle) idle.style.display = "none";
+  _tailCount = 0;
+  const tbody = $("live-table").querySelector("tbody");
+  clear(tbody);
+  _tailES = new EventSource(`/api/tail/${encodeURIComponent(src)}?min_severity=${minSev}`);
+  _tailES.onmessage = (msg) => {
+    let e;
+    try { e = JSON.parse(msg.data); } catch { return; }
+    _tailCount += 1;
+    $("live-count").textContent = `(${_tailCount} events · ${src})`;
+    const tr = el("tr", { className: `sev-row-${e.severity || "info"}` },
+      el("td", {}, sevBadge(e.severity)),
+      el("td", {}, el("span", { className: "row-msg", text: e.timestamp || "" })),
+      el("td", { text: e.hostname || "" }),
+      el("td", {}, el("span", { className: "row-msg", text: e.category })),
+      el("td", { text: e.description || "" }),
+    );
+    tbody.insertBefore(tr, tbody.firstChild);
+    while (tbody.children.length > 200) tbody.removeChild(tbody.lastChild);
+  };
+  _tailES.onerror = () => {
+    setStatus("Live tail connection lost — retrying automatically…");
+  };
+  $("tail-btn").textContent = "⏸ Stop Live Tail";
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   // Sidebar tabs
   document.querySelectorAll(".side-tab").forEach((tab) => {
@@ -2674,6 +2742,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("site-opt-btn").addEventListener("click", runSiteOptimize);
   $("site-picker").addEventListener("change", showSiteMeta);
   $("reload-containers").addEventListener("click", loadContainers);
+  const _tailBtn = $("tail-btn");
+  if (_tailBtn) { _tailBtn.addEventListener("click", toggleLiveTail); loadTailSources(); }
   // All/None bulk-toggle (previously dead handlers — the IDs existed in HTML
   // but no JS was wired, so clicking "All" only highlighted the button itself).
   const _allBtn = $("chips-all");

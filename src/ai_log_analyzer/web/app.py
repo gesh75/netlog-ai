@@ -828,6 +828,81 @@ def create_app() -> Flask:
         result["config_length"] = len(running_config)
         return jsonify(result)
 
+    # ── Incident memory ────────────────────────────────────────────────────
+    @app.route("/api/incidents/similar", methods=["GET"])
+    def api_incidents_similar():
+        """Free-text search over the local incident journal.
+
+        Requires AI_LOG_ANALYZER_INCIDENT_STORE; ?q=<text>&top=<n>.
+        """
+        from ai_log_analyzer.memory import get_store
+        store = get_store()
+        if store is None:
+            return jsonify({"error": "incident store not configured — "
+                            "set AI_LOG_ANALYZER_INCIDENT_STORE"}), 400
+        q = (request.args.get("q") or "").strip()
+        if not q:
+            return jsonify({"error": "q parameter required"}), 400
+        try:
+            top = max(1, min(20, int(request.args.get("top") or 5)))
+        except ValueError:
+            top = 5
+        return jsonify({"query": q, "journal_size": len(store),
+                        "matches": store.find_similar(q, top_n=top)})
+
+    # ── Live tail (SSE) ────────────────────────────────────────────────────
+    @app.route("/api/tail/<source_id>", methods=["GET"])
+    def api_tail(source_id: str):
+        """Server-Sent Events stream of classified events from a syslog source.
+
+        Zero-dependency real time: EventSource in the browser, chunked
+        response here — no websocket stack. EventSource cannot set request
+        headers, so on tokened deployments pass ?token=<API token>.
+        Optional ?min_severity=critical|high|medium|low filters server-side.
+        """
+        if API_TOKEN and request.args.get("token", "") != API_TOKEN \
+                and _token_supplied() != API_TOKEN:
+            abort(401)
+        src = source_manager.get(source_id)
+        if src is None:
+            return jsonify({"error": f"unknown source: {source_id}"}), 404
+        if not hasattr(src, "fetch_new"):
+            return jsonify({"error": "live tail supports syslog listener sources only"}), 400
+
+        from ai_log_analyzer.classifier import SEV_ORDER
+        min_sev = (request.args.get("min_severity") or "info").lower()
+        max_rank = SEV_ORDER.get(min_sev, 4)
+        poll_s = min(5.0, max(0.2, float(request.args.get("poll") or 1.0)))
+
+        def stream():
+            import json as _json
+            import time as _time
+            from ai_log_analyzer.classifier import iter_classify
+            cursor = getattr(src, "_total_ingested", 0)  # start at "now"
+            yield "event: hello\ndata: {}\n\n"
+            idle = 0.0
+            while True:
+                events, cursor = src.fetch_new(cursor)
+                sent = False
+                for ce in iter_classify(iter(events)):
+                    if SEV_ORDER.get(ce.severity, 4) <= max_rank:
+                        yield f"data: {_json.dumps(ce.to_dict())}\n\n"
+                        sent = True
+                if sent:
+                    idle = 0.0
+                else:
+                    idle += poll_s
+                    if idle >= 15.0:  # keep proxies from timing the stream out
+                        yield ": keepalive\n\n"
+                        idle = 0.0
+                _time.sleep(poll_s)
+
+        return app.response_class(
+            stream(),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
     # ── External log sources (Kibana, Splunk, Loki, syslog, LibreNMS, ...) ────
     @app.route("/api/sources", methods=["GET"])
     def api_sources_list():

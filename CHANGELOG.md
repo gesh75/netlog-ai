@@ -4,6 +4,50 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
+## [0.5.0] - 2026-07-13
+
+Research-driven wave (competitive study of 2026 NOC tooling — SSE-first live
+viewers, incident-history UX, Cisco/Nokia syslog references).
+
+### Added
+
+- **🔴 Live tail** — `GET /api/tail/<source_id>` streams classified events
+  from any syslog listener source via Server-Sent Events (zero new deps, no
+  polling, server-side `?min_severity=` filter, keepalive frames, query-token
+  auth for EventSource). New Live Tail panel in the Logs tab with start/stop,
+  source picker, and a rolling 200-event view. Backed by a new cursor-based
+  `fetch_new()` on the syslog source (monotonic ingest counter — no
+  duplicates, wraparound-safe).
+- **↻ Incident memory** (`memory.py`) — with `AI_LOG_ANALYZER_INCIDENT_STORE`
+  set, every run journals its action items locally (bounded JSONL); future
+  runs annotate items with `recurrence` ("seen 3× before, last Jul 5, on
+  spine-01") shown as a badge in the UI, and `/api/incidents/similar?q=`
+  answers free-text "have we seen this before?" via token-overlap search.
+- **🎬 Demo mode** — `ai-log-analyzer demo` runs a deterministic synthetic
+  incident storyline (6 devices, 4 vendor dialects: flapping interface, BGP
+  collapse, NX-OS service crash, PSU failure, SSH brute force, SR Linux
+  churn, one never-seen shape) through the full pipeline and prints the
+  result; `--serve` starts the UI with a UDP feeder so Live Tail streams the
+  story in real time. Zero setup, zero LLM key needed.
+- **Cisco IOS-XE / NX-OS / Nokia SR Linux classifier patterns** —
+  `%LINK-3-UPDOWN`, `%LINEPROTO-5-UPDOWN`, `%ETHPORT-5-IF_DOWN`,
+  `%SYSMGR-2-SERVICE_CRASHED`, `%VPC-2-*`, `%MODULE-2/%PLATFORM-2`,
+  `%DUAL-5-NBRCHANGE` (EIGRP), `%HSRP-5-STATECHANGE`, `%ENVMON`,
+  `%SEC_LOGIN-4/5`, `%SYS-5-CONFIG_I`, and SR Linux `bgp_mgr` session /
+  oper-state transitions — mapped onto the existing canonical descriptions so
+  stability flap-pairing, recovery filtering, and the KB all work unchanged.
+- **Per-event confidence score** — every classified event now carries
+  `confidence`: 1.0 custom rule, 0.9 KB pattern, 0.6 raw-severity promotion,
+  0.3 unmatched snippet.
+
+### Performance
+
+- Literal-gate extraction now recovers guaranteed literals from alternations
+  whose common prefix sre hoists into a short run (`%a|%b` → `%` + branch) —
+  unguarded always-scanned patterns drop from 2 to **0**.
+
+Suite 338 → 369 tests.
+
 ## [0.4.0] - 2026-07-13
 
 ### Added
