@@ -37,9 +37,11 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Public-facing URL of the upstream template database. Pinned to the main branch.
-# If upstream restructures, change this constant or set TFSM_DB_PATH locally.
-_UPSTREAM_DB_URL = (
-    "https://github.com/scottpeterman/tfsm_fire/raw/main/tfire/tfsm_templates.db"
+# Upstream has restructured before (the raw URL 404s when it does) — override
+# with TFSM_DB_URL to point at a mirror, or TFSM_DB_PATH at a local copy.
+_UPSTREAM_DB_URL = os.environ.get(
+    "TFSM_DB_URL",
+    "https://github.com/scottpeterman/tfsm_fire/raw/main/tfire/tfsm_templates.db",
 )
 _DEFAULT_DB_PATH = Path(
     os.environ.get(
