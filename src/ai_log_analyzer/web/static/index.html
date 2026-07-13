@@ -232,6 +232,7 @@
   #summary-panel         { contain-intrinsic-size: 0 260px; }
   #actions-panel         { contain-intrinsic-size: 0 380px; }
   #unknown-panel         { contain-intrinsic-size: 0 300px; }
+  #stability-panel       { contain-intrinsic-size: 0 340px; }
   #events-panel          { contain-intrinsic-size: 0 540px; }
   #optimize-panel        { contain-intrinsic-size: 0 800px; }
   #site-panel            { contain-intrinsic-size: 0 720px; }
@@ -1435,6 +1436,18 @@
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+
+    <div class="panel" id="stability-panel" style="display:none;">
+      <h2>📶 Fabric Stability <span class="h2-count" id="stability-score"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Per-device stability: flap oscillations (down↔up round trips), event-rate bursts vs the device's own baseline, and a heuristic 24h risk band from the activity trend. Worst devices first.</p>
+      <table id="stability-table">
+        <thead>
+          <tr><th>Device</th><th>Score</th><th>Flaps</th><th>Burst</th><th>Trend</th><th>24h Risk</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <ul class="summary" id="stability-recs" style="margin-top:8px;"></ul>
     </div>
 
     <div class="panel" id="unknown-panel" style="display:none;">

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netlog-ai"
-version = "0.3.1"
+version = "0.4.0"
 description = "AI-powered network syslog analyzer with pluggable LLM providers (local Docker Model Runner / Anthropic Claude) and lab adapters."
 readme = "README.md"
 license = { text = "MIT" }
