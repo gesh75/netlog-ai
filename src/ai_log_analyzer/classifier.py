@@ -28,6 +28,18 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"%bgp-3-notification|%bgp-5-adjchange.*down",                     "high",     "routing",    "BGP notification / adjacency down (FRR/IOS)"),
     (r"ospf.*(?:neighbor.*down|adj.*change|dead.*timer)",               "high",     "routing",    "OSPF neighbor state change"),
     (r"%ospf-5-adjchg.*down|ospf.*from\s+full\s+to",                    "high",     "routing",    "OSPF adjacency loss (FRR/IOS)"),
+    # Cisco IOS-XE / NX-OS (%FACILITY-SEV-MNEMONIC) + Nokia SR Linux
+    (r"%dual-5-nbrchange.*down",                                        "high",     "routing",    "EIGRP neighbor down (IOS)"),
+    (r"bgp_mgr.*(?:to\s+(?:idle|active|connect)\b|session.*(?:down|fail))", "high", "routing",    "BGP peer down / connect failure"),
+    (r"%(?:link-3-updown|lineproto-5-updown).*to\s+down",               "high",     "interface",  "Interface link down"),
+    (r"%ethport-5-if_down|%eth_port_channel.*down",                     "high",     "interface",  "Interface link down"),
+    (r"\w+_mgr.*oper.*state.*down|srlinux.*port.*down",                 "high",     "interface",  "Interface link down"),
+    (r"%sec_login-4-login_failed|%authpriv.*fail",                      "high",     "security",   "Authentication failure"),
+    (r"%sysmgr-2-service_crashed|%sysmgr.*(?:crash|terminated)",        "critical", "system",     "NX-OS service crash"),
+    (r"%vpc-2-|vpc.*peer.*(?:down|fail)",                               "high",     "lag",        "vPC peer failure (NX-OS)"),
+    (r"%hsrp-5-statechange|%fhrp",                                      "high",     "redundancy", "VRRP/gateway failover"),
+    (r"%envmon.*(?:fan|temperature|supply)|%platform.*(?:thermal|power)", "critical", "hardware", "Power supply or fan failure"),
+    (r"%module-2-|%platform-2-",                                        "critical", "hardware",  "Chassis alarm triggered"),
     (r"bfd.*(?:down|removed|session.*fail)",                            "high",     "routing",    "BFD session down"),
     (r"isis.*(?:adj.*down|adj.*change|lsp.*purge)",                     "high",     "routing",    "IS-IS adjacency change"),
     (r"license.*(?:expir|invalid|warn)|expir.*license",                 "high",     "compliance", "License expiration warning"),
@@ -43,6 +55,7 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"l3_entry|l2_entry|memory\s+block|blk:",                          "high",     "hardware",   "ASIC forwarding table error"),
     # ── MEDIUM ───────────────────────────────────────────────────────────
     (r"snmp_trap_link_up|link\s*up|carrier.*up|if_up",                  "medium",   "interface",  "Interface link up"),
+    (r"%(?:link-3-updown|lineproto-5-updown).*to\s+up",                 "medium",   "interface",  "Interface link up"),
     (r"rpd_bgp.*establ|bgp.*established|%bgp-5-adjchange.*up",          "medium",   "routing",    "BGP peer established"),
     (r"ospf.*(?:neighbor.*full|adj.*full)|%ospf-5-adjchg.*full",        "medium",   "routing",    "OSPF neighbor established"),
     (r"ntp.*(?:unreachable|stratum.*16|no.*server|sync\s+lost)",        "medium",   "ntp",        "NTP sync lost/unreachable"),
@@ -61,6 +74,8 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"accepted\s+(?:publickey|password|keyboard)|sshd.*accept",        "low",      "auth",       "SSH login accepted"),
     (r"session\s+(?:opened|closed)|pam_unix.*session",                  "low",      "auth",       "User session opened/closed"),
     (r"commit.*confirmed|config.*change|commit\b",                      "low",      "config",     "Configuration change committed"),
+    (r"%sys-5-config_i|%vshd-5-vshd_syslog_config_i",                   "low",      "config",     "Configuration change committed"),
+    (r"%sec_login-5-login_success",                                     "low",      "auth",       "SSH login accepted"),
     (r"lldp.*(?:neighbor|add|delete|update)",                           "low",      "discovery",  "LLDP neighbor change"),
     (r"snmpd|agentx|snmp.*trap",                                        "low",      "monitoring", "SNMP daemon/trap activity"),
     (r"sshd.*(?:disconnect|close|exit)",                                "low",      "auth",       "SSH session disconnected"),
@@ -136,9 +151,17 @@ def _guaranteed_literals(parsed) -> set[str] | None:
         # IN / ANY / AT / NOT_LITERAL etc. prove nothing — skip
     _flush()
 
-    solid = [r for r in runs if len(r) >= 3] or runs
+    # Prefer a solid (≥3 char) literal run; else fall back to branch-derived
+    # literals (sre hoists common alternation prefixes like '%' into a short
+    # run, which would otherwise mask the long per-alternative literals);
+    # else settle for the short run.
+    solid = [r for r in runs if len(r) >= 3]
     if solid:
         return {max(solid, key=len)}
+    if best and all(len(b) >= 3 for b in best):
+        return best
+    if runs:
+        return {max(runs, key=len)}
     return best
 
 
@@ -272,6 +295,9 @@ class ClassifiedEvent:
     action: str
     message: str
     sample_message: str = field(default="")  # short version for UI
+    # How the verdict was reached: 1.0 custom rule, 0.9 KB pattern,
+    # 0.6 raw-severity promotion, 0.3 unmatched (description = raw snippet).
+    confidence: float = field(default=0.9)
 
     def to_dict(self) -> dict:
         return {
@@ -285,6 +311,7 @@ class ClassifiedEvent:
             "action": self.action,
             "message": self.message,
             "sample_message": self.sample_message,
+            "confidence": self.confidence,
         }
 
 
@@ -324,11 +351,13 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
         clean_message = strip_ansi(ev.message)
         combined = f"{ev.appname} {clean_message}".lower()
         sev, cat, desc = "info", "other", ""
+        confidence = 0.9
 
         # Custom user rules take precedence over the built-in KB.
         for pattern, p_sev, p_cat, p_desc in _CUSTOM_RULES:
             if pattern.search(combined):
                 sev, cat, desc = p_sev, p_cat, p_desc
+                confidence = 1.0
                 break
 
         if not desc:
@@ -346,10 +375,12 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
         if not desc:
             snippet = clean_message[:120].strip() or ev.appname or "General log message"
             desc = snippet
+            confidence = 0.3
 
         # Promote raw severity if syslog says critical but classifier missed it
         if ev.severity_raw.lower() in ("crit", "emerg", "alert") and sev == "info":
             sev = "high"
+            confidence = 0.6
 
         yield ClassifiedEvent(
             timestamp=ev.timestamp,
@@ -362,6 +393,7 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
             action=_action_for(sev, cat),
             message=clean_message[:500],
             sample_message=clean_message[:200],
+            confidence=confidence,
         )
 
 
