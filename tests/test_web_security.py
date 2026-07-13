@@ -44,6 +44,27 @@ def test_token_set_accepts_correct_token(client, monkeypatch):
     assert r.status_code != 401  # passes the gate; body validation may 400
 
 
+@pytest.mark.unit
+def test_token_accepts_authorization_bearer(client, monkeypatch):
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    r = client.post("/api/llm/provider", json={},
+                    headers={"Authorization": "Bearer sekrit"})
+    assert r.status_code != 401
+    r = client.post("/api/llm/provider", json={},
+                    headers={"Authorization": "Bearer wrong"})
+    assert r.status_code == 401
+
+
+@pytest.mark.unit
+def test_sources_test_and_fetch_require_token(client, monkeypatch):
+    """/api/sources/<id>/test and /fetch were the only POST data routes
+    missing the auth gate — regression check that they now enforce it."""
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    assert client.post("/api/sources/x/test").status_code == 401
+    assert client.post("/api/sources/x/fetch", json={}).status_code == 401
+    assert client.post("/api/rules", json={}).status_code == 401
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # /api/analyze {source:"file"} path confinement
 # ──────────────────────────────────────────────────────────────────────────────

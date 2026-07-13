@@ -15,6 +15,7 @@ from ai_log_analyzer.classifier import (
     LogEvent,
     iter_classify,
 )
+from ai_log_analyzer.patterns import TemplateMiner
 from ai_log_analyzer.sanitize import sanitize
 
 
@@ -89,6 +90,7 @@ class AnalysisResult:
     executive_summary: list[str]
     llm_powered: bool
     generated_at: str
+    unknown_patterns: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -103,6 +105,7 @@ class AnalysisResult:
             "executive_summary": self.executive_summary,
             "llm_powered": self.llm_powered,
             "generated_at": self.generated_at,
+            "unknown_patterns": self.unknown_patterns,
         }
 
 
@@ -209,11 +212,19 @@ def deep_analyze(
 
     llm_result: dict | None = None
     if not skip_llm:
-        samples = "\n".join(f"  - {m}" for m in sample_messages[:5]) or "  (no samples)"
+        # CRITICAL: raw log lines can carry secrets (auth failures echo
+        # usernames, SNMP traps echo communities, RADIUS/TACACS lines echo
+        # server keys). Same sanitize gate as the config paths — nothing
+        # reaches an external LLM unscrubbed.
+        safe_samples = [sanitize(m, mask_pii=True)[0] for m in sample_messages[:5]]
+        samples = "\n".join(f"  - {m}" for m in safe_samples) or "  (no samples)"
+        # Descriptions are usually KB constants, but severity-promoted events
+        # (raw crit/emerg/alert with no KB match) carry a raw message snippet.
+        safe_description, _ = sanitize(description, mask_pii=True)
         user_prompt = (
             f"INCIDENT CONTEXT\n"
             f"Category: {category}\n"
-            f"Description: {description}\n"
+            f"Description: {safe_description}\n"
             f"Occurrences: {count}\n"
             f"Affected devices ({len(devices)}): {', '.join(devices[:5]) if devices else 'unknown'}\n"
             f"Platform hint: {platform_hint or 'mixed (frr/junos/eos)'}\n"
@@ -462,8 +473,8 @@ def _executive_summary(
             "- Match hostnames verbatim — no abbreviations, no shortenings."
         )
         top = [
-            f"{a.severity.upper()} | {a.description} ({a.count}× on "
-            f"{', '.join(a.devices[:5]) if a.devices else 'unknown'})"
+            f"{a.severity.upper()} | {sanitize(a.description, mask_pii=True)[0]} "
+            f"({a.count}× on {', '.join(a.devices[:5]) if a.devices else 'unknown'})"
             for a in items[:5]
         ]
         user_prompt = (
@@ -504,26 +515,31 @@ def _executive_summary(
 
 def _aggregate_stream(
     classified: Iterable[ClassifiedEvent], top_k: int = 300,
-) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict]:
+) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict, TemplateMiner]:
     """Single bounded pass over a classified stream.
 
-    Memory is O(top_k + KB rules + devices) regardless of input size — this
-    is what lets analyze() handle multi-GB syslog without materializing it.
-    Per-severity heaps keyed on (timestamp, -seq) keep the newest top_k
-    events of each severity; finalization reproduces classify_events()'
-    ordering exactly (severity rank, then timestamp desc, then arrival).
+    Memory is O(top_k + KB rules + devices + template clusters) regardless of
+    input size — this is what lets analyze() handle multi-GB syslog without
+    materializing it. Per-severity heaps keyed on (timestamp, -seq) keep the
+    newest top_k events of each severity; finalization reproduces
+    classify_events()' ordering exactly (severity rank, then timestamp desc,
+    then arrival). Events no KB rule matched are additionally mined into
+    templates so novel message shapes surface instead of vanishing as noise.
     """
     sev_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     cat_counts: dict[str, int] = {}
     buckets: dict[str, list] = {sev: [] for sev in SEV_ORDER}
     groups: dict[tuple[str, str], dict] = {}
     by_host: dict[str, dict] = {}
+    miner = TemplateMiner()
 
     for seq, e in enumerate(classified):
         sev_counts[e.severity] = sev_counts.get(e.severity, 0) + 1
         cat_counts[e.category] = cat_counts.get(e.category, 0) + 1
         _group_actionable(e, groups, seq)
         _count_device(e, by_host)
+        if e.category == "other" and e.message:
+            miner.add(e.message, e.hostname)
         heap = buckets.setdefault(e.severity, [])
         entry = (e.timestamp, -seq, e)
         if len(heap) < top_k:
@@ -538,7 +554,7 @@ def _aggregate_stream(
         )
         if len(top_events) >= top_k:
             break
-    return top_events[:top_k], sev_counts, cat_counts, groups, by_host
+    return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner
 
 
 def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3) -> AnalysisResult:
@@ -549,7 +565,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
     event list. Thread-safe: never mutates global llm state. `use_llm=False`
     is enforced by forcing `llm_top_n=0` and disabling the LLM exec summary.
     """
-    top_events, sev_counts, cat_counts, groups, by_host = _aggregate_stream(
+    top_events, sev_counts, cat_counts, groups, by_host, miner = _aggregate_stream(
         iter_classify(events)
     )
 
@@ -575,6 +591,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
         executive_summary=summary,
         llm_powered=any_llm,
         generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        unknown_patterns=miner.to_dict(top_n=10),
     )
 
 
