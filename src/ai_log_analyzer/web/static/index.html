@@ -231,6 +231,7 @@
   #health-panel          { contain-intrinsic-size: 0 320px; }
   #summary-panel         { contain-intrinsic-size: 0 260px; }
   #actions-panel         { contain-intrinsic-size: 0 380px; }
+  #unknown-panel         { contain-intrinsic-size: 0 300px; }
   #events-panel          { contain-intrinsic-size: 0 540px; }
   #optimize-panel        { contain-intrinsic-size: 0 800px; }
   #site-panel            { contain-intrinsic-size: 0 720px; }
@@ -1431,6 +1432,17 @@
       <table id="actions-table">
         <thead>
           <tr><th>Severity</th><th>Description</th><th>Count</th><th>Devices</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="panel" id="unknown-panel" style="display:none;">
+      <h2>🔭 Unknown Patterns <span class="h2-count" id="unknown-count"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Message shapes no knowledge-base rule matched, mined into templates (variables masked as &lt;ip&gt;/&lt;n&gt;/&lt;if&gt;). A brand-new error shape often precedes an outage — review ⚠ rows first. 🆕 marks shapes never seen in any prior run (set <code>AI_LOG_ANALYZER_TEMPLATE_STORE</code> to enable).</p>
+      <table id="unknown-table">
+        <thead>
+          <tr><th></th><th>Template</th><th>Count</th><th>Hosts</th></tr>
         </thead>
         <tbody></tbody>
       </table>
