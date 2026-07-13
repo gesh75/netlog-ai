@@ -17,6 +17,7 @@ from ai_log_analyzer.classifier import (
 )
 from ai_log_analyzer.patterns import TemplateMiner, apply_template_store
 from ai_log_analyzer.sanitize import sanitize
+from ai_log_analyzer.stability import StabilityTracker
 
 
 # Recovery events are classified as medium because they're useful in the
@@ -91,6 +92,7 @@ class AnalysisResult:
     llm_powered: bool
     generated_at: str
     unknown_patterns: dict = field(default_factory=dict)
+    stability: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -106,6 +108,7 @@ class AnalysisResult:
             "llm_powered": self.llm_powered,
             "generated_at": self.generated_at,
             "unknown_patterns": self.unknown_patterns,
+            "stability": self.stability,
         }
 
 
@@ -515,7 +518,7 @@ def _executive_summary(
 
 def _aggregate_stream(
     classified: Iterable[ClassifiedEvent], top_k: int = 300,
-) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict, TemplateMiner]:
+) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict, TemplateMiner, StabilityTracker]:
     """Single bounded pass over a classified stream.
 
     Memory is O(top_k + KB rules + devices + template clusters) regardless of
@@ -532,12 +535,14 @@ def _aggregate_stream(
     groups: dict[tuple[str, str], dict] = {}
     by_host: dict[str, dict] = {}
     miner = TemplateMiner()
+    tracker = StabilityTracker()
 
     for seq, e in enumerate(classified):
         sev_counts[e.severity] = sev_counts.get(e.severity, 0) + 1
         cat_counts[e.category] = cat_counts.get(e.category, 0) + 1
         _group_actionable(e, groups, seq)
         _count_device(e, by_host)
+        tracker.add(e)
         if e.category == "other" and e.message:
             miner.add(e.message, e.hostname)
         heap = buckets.setdefault(e.severity, [])
@@ -554,7 +559,7 @@ def _aggregate_stream(
         )
         if len(top_events) >= top_k:
             break
-    return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner
+    return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner, tracker
 
 
 def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3) -> AnalysisResult:
@@ -565,7 +570,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
     event list. Thread-safe: never mutates global llm state. `use_llm=False`
     is enforced by forcing `llm_top_n=0` and disabling the LLM exec summary.
     """
-    top_events, sev_counts, cat_counts, groups, by_host, miner = _aggregate_stream(
+    top_events, sev_counts, cat_counts, groups, by_host, miner, tracker = _aggregate_stream(
         iter_classify(events)
     )
     # Opt-in cross-run persistence: flags templates never seen in ANY prior
@@ -595,6 +600,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
         llm_powered=any_llm,
         generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         unknown_patterns=miner.to_dict(top_n=10),
+        stability=tracker.report(),
     )
 
 

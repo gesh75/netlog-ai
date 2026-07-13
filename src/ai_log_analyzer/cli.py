@@ -48,6 +48,48 @@ def cmd_containers(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Score playbook quality with the LLM-as-Judge harness.
+
+    Default: self-test every rule-based KB playbook (the quality floor with
+    the LLM off). --file scores a saved /api/analyze JSON result instead.
+    --min-score turns the run into a CI gate (exit 1 below threshold).
+    """
+    from ai_log_analyzer import judge
+
+    if args.file:
+        try:
+            with open(args.file, encoding="utf-8") as fh:
+                result = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"error: cannot read {args.file}: {exc}", file=sys.stderr)
+            return 2
+        report = judge.judge_analysis_result(result, use_llm=args.use_llm)
+    else:
+        report = judge.judge_kb(use_llm=args.use_llm)
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(f"Playbooks scored : {report['playbooks_scored']}")
+        print(f"Overall quality  : {report['overall']}/10")
+        print()
+        for v in report["verdicts"][: args.show]:
+            s = v["scores"]
+            label = v.get("description") or v.get("category", "")
+            print(f"  {s['overall']:>4}/10  [{v.get('judge')}] {label[:70]}")
+            print(f"          action={s['actionability']} safety={s['safety']} "
+                  f"grounding={s['grounding']} complete={s['completeness']}")
+            for note in v.get("notes", [])[:2]:
+                print(f"          ! {note}")
+
+    if args.min_score and report["overall"] < args.min_score:
+        print(f"\nFAIL: overall {report['overall']} < required {args.min_score}",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_mcp(args: argparse.Namespace) -> int:
     """Start the MCP server (stdio by default) so Claude Code / Cursor / Continue
     can call netlog-ai tools directly."""
@@ -82,6 +124,14 @@ def main() -> None:
 
     cp = sub.add_parser("containers", help="List running FRR lab containers")
     cp.set_defaults(func=cmd_containers)
+
+    ep = sub.add_parser("eval", help="Score playbook quality (LLM-as-Judge; KB self-test by default)")
+    ep.add_argument("--file", help="Saved /api/analyze JSON result to score (default: score the built-in KB)")
+    ep.add_argument("--use-llm", action="store_true", help="Blend in a real LLM judge (falls back to heuristic)")
+    ep.add_argument("--json", action="store_true", help="Machine-readable output")
+    ep.add_argument("--show", type=int, default=10, help="Verdicts to print, worst first (default 10)")
+    ep.add_argument("--min-score", type=float, default=0.0, help="Exit 1 if overall quality is below this (CI gate)")
+    ep.set_defaults(func=cmd_eval)
 
     mp = sub.add_parser("mcp", help="Run as an MCP server (for Claude Code / Cursor / Continue)")
     mp.add_argument("--transport", default="stdio", choices=["stdio", "streamable-http"],
