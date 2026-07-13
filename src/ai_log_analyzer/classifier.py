@@ -5,6 +5,7 @@ Works on any normalized event regardless of source (Kibana, FRR docker logs, raw
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Iterable, Iterator
@@ -162,6 +163,71 @@ _KEYWORDS = tuple(sorted(
     if not any(other != k and other in k for other in _kw)
 ))
 
+# ── Custom user rules ────────────────────────────────────────────────────
+# Loaded from a JSON file (env AI_LOG_ANALYZER_CUSTOM_RULES or add_custom_rules()).
+# Custom rules are checked BEFORE the built-in KB so operators can override
+# any built-in verdict. They bypass the literal gate — rule counts are small,
+# so the extra scans are negligible.
+_CUSTOM_RULES: list[tuple[re.Pattern[str], str, str, str]] = []
+
+
+def add_custom_rules(rules: list[dict]) -> tuple[int, list[str]]:
+    """Register user-defined classification rules at runtime.
+
+    Each rule: {"pattern": regex, "severity": critical|high|medium|low|info,
+    "category": str, "description": str}. Returns (added_count, errors);
+    invalid rules are skipped, never fatal.
+    """
+    added, errors = 0, []
+    for i, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            errors.append(f"rule {i}: not an object")
+            continue
+        pattern = rule.get("pattern", "")
+        severity = str(rule.get("severity", "")).lower()
+        category = str(rule.get("category", "custom")) or "custom"
+        description = str(rule.get("description", "")) or "Custom rule match"
+        if severity not in SEV_ORDER:
+            errors.append(f"rule {i}: invalid severity {severity!r}")
+            continue
+        try:
+            compiled = re.compile(pattern, re.IGNORECASE)
+        except re.error as exc:
+            errors.append(f"rule {i}: bad regex: {exc}")
+            continue
+        _CUSTOM_RULES.append((compiled, severity, category, description))
+        added += 1
+    return added, errors
+
+
+def load_custom_rules_file(path: str) -> tuple[int, list[str]]:
+    """Load custom rules from a JSON file: a list of rule objects."""
+    import json
+    from pathlib import Path
+    p = Path(path).expanduser()
+    if not p.is_file():
+        return 0, [f"custom rules file not found: {p}"]
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return 0, [f"custom rules file unreadable: {exc}"]
+    if not isinstance(data, list):
+        return 0, ["custom rules file must contain a JSON list"]
+    return add_custom_rules(data)
+
+
+def custom_rules() -> list[dict]:
+    """JSON-ready view of the currently registered custom rules."""
+    return [
+        {"pattern": p.pattern, "severity": s, "category": c, "description": d}
+        for (p, s, c, d) in _CUSTOM_RULES
+    ]
+
+
+_rules_path = os.environ.get("AI_LOG_ANALYZER_CUSTOM_RULES", "")
+if _rules_path:
+    load_custom_rules_file(_rules_path)
+
 # ANSI/VT100 terminal escape sequences — systemd, journald, FRR vtysh, and
 # any source piping colored output leaks these into the message field.
 # Pattern covers CSI (\x1b[...m), OSC (\x1b]...\x07), and SGR-style codes.
@@ -259,16 +325,23 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
         combined = f"{ev.appname} {clean_message}".lower()
         sev, cat, desc = "info", "other", ""
 
-        # Literal gate: no keyword → only the unproven patterns can possibly
-        # match (their relative order is preserved, so precedence holds).
-        if any(k in combined for k in _KEYWORDS):
-            candidates = _COMPILED
-        else:
-            candidates = _UNGUARDED
-        for pattern, p_sev, p_cat, p_desc in candidates:
+        # Custom user rules take precedence over the built-in KB.
+        for pattern, p_sev, p_cat, p_desc in _CUSTOM_RULES:
             if pattern.search(combined):
                 sev, cat, desc = p_sev, p_cat, p_desc
                 break
+
+        if not desc:
+            # Literal gate: no keyword → only the unproven patterns can possibly
+            # match (their relative order is preserved, so precedence holds).
+            if any(k in combined for k in _KEYWORDS):
+                candidates = _COMPILED
+            else:
+                candidates = _UNGUARDED
+            for pattern, p_sev, p_cat, p_desc in candidates:
+                if pattern.search(combined):
+                    sev, cat, desc = p_sev, p_cat, p_desc
+                    break
 
         if not desc:
             snippet = clean_message[:120].strip() or ev.appname or "General log message"

@@ -770,6 +770,34 @@ function render(r) {
     aTbody.appendChild(tr);
   });
 
+  // Unknown patterns (mined templates of lines no KB rule matched)
+  const up = r.unknown_patterns || {};
+  const upTemplates = up.top_templates || [];
+  const upPanel = $("unknown-panel");
+  if (upPanel) {
+    if (upTemplates.length) {
+      upPanel.style.display = "block";
+      $("unknown-count").textContent =
+        `(${up.template_count} templates · ${up.total_unclassified} lines)`;
+      const uTbody = $("unknown-table").querySelector("tbody");
+      clear(uTbody);
+      upTemplates.forEach((t) => {
+        const hostLabel = t.host_count > 3
+          ? `${t.host_count}: ${t.hosts.slice(0, 3).join(", ")}…`
+          : t.hosts.join(", ");
+        const tr = el("tr", { className: t.severity_hint !== "info" ? "sev-row-medium" : "" },
+          el("td", { text: t.severity_hint !== "info" ? "⚠" : "" }),
+          el("td", {}, el("span", { className: "row-msg", text: t.template })),
+          el("td", { text: String(t.count) }),
+          el("td", { text: hostLabel }),
+        );
+        uTbody.appendChild(tr);
+      });
+    } else {
+      upPanel.style.display = "none";
+    }
+  }
+
   // Events
   $("events-panel").style.display = "block";
   const totalEvents = (r.classified_events || []).length;

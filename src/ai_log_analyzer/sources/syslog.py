@@ -59,10 +59,12 @@ class SyslogListenerSource:
 
     def fetch(self, *, since_seconds: int = 3600, limit: int = 10_000,
               host_filter: str = "") -> Iterable[LogEvent]:
-        # Drain up to `limit` lines from the buffer (newest-last order preserved).
+        # Snapshot up to `limit` lines (newest-last order preserved) WITHOUT
+        # draining. Every other connector is idempotent; clearing here meant a
+        # correlate → triage sequence on the same source saw zero events on
+        # the second call. The deque's maxlen already bounds memory.
         with self._lock:
             lines = list(self._buffer)
-            self._buffer.clear()
         if limit and len(lines) > limit:
             lines = lines[-int(limit):]
         for ev in parse_lines(lines, default_host=host_filter or "syslog"):

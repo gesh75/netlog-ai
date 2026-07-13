@@ -35,7 +35,21 @@ from ai_log_analyzer.sources.manager import manager as source_manager
 
 log = logging.getLogger(__name__)
 
-_SITES_DIR = Path(__file__).resolve().parents[3] / "sites"
+def _resolve_sites_dir() -> Path:
+    """Same resolution order as the web app: env override → packaged data
+    (present in pip/Docker installs) → legacy repo-root layout. The old
+    repo-root-only lookup made list_sites/analyze_site return empty on any
+    `pip install netlog-ai[mcp]` wheel."""
+    override = os.environ.get("AI_LOG_ANALYZER_SITES_DIR", "")
+    if override:
+        return Path(override).expanduser()
+    packaged = Path(__file__).resolve().parents[1] / "data" / "sites"
+    if packaged.is_dir():
+        return packaged
+    return Path(__file__).resolve().parents[3] / "sites"
+
+
+_SITES_DIR = _resolve_sites_dir()
 
 
 def _build_server():
@@ -277,7 +291,7 @@ def _build_server():
         cross-device findings (BGP, OSPF, MTU, BFD, LLDP gaps + topology hints).
 
         Note: LLM usage is governed by the server-side LLM toggle, not a per-call
-        parameter — same behaviour as the web UI's /api/site/analyze endpoint.
+        parameter — same behaviour as the web UI's /api/optimize/site endpoint.
         """
         from ai_log_analyzer.analyzer import analyze_site as _analyze_site
         safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", site_id)

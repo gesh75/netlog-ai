@@ -151,9 +151,9 @@ class SourceManager:
                 username=fields.pop("username", ""),
                 password=fields.pop("password", ""),
                 cookies=cookies,
+                verify_tls=fields.pop("verify_tls", "true").lower() != "false",
+                timeout_seconds=float(fields.pop("timeout_seconds", "30")),
                 extra={k: v for k, v in fields.items() if v},
-                verify_tls=fields.get("verify_tls", "true").lower() != "false",
-                timeout_seconds=float(fields.get("timeout_seconds", "30")),
             )
             try:
                 self.add(cfg)
