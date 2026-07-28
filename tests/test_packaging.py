@@ -16,6 +16,7 @@ They are pure metadata assertions — no network, no build.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,17 @@ def _all_requirements() -> list[tuple[str, str]]:
     return pairs
 
 
+def _dist_name(requirement: str) -> str:
+    """Normalized (PEP 503) distribution name from a PEP 508 requirement string.
+
+    Matching on the parsed name rather than a substring matters here: `textfsm`
+    *contains* the substring "tfsm", and it is a plausible future dependency —
+    it is the maintained library the withdrawn package was built on.
+    """
+    name = re.split(r"[<>=!~;\[@\s]", requirement.strip(), maxsplit=1)[0]
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 def test_no_direct_reference_requirements():
     """PEP 508 direct references (`name @ url`) cannot be published to PyPI.
 
@@ -64,18 +76,37 @@ def test_no_direct_reference_requirements():
     )
 
 
+WITHDRAWN = {"tfsm-fire"}
+
+
 def test_no_withdrawn_tfsm_fire_dependency():
     """`tfsm-fire` is gone from PyPI — requiring it makes the package uninstallable.
 
     See docs/TFSM_AUTO_PARSER.md. The adapter stays; only the hard dependency is gone.
+
+    Deliberately matches the exact normalized distribution name, not a substring:
+    `textfsm` is a legitimate (and likely) future dependency that contains "tfsm".
     """
     offenders = [
-        (src, req) for src, req in _all_requirements() if "tfsm" in req.lower()
+        (src, req) for src, req in _all_requirements() if _dist_name(req) in WITHDRAWN
     ]
     assert not offenders, (
         "tfsm-fire was withdrawn from PyPI and its upstream repo deleted; requiring it "
         f"breaks install for all users: {offenders}"
     )
+
+
+def test_dist_name_parsing():
+    """_dist_name must key off the parsed name, or the guard above misfires."""
+    assert _dist_name("tfsm-fire>=0.1.0") == "tfsm-fire"
+    assert _dist_name("tfsm_fire >= 0.1.0") == "tfsm-fire"
+    assert _dist_name('tfsm-fire @ git+https://example.invalid/x.git') == "tfsm-fire"
+    assert _dist_name('mcp>=1.0,<2') == "mcp"
+    assert _dist_name('tomli>=2.0; python_version < "3.11"') == "tomli"
+    assert _dist_name("pytest-cov>=5.0") == "pytest-cov"
+    # The false positive this guard exists to avoid:
+    assert _dist_name("textfsm>=1.1.3") == "textfsm"
+    assert _dist_name("textfsm>=1.1.3") not in WITHDRAWN
 
 
 def test_all_extra_is_superset_of_named_extras():
