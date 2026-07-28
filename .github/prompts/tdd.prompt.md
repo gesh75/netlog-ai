@@ -3,9 +3,9 @@ mode: agent
 description: Write failing tests first for a change (TDD)
 ---
 
-Practise strict TDD for the change I describe.
+Practice strict TDD for the change I describe.
 
-1. Restate the behaviour in one sentence.
+1. Restate the behavior in one sentence.
 2. Write the tests **first**, covering happy path, boundaries, and error paths.
 3. Run them and show me they fail for the right reason - not an import or syntax error.
 4. Write the minimum implementation to make them pass.

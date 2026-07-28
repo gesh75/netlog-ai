@@ -1,16 +1,16 @@
 # Environment preparation for the GitHub Copilot coding agent.
 #
-# The agent runs ONLY the job named `copilot-setup-steps` from this file before it
-# starts work, so dependencies are already installed when it opens a PR.
+# The agent runs ONLY the job named `copilot-setup-steps` before it starts work,
+# so dependencies are already installed when it opens a PR.
 # https://docs.github.com/copilot/customizing-copilot/customizing-the-development-environment-for-copilot-coding-agent
+#
+# Deliberately NO `pull_request` trigger: a fork PR editing this file would
+# otherwise execute untrusted code on our runner.
 name: Copilot Setup Steps
 
 on:
   workflow_dispatch:
   push:
-    paths:
-      - .github/workflows/copilot-setup-steps.yml
-  pull_request:
     paths:
       - .github/workflows/copilot-setup-steps.yml
 
@@ -26,11 +26,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e '.[dev]' || { pip install -e .; pip install pytest pytest-cov ruff; }
+          # NOT '.[all,dev]': the 'all' extra pins tfsm-fire, which is not on PyPI.
+          python -m pip install -e '.[dev]'
