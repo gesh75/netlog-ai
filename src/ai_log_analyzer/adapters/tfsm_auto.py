@@ -13,17 +13,35 @@ tfsm_fire scores every TextFSM template in its SQLite DB against the input and r
 best match. We use it as a strict *fallback* — never the primary path — so regex stays fast
 and tfsm only runs when we don't already have a parser for the input.
 
+Upstream status (as of 2026-07-28) — READ THIS FIRST
+----------------------------------------------------
+`tfsm-fire` has been **withdrawn from PyPI**, and `github.com/scottpeterman/tfsm_fire`
+has been deleted. Both return 404; there is no surviving fork, mirror, or renamed
+distribution. It installed cleanly as recently as 2026-07-13, so older environments may
+still have it — but it can no longer be obtained, and the template-DB URL below is dead
+too. The `parse` extra that used to install it was removed in v0.5.1 because it made
+`pip install netlog-ai[parse]` and `[all]` unresolvable for everyone.
+
+This module is kept intact and fully functional for anyone who still has a copy of the
+package and a copy of the template DB. It is inert (never raises, always returns
+no-match) everywhere else.
+
 Soft-dependency
 ---------------
-`tfsm-fire` is an optional extra (`pip install netlog-ai[parse]`). All public functions return
-an empty/None result if the package isn't installed — they never raise. Use `is_available()`
-to gate UI affordances.
+All public functions return an empty/None result if the package isn't installed — they
+never raise. Use `is_available()` to gate UI affordances.
 
 Template DB
 -----------
-The pip package does NOT ship the 576KB SQLite template DB — it lives only in the upstream
-GitHub repo. We auto-download it once to `~/.cache/netlog-ai/tfsm_templates.db` on first use.
-Override with the `TFSM_DB_PATH` environment variable.
+The pip package never shipped the 576KB SQLite template DB — it lived only in the (now
+deleted) upstream GitHub repo. The auto-download below therefore fails on a stock setup.
+To use this adapter you must supply the DB yourself:
+
+    export TFSM_DB_PATH=/opt/netlog-ai/tfsm_templates.db   # local copy, or
+    export TFSM_DB_URL=https://your-mirror.example/tfsm_templates.db
+
+Templates originate from networktocode/ntc-templates, which is still maintained — a
+compatible DB can be rebuilt from that source.
 """
 from __future__ import annotations
 
@@ -36,9 +54,11 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Public-facing URL of the upstream template database. Pinned to the main branch.
-# Upstream has restructured before (the raw URL 404s when it does) — override
-# with TFSM_DB_URL to point at a mirror, or TFSM_DB_PATH at a local copy.
+# Historical URL of the upstream template database. The upstream repo was deleted in
+# July 2026, so this default now 404s and _ensure_db() will always fall through to the
+# "download failed" path unless you override it. Retained so environments that already
+# cached the DB keep working, and so it starts working again if upstream is ever
+# restored. Set TFSM_DB_URL to a mirror, or TFSM_DB_PATH to a local copy.
 _UPSTREAM_DB_URL = os.environ.get(
     "TFSM_DB_URL",
     "https://github.com/scottpeterman/tfsm_fire/raw/main/tfire/tfsm_templates.db",
