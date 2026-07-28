@@ -4,6 +4,73 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
+## [0.5.1] - 2026-07-28
+
+Packaging hotfix. **`pip install netlog-ai[all]` and `pip install netlog-ai[parse]`
+were failing for every user of the published package**, and CI was red on Python
+3.10 / 3.11 / 3.12.
+
+### Fixed
+
+- **Removed the withdrawn `tfsm-fire` dependency.** Upstream deleted the package from
+  PyPI *and* deleted `github.com/scottpeterman/tfsm_fire`, some time between
+  2026-07-13 (netlog-ai CI installed `tfsm_fire-0.1.0-py3-none-any.whl` cleanly that
+  day) and 2026-07-28 (both 404). There is no surviving fork, mirror, renamed
+  distribution, or Wayback snapshot — the dependency is simply unobtainable, so the
+  extras that required it could not resolve:
+
+  ```text
+  ERROR: Could not find a version that satisfies the requirement tfsm-fire>=0.1.0; extra == "all"
+  ERROR: No matching distribution found for tfsm-fire>=0.1.0; extra == "all"
+  ```
+
+  Repointing the extra at a `git+https://` URL was not an option — the repo is gone,
+  and PyPI rejects PEP 508 direct references in uploaded metadata regardless.
+
+- **Pinned the ruff rule selection**, fixing a *second*, independent CI break that the
+  install failure was masking. `[tool.ruff.lint]` set only `ignore`, never `select`, so
+  the repo inherited ruff's default rule set — while `dev` allows `ruff>=0.5`. ruff
+  0.16.0 broadened those defaults, turning an unmodified `main` from "All checks passed"
+  into **240 findings** with no code change (verified: ruff 0.15.21 passes on
+  `origin/main`, ruff 0.16.0 does not). Lint now explicitly selects `E4, E7, E9, F` —
+  ruff's historical defaults and the set this codebase was written against — so the
+  config no longer drifts with the tool version.
+
+- **Bounded the MCP SDK to `<2`**, fixing a *third* independent break. MCP SDK 2.0
+  removed `mcp.server.fastmcp` (it is now `mcp.server.mcpserver`), which
+  `mcp_server/server.py` imports; `mcp>=1.0` resolved to 2.0.0 and failed
+  `tests/test_mcp_tools.py` on unmodified `main`. Porting to the 2.x API is a real
+  migration and is tracked separately rather than bundled into a packaging hotfix.
+
+All three had the same underlying cause — unpinned dependencies drifting under a repo
+that had not run CI since 2026-07-13 — and each was masked by the one before it.
+
+### Changed
+
+- **`parse` extra removed.** `pip install netlog-ai[parse]` now warns that the extra
+  doesn't exist and installs the base package, instead of hard-failing.
+- **`all` extra reduced to `mcp>=1.0`** — it now installs everything it advertises.
+- **`docs/TFSM_AUTO_PARSER.md`** documents manual installation of `tfsm-fire` plus the
+  template DB for anyone who still has copies, and notes that the templates originate
+  from the still-maintained
+  [networktocode/ntc-templates](https://github.com/networktocode/ntc-templates).
+- CI installs the base `[dev]` set and the full `[dev,all]` set as separate steps, so a
+  broken base dependency can't hide behind the extras.
+
+### Added
+
+- `tests/test_packaging.py` — offline metadata guards: no PEP 508 direct references in
+  any dependency list (they build fine locally but cannot be uploaded to PyPI), no
+  `tfsm-fire` requirement, and `all` stays a superset of the other non-dev extras.
+
+### Unchanged
+
+- `adapters/tfsm_auto.py` and its public API are untouched. It has always been a strict
+  fallback parser that no other feature depends on, and it already degraded to
+  no-match — never raising — when the package or template DB was absent. Set
+  `TFSM_DB_PATH` / `TFSM_DB_URL` and install your own copy of `tfsm-fire` to keep using
+  it; `tests/test_tfsm_auto.py` skips at module level otherwise.
+
 ## [0.5.0] - 2026-07-13
 
 Research-driven wave (competitive study of 2026 NOC tooling — SSE-first live

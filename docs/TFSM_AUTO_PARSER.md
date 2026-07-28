@@ -1,8 +1,28 @@
 # Auto-Detection Parser (tfsm_fire integration)
 
-netlog-ai integrates [scottpeterman/tfsm_fire](https://github.com/scottpeterman/tfsm_fire)
-as an **opt-in fallback parser** for arbitrary CLI output where the platform and command
-aren't known up-front.
+> ## ⚠️ Upstream status: withdrawn (July 2026)
+>
+> `tfsm-fire` has been **removed from PyPI** and `github.com/scottpeterman/tfsm_fire` has
+> been **deleted**. Both return 404. There is no surviving fork, mirror, renamed
+> distribution, or Wayback snapshot, and the template-DB raw URL is dead too.
+>
+> It was installable as recently as **2026-07-13** (netlog-ai CI installed
+> `tfsm_fire-0.1.0-py3-none-any.whl` that day), so pre-existing environments may still
+> have it cached. But it can no longer be obtained from anywhere.
+>
+> **What changed in netlog-ai v0.5.1:** the `parse` extra was removed and `all` reduced
+> to `mcp` only. Keeping the dependency made `pip install netlog-ai[parse]` and
+> `pip install netlog-ai[all]` hard-fail for every user, and broke CI on all Python
+> versions. A `git+https://` direct reference was not an option: the repo is gone, and
+> PyPI rejects direct references in uploaded metadata regardless.
+>
+> **What did not change:** `adapters/tfsm_auto.py` and its API are untouched. The adapter
+> is a strict fallback that nothing else depends on, and it degrades to no-match when the
+> package or DB is absent. If you have a copy of both, everything below still works —
+> see [Installation](#installation).
+
+netlog-ai integrates `tfsm_fire` as an **opt-in fallback parser** for arbitrary CLI output
+where the platform and command aren't known up-front.
 
 ## Why
 
@@ -18,19 +38,35 @@ from ntc-templates) against the input, then returning the one with the highest s
 
 ## Installation
 
-```bash
-pip install -e ".[parse]"   # adds tfsm-fire + textfsm
-```
+There is no longer an extra for this — `pip install netlog-ai[parse]` was removed in
+v0.5.1 because the dependency is unobtainable (see the banner above). Both pieces must
+now be supplied manually.
 
-The template DB (~576 KB SQLite) is **not** bundled in the pip package. It's auto-downloaded
-from the upstream GitHub repo to `~/.cache/netlog-ai/tfsm_templates.db` on first use.
-
-Override the path with the `TFSM_DB_PATH` env var if you want to vendor it elsewhere
-(e.g. for an air-gapped environment):
+**1. The package.** You need a copy of `tfsm-fire` 0.1.0 (imports as `tfire`, depends on
+`textfsm>=1.1.3`). If you have one in an existing environment, an old wheel, or a private
+index:
 
 ```bash
-export TFSM_DB_PATH=/opt/netlog-ai/tfsm_templates.db
+pip install textfsm
+pip install /path/to/tfsm_fire-0.1.0-py3-none-any.whl   # or: pip install -e /path/to/checkout
 ```
+
+**2. The template DB** (~576 KB SQLite). This was never bundled in the pip package — it
+lived only in the upstream GitHub repo, which is gone. The auto-download will fail, so
+point the adapter at your own copy:
+
+```bash
+export TFSM_DB_PATH=/opt/netlog-ai/tfsm_templates.db     # local copy, or
+export TFSM_DB_URL=https://your-mirror.example/tfsm_templates.db
+```
+
+The templates came from [networktocode/ntc-templates](https://github.com/networktocode/ntc-templates),
+which is still actively maintained — a compatible DB can be rebuilt from that source if
+you no longer have the original.
+
+If either piece is missing, `is_available()` returns `False`, `auto_parse()` returns an
+unmatched `ParseResult`, and `tests/test_tfsm_auto.py` skips at module level. Nothing
+raises and no other feature is affected.
 
 ## Quick start
 
@@ -99,7 +135,7 @@ records = parse_output(cmd, filter_hint="bgp_summary")
 
 ### `is_available() -> bool`
 
-Cheap probe — use it to gate UI affordances when the `parse` extra isn't installed.
+Cheap probe — use it to gate UI affordances when `tfsm-fire` isn't installed.
 
 ## Scoring guide
 
@@ -151,7 +187,7 @@ The right mental model: tfsm_fire is the *parser of last resort* when nothing el
 
 ## References
 
-- Upstream repo: https://github.com/scottpeterman/tfsm_fire
-- Template source: https://github.com/networktocode/ntc-templates
+- Upstream repo: `https://github.com/scottpeterman/tfsm_fire` — **deleted, 404 as of 2026-07-28**
+- Template source: https://github.com/networktocode/ntc-templates (still maintained)
 - Our adapter: [`src/ai_log_analyzer/adapters/tfsm_auto.py`](../src/ai_log_analyzer/adapters/tfsm_auto.py)
 - Tests: [`tests/test_tfsm_auto.py`](../tests/test_tfsm_auto.py)
