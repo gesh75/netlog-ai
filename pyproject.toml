@@ -33,7 +33,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.5"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    # tests/test_packaging.py reads this file. Python 3.10 has no stdlib tomllib, and
+    # the test skips without a TOML parser — so on 3.10 the guard would silently stop
+    # guarding. pytest currently pulls tomli in transitively there; declare it so the
+    # guard doesn't depend on that continuing to be true.
+    'tomli>=2.0; python_version < "3.11"',
+]
 # Upper bound is deliberate: MCP SDK 2.0 removed `mcp.server.fastmcp` (now
 # `mcp.server.mcpserver`), which mcp_server/server.py imports. `mcp>=1.0` silently
 # resolved to 2.0.0 and broke test_mcp_tools.py on unmodified main. Porting to the

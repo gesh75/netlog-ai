@@ -17,8 +17,9 @@ pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# Skip if the optional extra isn't installed. The unit suite must stay green
-# in environments that haven't installed the `parse` extra.
+# Skip unless tfsm-fire is present. Since v0.5.1 there is no extra that installs
+# it — upstream withdrew the package — so this is a manual-install-only path and
+# these tests skip on every stock checkout. The unit suite must stay green there.
 # ---------------------------------------------------------------------------
 if not tfsm_auto.is_available():
     pytest.skip("tfsm-fire not installed — withdrawn from PyPI upstream, so there is no "
