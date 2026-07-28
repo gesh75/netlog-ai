@@ -1,8 +1,10 @@
 """Tests for the tfsm_fire auto-parsing adapter.
 
-These tests are skipped if `tfsm-fire` isn't installed (optional `parse` extra).
-They use real upstream templates against canned device output — no mocking — to
-prove the integration actually works end-to-end against scottpeterman's DB.
+These tests are skipped unless `tfsm-fire` is installed. Since v0.5.1 that means a
+manual install: upstream withdrew the package from PyPI and deleted its GitHub repo
+(see the adapter docstring), so there is no extra that can pull it in. They use real
+templates against canned device output — no mocking — to prove the integration
+actually works end-to-end when the dependency and template DB are present.
 """
 from __future__ import annotations
 
@@ -15,20 +17,21 @@ pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# Skip if the optional extra isn't installed. The unit suite must stay green
-# in environments that haven't installed the `parse` extra.
+# Skip unless tfsm-fire is present. Since v0.5.1 there is no extra that installs
+# it — upstream withdrew the package — so this is a manual-install-only path and
+# these tests skip on every stock checkout. The unit suite must stay green there.
 # ---------------------------------------------------------------------------
 if not tfsm_auto.is_available():
-    pytest.skip("tfsm-fire not installed (install with: pip install netlog-ai[parse])",
+    pytest.skip("tfsm-fire not installed — withdrawn from PyPI upstream, so there is no "
+                "extra to install it; supply your own copy to run these tests",
                 allow_module_level=True)
 
-# The template DB is a third-party download (upstream GitHub raw file). When
-# upstream is unreachable or has restructured (404), the adapter degrades to
-# no-match by design — skip the end-to-end tests rather than fail CI on an
-# external outage. Point TFSM_DB_URL at a mirror or TFSM_DB_PATH at a local
+# The template DB was a third-party download from the upstream GitHub raw file, which
+# no longer exists. The adapter degrades to no-match by design — skip the end-to-end
+# tests rather than fail CI. Point TFSM_DB_URL at a mirror or TFSM_DB_PATH at a local
 # copy to re-enable them.
 if tfsm_auto._get_engine() is None:
-    pytest.skip("tfsm_fire template DB unavailable (upstream download failed — "
+    pytest.skip("tfsm_fire template DB unavailable (upstream repo deleted — "
                 "set TFSM_DB_URL/TFSM_DB_PATH to a mirror or local copy)",
                 allow_module_level=True)
 

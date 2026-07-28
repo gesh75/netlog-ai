@@ -18,7 +18,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install
+      # Two-step so a broken *base* dependency set can't hide behind the extras,
+      # and so an unresolvable extra fails on a line that names the extra.
+      - name: Install (base + dev)
+        run: pip install -e ".[dev]"
+      - name: Install (all extras)
         run: pip install -e ".[dev,all]"
       - name: Lint
         run: ruff check src/ tests/

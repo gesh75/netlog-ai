@@ -324,7 +324,7 @@ flowchart TB
 |---|---|
 | **Language** | Python 3.10+ (frozen dataclasses, `typing.Protocol`, `re`) |
 | **Web / API** | Flask 3 · flask-cors · gunicorn · vanilla JS · Cytoscape.js + ELK |
-| **Ingest** | `requests` · raw AF_UNIX socket HTTP · `subprocess` (docker CLI) · optional tfsm-fire / TextFSM |
+| **Ingest** | `requests` · raw AF_UNIX socket HTTP · `subprocess` (docker CLI) · optional tfsm-fire / TextFSM (upstream withdrawn 2026-07 — manual install only, see [TFSM_AUTO_PARSER.md](TFSM_AUTO_PARSER.md)) |
 | **Intelligence** | Ollama · Docker Model Runner (OpenAI-compat) · Anthropic Claude (`claude-haiku-4-5`) · rule-based KB |
 | **Security** | `hashlib` (sha256 stable tokens) · `ipaddress` · sanitize-before-LLM gate · X-API-Token · CORS allow-list |
 | **Agent surface** | MCP SDK (FastMCP, optional) over stdio / streamable-http |
