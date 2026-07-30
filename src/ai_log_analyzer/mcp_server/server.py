@@ -76,7 +76,7 @@ def _build_server():
         raise RuntimeError(
             f"MCP SDK 2.x required (MCPServer at mcp.server.mcpserver); "
             f"found mcp {ver}. Upgrade with `pip install 'mcp>=2,<3'`."
-        ) from exp
+        ) from exc
 
     mcp = MCPServer("netlog-ai")
 
