@@ -43,13 +43,10 @@ dev = [
     # guard doesn't depend on that continuing to be true.
     'tomli>=2.0; python_version < "3.11"',
 ]
-# Upper bound is deliberate: MCP SDK 2.0 removed `mcp.server.fastmcp` (now
-# `mcp.server.mcpserver`), which mcp_server/server.py imports. `mcp>=1.0` silently
-# resolved to 2.0.0 and broke test_mcp_tools.py on unmodified main. Porting to the
-# 2.x API is a real migration, not a CI hotfix — tracked separately. Drop the bound
-# once server.py targets 2.x.
-mcp = ["mcp>=1.0,<2"]
-all = ["mcp>=1.0,<2"]
+# MCP SDK 2.x required (FastMCP was renamed to MCPServer and moved to
+# mcp.server.mcpserver). The server was ported in PR #20 / issue #17.
+mcp = ["mcp>=2,<3"]
+all = ["mcp>=2,<3"]
 # NOTE: there was a `parse = ["tfsm-fire>=0.1.0"]` extra here through v0.5.0.
 # Upstream withdrew `tfsm-fire` from PyPI and deleted github.com/scottpeterman/tfsm_fire
 # between 2026-07-13 (last green CI, which installed tfsm_fire-0.1.0) and 2026-07-28
