@@ -18,7 +18,8 @@ Tools exposed:
   - analyze_site          : run full site-wide analysis on a bundle
 
 The MCP SDK is an optional dependency — install with
-`pip install netlog-ai[mcp]` or `pip install mcp`.
+`pip install netlog-ai[mcp]` or `pip install 'mcp>=2,<3'`.
+Requires MCP SDK 2.x (MCPServer). See issue #17.
 """
 from __future__ import annotations
 
@@ -53,17 +54,31 @@ _SITES_DIR = _resolve_sites_dir()
 
 
 def _build_server():
-    """Construct the FastMCP server. Deferred import so the rest of the
-    package works even when the MCP SDK isn't installed."""
+    """Construct the MCPServer (MCP SDK 2.x). Deferred import so the rest of the
+    package works even when the MCP SDK isn't installed.
+
+    MCP SDK 2.0 renamed FastMCP → MCPServer and moved the import path to
+    `mcp.server.mcpserver`. The decorator surface (`@mcp.tool()`) is unchanged.
+    """
     try:
-        from mcp.server.fastmcp import FastMCP
-    except ImportError as exc:  # noqa: BLE001
+        from mcp.server.mcpserver import MCPServer
+    except ImportError as exc:
+        # Distinguish "SDK absent" from "SDK present but wrong major" so the next
+        # break reports itself accurately (issue #17).
+        try:
+            import mcp as _mcp
+        except ImportError:
+            raise RuntimeError(
+                "MCP SDK not installed. Run `pip install 'mcp>=2,<3'` "
+                "or `pip install netlog-ai[mcp]`."
+            ) from exc
+        ver = getattr(_mcp, "__version__", "unknown")
         raise RuntimeError(
-            "MCP SDK not installed. Run `pip install mcp` "
-            "or `pip install netlog-ai[mcp]`."
+            f"MCP SDK 2.x required (MCPServer at mcp.server.mcpserver); "
+            f"found mcp {ver}. Upgrade with `pip install 'mcp>=2,<3'`."
         ) from exc
 
-    mcp = FastMCP("netlog-ai")
+    mcp = MCPServer("netlog-ai")
 
     # ── inventory ────────────────────────────────────────────────────────────
     @mcp.tool()
@@ -334,7 +349,6 @@ def run(transport: str = "stdio") -> None:
     Auto-loads env-configured sources before serving so the MCP client sees
     them immediately on list_sources().
     """
-    # Eager-load env sources so tools like list_sources() work out of the box
     try:
         source_manager.load_from_env()
     except Exception:  # noqa: BLE001
@@ -343,8 +357,6 @@ def run(transport: str = "stdio") -> None:
     server = _build_server()
     if transport not in {"stdio", "streamable-http"}:
         raise ValueError(f"Unsupported transport: {transport!r}")
-    # FastMCP.run() accepts no kwargs in stdio mode; pass transport in
-    # streamable-http mode.
     if transport == "stdio":
         server.run()
     else:
