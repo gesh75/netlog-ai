@@ -1,8 +1,28 @@
 """Tests for log adapters (FRR + generic file)."""
+from unittest.mock import Mock
+
 import pytest
 
+from ai_log_analyzer.adapters import frr
 from ai_log_analyzer.adapters.file import parse_lines
 from ai_log_analyzer.adapters.frr import parse_frr_line
+
+
+@pytest.mark.unit
+def test_lab_container_inventory_excludes_unrelated_containerlab_nodes(monkeypatch):
+    """Only the bundled clab fabric may cross the docker-exec trust boundary."""
+    monkeypatch.setattr(frr.shutil, "which", lambda _binary: "/usr/bin/docker")
+    monkeypatch.setattr(
+        frr.subprocess,
+        "run",
+        Mock(return_value=Mock(stdout="\n".join((
+            "clab-clos-evpn-leaf1",
+            "clab-unrelated-linux",
+            "de-fra-core-01",
+        )))),
+    )
+
+    assert frr.list_lab_containers() == ["clab-clos-evpn-leaf1", "de-fra-core-01"]
 
 
 @pytest.mark.unit
