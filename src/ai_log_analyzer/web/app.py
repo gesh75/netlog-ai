@@ -682,8 +682,11 @@ def create_app() -> Flask:
                 # via body.pattern). Cap at 500 files for safety.
                 pattern = body.get("pattern", "*.log")
                 recursive = _parse_bool(body.get("recursive", True), default=True)
-                file_count = count_directory_files(p, pattern=pattern,
-                                                    recursive=recursive)
+                try:
+                    file_count = count_directory_files(p, pattern=pattern,
+                                                       recursive=recursive)
+                except ValueError as exc:
+                    return jsonify({"error": str(exc)}), 400
                 if file_count == 0:
                     return jsonify({
                         "error": f"No files matching {pattern!r} in {path}",
