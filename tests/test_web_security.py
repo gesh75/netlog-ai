@@ -98,6 +98,24 @@ def test_file_source_traversal_is_blocked(client, monkeypatch, tmp_path):
     assert r.status_code == 403
 
 
+@pytest.mark.unit
+def test_directory_source_pattern_cannot_escape_root(client, monkeypatch, tmp_path):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    (tmp_path / "secret.log").write_text("TOP SECRET\n", encoding="utf-8")
+    monkeypatch.setattr(web_app, "FILE_ROOTS", [tmp_path])
+
+    r = client.post("/api/analyze", json={
+        "source": "file",
+        "path": str(allowed),
+        "pattern": "../secret.log",
+        "recursive": False,
+        "use_llm": False,
+    })
+    assert r.status_code == 400
+    assert "path components" in r.get_json()["error"]
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # /api/llm/status redaction
 # ──────────────────────────────────────────────────────────────────────────────

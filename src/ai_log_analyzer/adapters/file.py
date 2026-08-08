@@ -1,7 +1,10 @@
 """Generic syslog/file adapter — parse RFC3164 / RFC5424 / freeform log files."""
 from __future__ import annotations
 
+import fnmatch
+import os
 import re
+from itertools import islice
 from pathlib import Path
 from typing import Iterable
 
@@ -48,6 +51,44 @@ _SCRT_RE = re.compile(
 # Filename pattern SecureCRT uses: "<hostname> (<ip>) -- YYYY-MM-DD_HH-MM"
 _SCRT_FILENAME_RE = re.compile(r"^(?P<host>[A-Za-z0-9][\w.\-]*)\s*\(")
 
+_MAX_DIRECTORY_FILES = 500
+_MAX_DIRECTORY_ENTRIES = 10_000
+
+
+def _validated_file_pattern(pattern: str) -> str:
+    """Accept a filename glob, but never a path that can escape the scan root."""
+    if not isinstance(pattern, str) or not pattern or pattern in {".", ".."}:
+        raise ValueError("directory pattern must be a non-empty filename glob")
+    if "/" in pattern or "\\" in pattern or ".." in pattern:
+        raise ValueError("directory pattern must not contain path components")
+    return pattern
+
+
+def _matching_files(path: Path, pattern: str, recursive: bool) -> Iterable[Path]:
+    pattern = _validated_file_pattern(pattern)
+    root = path.resolve()
+    pending = [root]
+    scanned = 0
+    while pending and scanned < _MAX_DIRECTORY_ENTRIES:
+        directory = pending.pop()
+        try:
+            entries = os.scandir(directory)
+        except OSError:
+            continue
+        with entries:
+            for entry in entries:
+                scanned += 1
+                if scanned > _MAX_DIRECTORY_ENTRIES:
+                    return
+                try:
+                    if recursive and entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
+                    elif (entry.is_file(follow_symlinks=False)
+                          and fnmatch.fnmatchcase(entry.name, pattern)):
+                        yield Path(entry.path)
+                except OSError:
+                    continue
+
 
 def parse_lines(lines: Iterable[str], default_host: str = "") -> Iterable[LogEvent]:
     """Parse any iterable of log lines, picking the first format that matches."""
@@ -73,7 +114,8 @@ def parse_file(path: str | Path, default_host: str = "") -> Iterable[LogEvent]:
 
 
 def parse_directory(path: str | Path, pattern: str = "*.log",
-                    recursive: bool = True, max_files: int = 500) -> Iterable[LogEvent]:
+                    recursive: bool = True,
+                    max_files: int = _MAX_DIRECTORY_FILES) -> Iterable[LogEvent]:
     """Parse every file in a directory matching `pattern` and yield all events
     in chronological-ish order (by filename sort, then by file order).
 
@@ -82,30 +124,28 @@ def parse_directory(path: str | Path, pattern: str = "*.log",
     sessions on the same device naturally group together).
 
     `max_files` is a safety cap to prevent accidental analysis of a 100K-file
-    directory. Set to 0 to disable.
+    directory. It cannot be disabled: non-positive values use the default cap.
     """
     p = Path(path)
     if not p.is_dir():
         raise ValueError(f"{p} is not a directory")
-    if recursive:
-        files = sorted(f for f in p.rglob(pattern) if f.is_file())
-    else:
-        files = sorted(f for f in p.glob(pattern) if f.is_file())
-    if max_files and len(files) > max_files:
-        files = files[:max_files]
+    limit = max_files if max_files > 0 else _MAX_DIRECTORY_FILES
+    # Apply the cap while iterating. Do not materialize and sort an attacker-
+    # controlled number of matches before truncating the result.
+    files = sorted(islice(_matching_files(p, pattern, recursive), limit))
     for f in files:
         yield from parse_file(f)
 
 
 def count_directory_files(path: str | Path, pattern: str = "*.log",
-                          recursive: bool = True) -> int:
-    """Cheap precheck — how many matching files would parse_directory ingest?"""
+                          recursive: bool = True,
+                          max_files: int = _MAX_DIRECTORY_FILES) -> int:
+    """Return a bounded count of files that ``parse_directory`` can ingest."""
     p = Path(path)
     if not p.is_dir():
         return 0
-    if recursive:
-        return sum(1 for f in p.rglob(pattern) if f.is_file())
-    return sum(1 for f in p.glob(pattern) if f.is_file())
+    limit = max_files if max_files > 0 else _MAX_DIRECTORY_FILES
+    return sum(1 for _ in islice(_matching_files(p, pattern, recursive), limit))
 
 
 def _parse_line(line: str, default_host: str) -> LogEvent | None:
