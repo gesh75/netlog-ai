@@ -108,10 +108,16 @@ def frr_docker_logs(
 def list_lab_containers(
     prefix_filter: tuple[str, ...] = (
         "de-", "uk-", "nl-", "us-",  # original FRR site-coded lab
-        "clab-",                     # containerlab multi-vendor fabric (clab-clos-evpn-*, etc.)
+    ),
+    name_filter: tuple[str, ...] = (
+        # Nodes in the bundled containerlab multi-vendor fabric.  Do not use
+        # the generic ``clab-`` prefix here: /api/run treats this inventory as
+        # the authorization boundary for its docker-exec fallback.
+        *(f"clab-clos-evpn-leaf{i}" for i in range(1, 7)),
+        *(f"clab-clos-evpn-spine{i}" for i in range(1, 4)),
     ),
 ) -> list[str]:
-    """Return running containers matching lab naming prefixes."""
+    """Return running containers belonging to the bundled labs."""
     if not shutil.which("docker"):
         return []
     try:
@@ -122,4 +128,4 @@ def list_lab_containers(
     except subprocess.CalledProcessError:
         return []
     names = [n.strip() for n in proc.stdout.splitlines() if n.strip()]
-    return sorted(n for n in names if n.startswith(prefix_filter))
+    return sorted(n for n in names if n.startswith(prefix_filter) or n in name_filter)
