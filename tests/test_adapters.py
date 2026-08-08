@@ -252,3 +252,47 @@ def test_count_directory_files_matches_glob(tmp_path):
     assert count_directory_files(tmp_path, pattern="*.log", recursive=False) == 2
     assert count_directory_files(tmp_path, pattern="*.log", recursive=True) == 3
     assert count_directory_files(tmp_path / "does-not-exist") == 0
+
+
+@pytest.mark.unit
+def test_directory_scan_rejects_path_patterns(tmp_path):
+    from ai_log_analyzer.adapters.file import count_directory_files, parse_directory
+
+    outside = tmp_path / "secret.log"
+    outside.write_text("TOP SECRET\n", encoding="utf-8")
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+
+    with pytest.raises(ValueError, match="path components"):
+        count_directory_files(allowed, pattern="../secret.log", recursive=False)
+    with pytest.raises(ValueError, match="path components"):
+        list(parse_directory(allowed, pattern="**/*.log"))
+
+
+@pytest.mark.unit
+def test_directory_scan_caps_before_materializing_matches(tmp_path, monkeypatch):
+    from ai_log_analyzer.adapters import file as file_adapter
+
+    visited = []
+
+    def matches(_path, _pattern, _recursive):
+        for index in range(1000):
+            visited.append(index)
+            yield tmp_path / f"{index:04}.log"
+
+    monkeypatch.setattr(file_adapter, "_matching_files", matches)
+    assert file_adapter.count_directory_files(tmp_path, max_files=3) == 3
+    assert len(visited) == 3
+
+
+@pytest.mark.unit
+def test_directory_scan_does_not_follow_file_symlinks(tmp_path):
+    from ai_log_analyzer.adapters.file import count_directory_files
+
+    outside = tmp_path / "secret.log"
+    outside.write_text("TOP SECRET\n", encoding="utf-8")
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    (allowed / "linked.log").symlink_to(outside)
+
+    assert count_directory_files(allowed) == 0
