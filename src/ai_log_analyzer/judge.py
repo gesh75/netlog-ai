@@ -29,6 +29,7 @@ import re
 from typing import Any
 
 from ai_log_analyzer import llm
+from ai_log_analyzer.sanitize import sanitize
 
 # Same placeholder pattern the analyzer scrubs — a playbook naming R1/SW2
 # instead of real inventory is hallucinating.
@@ -160,8 +161,12 @@ def judge_playbook_llm(deep: dict, devices: list[str] | None = None) -> dict[str
     """LLM pass — returns None when no provider is reachable or output is junk."""
     if not llm.is_enabled():
         return None
-    prompt = (f"AFFECTED DEVICES: {devices or ['unknown']}\n\n"
-              f"PLAYBOOK JSON:\n{json.dumps(deep, indent=1)[:6000]}\n\nScore it now.")
+    # Saved analysis results retain raw log samples for the local UI. Treat
+    # every field as untrusted before sending the playbook to a provider.
+    safe_devices, _ = sanitize(json.dumps(devices or ["unknown"]), mask_pii=True)
+    safe_deep, _ = sanitize(json.dumps(deep, indent=1), mask_pii=True)
+    prompt = (f"AFFECTED DEVICES: {safe_devices}\n\n"
+              f"PLAYBOOK JSON:\n{safe_deep[:6000]}\n\nScore it now.")
     text = llm.query(_LLM_JUDGE_PROMPT, prompt, max_tokens=200)
     if not text:
         return None
