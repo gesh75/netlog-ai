@@ -161,6 +161,33 @@ def test_judge_llm_blend_merges_scores(monkeypatch):
     assert v["scores"]["overall"] > heuristic_only["scores"]["overall"]
 
 
+def test_judge_llm_sanitizes_saved_log_samples(monkeypatch):
+    from ai_log_analyzer import llm
+    captured = {}
+
+    monkeypatch.setattr(llm, "is_enabled", lambda: True)
+
+    def capture_query(_system, prompt, **_kwargs):
+        captured["prompt"] = prompt
+        return json.dumps({
+            "actionability": 10, "safety": 10,
+            "grounding": 10, "completeness": 10,
+        })
+
+    monkeypatch.setattr(llm, "query", capture_query)
+    playbook = dict(GOOD_PLAYBOOK)
+    playbook["sample_messages"] = [
+        "neighbor 8.8.8.8 password 7 ULTRA_SECRET_CANARY username admin",
+    ]
+
+    assert judge.judge_playbook_llm(playbook) is not None
+    prompt = captured["prompt"]
+    assert "ULTRA_SECRET_CANARY" not in prompt
+    assert "8.8.8.8" not in prompt
+    assert "username admin" not in prompt
+    assert "<REDACTED>" in prompt
+
+
 # ── eval CLI ─────────────────────────────────────────────────────────────────
 
 def test_cli_eval_kb_self_test(capsys):
