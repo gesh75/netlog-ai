@@ -385,9 +385,11 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
                 break
 
         if not desc:
-            # Literal gate: no keyword → only the unproven patterns can possibly
-            # match (their relative order is preserved, so precedence holds).
-            if any(k in combined for k in _KEYWORDS):
+            # re.IGNORECASE has additional Unicode matches that plain lowercase
+            # substring checks do not, so only use the literal gate for ASCII.
+            # No keyword → only the unproven patterns can possibly match (their
+            # relative order is preserved, so precedence holds).
+            if not combined.isascii() or any(k in combined for k in _KEYWORDS):
                 candidates = _COMPILED
             else:
                 candidates = _UNGUARDED
