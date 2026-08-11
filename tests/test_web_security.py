@@ -65,6 +65,16 @@ def test_sources_test_and_fetch_require_token(client, monkeypatch):
     assert client.post("/api/rules", json={}).status_code == 401
 
 
+@pytest.mark.unit
+def test_incident_search_requires_token(client, monkeypatch):
+    """Incident history must not be searchable anonymously when tokened."""
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    url = "/api/incidents/similar?q=router"
+    assert client.get(url).status_code == 401
+    assert client.get(url, headers={"X-API-Token": "wrong"}).status_code == 401
+    assert client.get(url, headers={"X-API-Token": "sekrit"}).status_code != 401
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # /api/analyze {source:"file"} path confinement
 # ──────────────────────────────────────────────────────────────────────────────
