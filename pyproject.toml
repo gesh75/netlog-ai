@@ -30,6 +30,7 @@ dependencies = [
     "requests>=2.32",
     "python-dotenv>=1.0",
     "gunicorn>=23.0",
+    "regex>=2024.7.24",
 ]
 
 [project.optional-dependencies]

@@ -10,6 +10,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable, Iterator
 
+import regex
+
 # (regex, severity, category, description) — first match wins.
 # Patterns tested against f"{appname} {message}".lower()
 _KB_PATTERNS: list[tuple[str, str, str, str]] = [
@@ -191,7 +193,10 @@ _KEYWORDS = tuple(sorted(
 # Custom rules are checked BEFORE the built-in KB so operators can override
 # any built-in verdict. They bypass the literal gate — rule counts are small,
 # so the extra scans are negligible.
-_CUSTOM_RULES: list[tuple[re.Pattern[str], str, str, str]] = []
+_MAX_CUSTOM_RULES = 100
+_MAX_CUSTOM_PATTERN_LENGTH = 512
+_CUSTOM_REGEX_TIMEOUT_SECONDS = 0.01
+_CUSTOM_RULES: list[tuple[regex.Pattern, str, str, str]] = []
 
 
 def add_custom_rules(rules: list[dict]) -> tuple[int, list[str]]:
@@ -203,6 +208,9 @@ def add_custom_rules(rules: list[dict]) -> tuple[int, list[str]]:
     """
     added, errors = 0, []
     for i, rule in enumerate(rules):
+        if len(_CUSTOM_RULES) >= _MAX_CUSTOM_RULES:
+            errors.append(f"rule {i}: custom rule limit ({_MAX_CUSTOM_RULES}) reached")
+            continue
         if not isinstance(rule, dict):
             errors.append(f"rule {i}: not an object")
             continue
@@ -213,9 +221,17 @@ def add_custom_rules(rules: list[dict]) -> tuple[int, list[str]]:
         if severity not in SEV_ORDER:
             errors.append(f"rule {i}: invalid severity {severity!r}")
             continue
+        if not isinstance(pattern, str) or not pattern:
+            errors.append(f"rule {i}: pattern must be a non-empty string")
+            continue
+        if len(pattern) > _MAX_CUSTOM_PATTERN_LENGTH:
+            errors.append(
+                f"rule {i}: pattern exceeds {_MAX_CUSTOM_PATTERN_LENGTH} characters"
+            )
+            continue
         try:
-            compiled = re.compile(pattern, re.IGNORECASE)
-        except re.error as exc:
+            compiled = regex.compile(pattern, regex.IGNORECASE)
+        except regex.error as exc:
             errors.append(f"rule {i}: bad regex: {exc}")
             continue
         _CUSTOM_RULES.append((compiled, severity, category, description))
@@ -355,7 +371,15 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
 
         # Custom user rules take precedence over the built-in KB.
         for pattern, p_sev, p_cat, p_desc in _CUSTOM_RULES:
-            if pattern.search(combined):
+            try:
+                matched = pattern.search(
+                    combined, timeout=_CUSTOM_REGEX_TIMEOUT_SECONDS
+                )
+            except TimeoutError:
+                # Treat pathological rules as non-matches rather than letting
+                # attacker-controlled log text monopolize a worker.
+                matched = None
+            if matched:
                 sev, cat, desc = p_sev, p_cat, p_desc
                 confidence = 1.0
                 break
@@ -419,4 +443,3 @@ def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], 
     classified.sort(key=lambda e: e.timestamp, reverse=True)
     classified.sort(key=lambda e: SEV_ORDER.get(e.severity, 5))
     return classified, sev_counts, cat_counts
-

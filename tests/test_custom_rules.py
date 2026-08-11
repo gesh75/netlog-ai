@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -62,6 +63,37 @@ def test_invalid_rules_are_skipped_with_errors():
     ])
     assert added == 1
     assert len(errors) == 3
+
+
+def test_custom_rule_catastrophic_backtracking_is_bounded():
+    added, errors = classifier.add_custom_rules([{
+        "pattern": r"(a+)+$", "severity": "high",
+    }])
+    assert added == 1 and not errors
+
+    started = time.monotonic()
+    events, _, _ = classify_events([_event("a" * 10_000 + "!")])
+    assert time.monotonic() - started < 1
+    assert events[0].severity == "info"
+
+
+def test_custom_rule_count_and_pattern_length_are_limited():
+    rules = [{"pattern": f"rule-{i}", "severity": "low"}
+             for i in range(classifier._MAX_CUSTOM_RULES + 1)]
+    added, errors = classifier.add_custom_rules(rules)
+    assert added == classifier._MAX_CUSTOM_RULES
+    assert errors == [
+        f"rule {classifier._MAX_CUSTOM_RULES}: custom rule limit "
+        f"({classifier._MAX_CUSTOM_RULES}) reached"
+    ]
+
+    classifier._CUSTOM_RULES.clear()
+    added, errors = classifier.add_custom_rules([{
+        "pattern": "x" * (classifier._MAX_CUSTOM_PATTERN_LENGTH + 1),
+        "severity": "low",
+    }])
+    assert added == 0
+    assert "exceeds" in errors[0]
 
 
 def test_load_custom_rules_file(tmp_path):
