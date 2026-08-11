@@ -21,11 +21,23 @@ from typing import Any
 
 import requests
 
+from ai_log_analyzer.sanitize import sanitize
+
 logger = logging.getLogger(__name__)
 
 _SEV_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 _TIMEOUT_S = 5
 _MAX_ACTION_ITEMS = 5
+
+
+def _sanitize_text(value: Any) -> str:
+    """Remove secrets and PII from an analysis-derived payload field."""
+    return sanitize(str(value), mask_pii=True)[0]
+
+
+def _slack_text(value: Any) -> str:
+    """Sanitize user-controlled text and disable Slack link/mention parsing."""
+    return _sanitize_text(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _config() -> tuple[str, str, str]:
@@ -63,11 +75,11 @@ def build_payload(result: dict[str, Any], source: str, fmt: str, min_severity: s
     summary + top action items — payloads stay small and post-sanitize."""
     top_actions = [
         {
-            "severity": a.get("severity", ""),
-            "category": a.get("category", ""),
-            "description": a.get("description", ""),
+            "severity": _sanitize_text(a.get("severity", "")),
+            "category": _sanitize_text(a.get("category", "")),
+            "description": _sanitize_text(a.get("description", "")),
             "count": a.get("count", 0),
-            "devices": a.get("devices", [])[:5],
+            "devices": [_sanitize_text(device) for device in a.get("devices", [])[:5]],
         }
         for a in result.get("action_items", [])[:_MAX_ACTION_ITEMS]
     ]
@@ -75,19 +87,19 @@ def build_payload(result: dict[str, Any], source: str, fmt: str, min_severity: s
         alerting = _alerting_counts(result, min_severity)
         sev_line = ", ".join(f"{n} {sev}" for sev, n in alerting.items()) or "events"
         lines = [
-            f":rotating_light: *netlog-ai* — {sev_line} from *{source}* "
+            f":rotating_light: *netlog-ai* — {sev_line} from *{_slack_text(source)}* "
             f"(health {result.get('score', '?')}/100, grade {result.get('grade', '?')})"
         ]
         lines += [
-            f"• [{a['severity'].upper()}] {a['description']} "
-            f"(×{a['count']} on {', '.join(a['devices']) or 'n/a'})"
+            f"• [{_slack_text(a['severity']).upper()}] {_slack_text(a['description'])} "
+            f"(×{a['count']} on {', '.join(_slack_text(d) for d in a['devices']) or 'n/a'})"
             for a in top_actions
         ]
         return {"text": "\n".join(lines)}
     return {
         "source": "netlog-ai",
         "event": "analysis_completed",
-        "input": source,
+        "input": _sanitize_text(source),
         "score": result.get("score"),
         "grade": result.get("grade"),
         "severity_counts": result.get("severity_counts", {}),

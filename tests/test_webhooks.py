@@ -67,6 +67,31 @@ def test_slack_payload_shape():
     assert "medium" not in p["text"].split("\n")[0]  # below threshold not in headline
 
 
+@pytest.mark.unit
+def test_payloads_redact_raw_log_secrets_and_slack_mentions():
+    result = {
+        **RESULT,
+        "action_items": [{
+            "severity": "high",
+            "category": "system",
+            "description": "snmp-server community TopSecretRO ro <!channel>",
+            "count": 1,
+            "devices": ["8.8.8.8"],
+        }],
+    }
+
+    generic = webhooks.build_payload(result, "snmp-server community SourceSecret ro",
+                                     "generic", "high")
+    assert "TopSecretRO" not in generic["action_items"][0]["description"]
+    assert "SourceSecret" not in generic["input"]
+    assert generic["action_items"][0]["devices"][0].startswith("PUB-")
+
+    slack = webhooks.build_payload(result, "raw <!channel>", "slack", "high")["text"]
+    assert "TopSecretRO" not in slack
+    assert "<!channel>" not in slack
+    assert "&lt;!channel&gt;" in slack
+
+
 # ── delivery ─────────────────────────────────────────────────────────────────
 
 class _Resp:
