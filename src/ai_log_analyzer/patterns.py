@@ -29,6 +29,8 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .sanitize import sanitize
+
 logger = logging.getLogger(__name__)
 
 # Masking rules applied before tokenization, most specific first.
@@ -125,7 +127,8 @@ class TemplateMiner:
 
     def add(self, message: str, hostname: str = "") -> TemplateCluster:
         """Feed one raw message; returns the cluster it joined or created."""
-        masked = mask_message(message.strip())
+        safe_message, _ = sanitize(message.strip())
+        masked = mask_message(safe_message)
         tokens = masked.split()
         if len(tokens) > self.max_tokens:
             tokens = tokens[: self.max_tokens]
@@ -230,7 +233,8 @@ class TemplateStore:
         if isinstance(data, list):
             for t in data[-self.max_entries:]:
                 if isinstance(t, str):
-                    self._templates[t] = None
+                    safe_template, _ = sanitize(t)
+                    self._templates[safe_template] = None
 
     def __contains__(self, template: str) -> bool:
         return template in self._templates
@@ -243,7 +247,7 @@ class TemplateStore:
         templates into the store, and return the new-template count."""
         new_count = 0
         for cluster in miner._clusters.values():
-            t = cluster.template
+            t, _ = sanitize(cluster.template)
             if t not in self._templates:
                 cluster.is_new = True
                 new_count += 1
@@ -258,8 +262,14 @@ class TemplateStore:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            tmp.write_text(json.dumps(list(self._templates)), encoding="utf-8")
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(tmp, flags, 0o600)
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as store_file:
+                json.dump(list(self._templates), store_file)
             tmp.replace(self.path)
+            self.path.chmod(0o600)
         except OSError as exc:
             logger.warning("could not persist template store to %s: %s", self.path, exc)
 
