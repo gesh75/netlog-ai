@@ -830,6 +830,7 @@ def create_app() -> Flask:
 
     # ── Incident memory ────────────────────────────────────────────────────
     @app.route("/api/incidents/similar", methods=["GET"])
+    @require_api_token
     def api_incidents_similar():
         """Free-text search over the local incident journal.
 
