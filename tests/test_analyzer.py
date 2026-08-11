@@ -251,6 +251,39 @@ def test_executive_summary_llm_prompt_anchors_hostnames(monkeypatch):
 
 
 @pytest.mark.unit
+def test_executive_summary_caps_hostname_anchors(monkeypatch):
+    """Attacker-amplified action items must not grow the LLM hostname list."""
+    from ai_log_analyzer import llm
+    from ai_log_analyzer.analyzer import ActionItem, _executive_summary
+
+    captured = {}
+
+    def fake_query(system: str, user: str, max_tokens: int = 400) -> str:
+        captured["user"] = user
+        return "• Investigate the top affected devices"
+
+    monkeypatch.setattr(llm, "query", fake_query)
+    items = [
+        ActionItem(severity="high", category="routing",
+                   description=f"Unique failure {i}", count=1,
+                   devices=[f"host{i:03d}"], sample_messages=[])
+        for i in range(100)
+    ]
+
+    _executive_summary(
+        sev_counts={"critical": 0, "high": 100, "medium": 0},
+        cat_counts={"routing": 100},
+        score=0, grade="F", grade_label="Critical",
+        items=items, use_llm=True,
+    )
+
+    hostname_line = captured["user"].splitlines()[0]
+    assert "host000" in hostname_line and "host004" in hostname_line
+    assert "host005" not in hostname_line and "host099" not in hostname_line
+    assert "Additional hostname references omitted: 95" in captured["user"]
+
+
+@pytest.mark.unit
 def test_executive_summary_scrubs_placeholders_in_llm_output(monkeypatch):
     """LLM that still emits R1/SW2 → bullet gets [hostname?] substitution."""
     from ai_log_analyzer import llm
