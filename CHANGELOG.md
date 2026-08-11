@@ -4,6 +4,13 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+
+- Secret-sanitize cross-run template memory before persistence and force its JSON
+  file to owner-only permissions.
+
 ## [0.5.1] - 2026-07-28
 
 Packaging hotfix. **`pip install netlog-ai[all]` and `pip install netlog-ai[parse]`

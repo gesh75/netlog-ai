@@ -1,6 +1,9 @@
 """Tests for the unknown-pattern template miner (patterns.py)."""
 from __future__ import annotations
 
+import json
+import stat
+
 import pytest
 
 from ai_log_analyzer.patterns import TemplateMiner, mask_message
@@ -144,6 +147,23 @@ def test_template_store_flags_new_templates_across_runs(tmp_path):
     by_template = {c.template: c for c in m2.top(10)}
     assert by_template["thermal envelope exceeded on chip <n>"].is_new is False
     assert by_template["gravity plating desynchronized"].is_new is True
+
+
+def test_template_store_redacts_secrets_and_uses_owner_only_permissions(tmp_path):
+    from ai_log_analyzer.patterns import TemplateStore
+
+    store_path = tmp_path / "templates.json"
+    miner = TemplateMiner()
+    miner.add("maintenance neighbor 192.0.2.10 password 7 FakeCredentialValue")
+
+    store = TemplateStore(store_path)
+    store.mark_and_update(miner)
+    store.save()
+
+    persisted = store_path.read_text(encoding="utf-8")
+    assert "FakeCredentialValue" not in persisted
+    assert "<REDACTED>" in json.loads(persisted)[0]
+    assert stat.S_IMODE(store_path.stat().st_mode) == 0o600
 
 
 def test_template_store_bounded_and_corrupt_file_tolerated(tmp_path):
