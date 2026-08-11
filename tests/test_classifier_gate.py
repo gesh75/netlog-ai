@@ -55,6 +55,19 @@ def test_guarded_pattern_still_matches():
 
 
 @pytest.mark.unit
+def test_non_ascii_ignorecase_match_bypasses_literal_gate():
+    events = [LogEvent(timestamp="2026-01-01T00:00:00", hostname="r1",
+                       appname="authd", severity_raw="err",
+                       message="authentıcation faıl")]
+
+    classified, _, _ = classify_events(events)
+
+    assert classified[0].severity == "high"
+    assert classified[0].category == "security"
+    assert classified[0].description == "Authentication failure"
+
+
+@pytest.mark.unit
 def test_unmatched_line_stays_info():
     events = [LogEvent(timestamp="2026-01-01T00:00:00", hostname="r1",
                        appname="cron", severity_raw="info",
