@@ -464,11 +464,17 @@ def _executive_summary(
     use_llm: bool,
 ) -> tuple[list[str], bool]:
     if use_llm:
-        # Collect the real hostnames from validated action items — single source
-        # of truth for the LLM. Anything outside this list is a hallucination.
+        # Keep hostname anchoring aligned with the bounded action-item details
+        # below.  Do not serialize every action item's devices: callers can
+        # create many distinct action items and otherwise grow the LLM prompt
+        # without bound.
+        anchor_items = items[:5]
         allowed_hostnames = sorted({
-            h.lower() for a in items for h in (a.devices or []) if h
+            h.lower() for a in anchor_items for h in (a.devices or [])[:5] if h
         })
+        omitted_hostnames = sum(len(a.devices or []) for a in items) - sum(
+            min(5, len(a.devices or [])) for a in anchor_items
+        )
         sys_prompt = (
             "You are a senior network engineer writing a 4-6 bullet executive summary for a "
             "network operations standup. Each bullet must be specific (with device names + numbers), "
@@ -486,6 +492,7 @@ def _executive_summary(
         ]
         user_prompt = (
             f"ALLOWED_HOSTNAMES (use only these exact names): {allowed_hostnames}\n\n"
+            f"Additional hostname references omitted: {omitted_hostnames}\n"
             f"Score: {score}/100 (grade {grade} — {grade_label})\n"
             f"Severity: critical={sev_counts.get('critical', 0)}, "
             f"high={sev_counts.get('high', 0)}, medium={sev_counts.get('medium', 0)}\n"
