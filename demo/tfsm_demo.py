@@ -74,6 +74,7 @@ Neighbor        V         AS   MsgRcvd   MsgSent   TblVer  InQ OutQ  Up/Down Sta
 
     hdr("Threshold filtering (min_score=40 in production)")
     r = auto_parse("random log line nothing structured here at all",
+                   filter_hint="lldp_neighbor",
                    min_score=40.0)
     show("matched", r.matched)
     show("score", f"{r.score:.1f}")
