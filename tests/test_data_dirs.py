@@ -6,6 +6,8 @@ and Docker images boot with demo content; env vars override for custom data.
 from __future__ import annotations
 
 
+import re
+
 import pytest
 
 from ai_log_analyzer.web.app import SAMPLES_DIR, SITES_DIR, STATIC_DIR, _data_dir
@@ -48,9 +50,21 @@ def test_samples_stay_pseudonymized():
 
 
 @pytest.mark.unit
+def test_bundled_sites_do_not_contain_credentials():
+    """Public wheels must contain only sanitized site configurations."""
+    credential_patterns = (
+        re.compile(r"\$(?:6|y|aes1)\$(?!REDACTED)"),
+        re.compile(r"-----BEGIN (?:ENCRYPTED )?PRIVATE KEY-----"),
+    )
+    for config in SITES_DIR.rglob("*.txt"):
+        text = config.read_text(errors="replace")
+        for pattern in credential_patterns:
+            assert not pattern.search(text), f"{config} contains credential material"
+
+
+@pytest.mark.unit
 def test_index_html_has_no_cdn_scripts():
     """Air-gap guard: the UI must not load JS from external CDNs."""
     html = (STATIC_DIR / "index.html").read_text()
-    import re
     external = re.findall(r'<script[^>]+src="(https?://[^"]+)"', html)
     assert not external, f"external scripts found: {external}"

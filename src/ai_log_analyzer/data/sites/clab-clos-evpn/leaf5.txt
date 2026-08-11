@@ -1885,7 +1885,7 @@
                     ]
                 }
                 linuxadmin-user {
-                    password $y$j9T$XvJnmFLaz/uudk.SUG0.J0$K4un1F9/0nyiPJmBAPKhWooaRb7bKSkeItXyVnnlTSC
+                    password <redacted>
                     ssh-key [
                         "<REDACTED-SSH-KEY>"
                     ]
@@ -1911,7 +1911,7 @@
         }
         tls {
             server-profile clab-profile {
-                key $aes1$ATC9nGpTSCuNUm8=$k6eYboQ9TKuILFp76WugkoOPNs/AWwyXQxLOnPCYiiDUtht2vQU/KXvbUMNoNFuS+IAkAhtiz7IGnMbEXFDmmRKjLmN+XoRnuOz9B/oazBL5MVx3lcHXiitAF4tj6+ElrhjsGTIFEFEZux5qlnEslwF4/mc8w5GppPCjvjd2AQnJ2uzFZsoyFq8p8fvSwS6UNNeV8gr9Xr/5NDq6ZqjjsOxt7ocDKC9UeW/V48FIicobAl0ILjqdVqIoClE4a+5xrUBYdevNf1PbIMpCpXLOOXHrllQiUEckhz5HSOgMZ0Q1QuOWVbJ+SpGFaGM1POhzCBcmDzMSsmcGB7w3EOSUWfxOgWjw0H4BRz9GaZO/TXqJ/xo2wy/dsn8cb7cH7oGF7UIzWHBejdjw0q8kbhBV+r6auqF9TkPOYWccsbeLwy7xa7/rblfSgmvdG/w30rOt6vYchD+KkMbXzMsh5trU5ySDzMxHEs8Arx7E+FdSwfo9b7Bx1yP8IjdSbdqTGhJfLs9rdq2z+2FvC3QyMInbswakygNLGKip19KcKbXF7rWGqAOm5Mw4uhQkSOW0Xz5Pqu3JEagXRbtpj1033evsrL63W0VrzV8otjZyitz8jXvaf1aU3tP03Sb7Qv1k8e4Gk0gzhbgxIGVEMSHl3PpwLWOihEu/Dm/8oyasb4a1s7vFibT9Ze37uXsecPnMWrH0CFt5cBuNX2KoKfEWHim9Fdft5WbDnucvU3qVBPByP1BEPIlozhgS3ACHO1qsljikl9vmMmmiWbPHHqNkoslAtRmz8qDijzSwq3i1nvrSZ0rBNYcoIb8cMifqKSkcy72sI+iqAU8GZf4bzpQCetx+4w261tz+0lXa80+wK/fPm/uWmvxfgk9l0DeTjgmvuGK0bfO1IpaGE3mT59o7LjqC61BBaHuIwlnNyYtGL40AKZ+YqcgdZ5rQAIQ7U4GceF+fpZBmZBf7c0MOIf1gxV+t5pDCJg+ZVjeO84w5R/gt9/PokzZXIoWDf5ENoYGDVeHYCxNAhfHdeSWsYjOM5OTNBJgcjYhE4ZliQyF6h7Uk+HytTVIu65GK3qxTDJYbpie//MVKH/7yVqKxrHe+vMmIKaXhcFK+B/mFqbUWEUZRZ3LwQbnsFiKPW2OwxoIxjlp0JNdpwLknaQueA1OwtN/PZXNyVjH5ObXfgoKrpxVmnJebgveTzxLn/bFy6Zmp5l1JMjIeRfrjGscNrsO23PGONxWlKPD5z/wm6bj71ASvWhDieIRru805WrMXvVe0en9nBPCW2pSVtQOZ0Uznz3VU2BnXLJ9JSRhg+tvPTj7kITF8tCzQJPK/6KYoQb5TGyKj76/vmhO4YaCcLbfxItHuGRmQDQ4Ch7Qby3bbSTauRhRdNzZEh2FgiV2yTPAxNfp58q+NoNGxgp4yQbTN5J16/SyHeQqNo27vTbbQIatdCWTnrVGaXUeGzmNnhaarbba/pdExwgquIL8GGiswJmUNRcoaEI202NQlYjc0xVi4Fg1aS3EEV7UF3E/RTc6yLYgsmugjHC3uy0Fmq79xp59dk8w4ZY1lU/avHPvARc2XezQt/eslRFVgIo9aq6rTCARTs9DqwKyrgZq9PcZUYL13SiVcIOlODiSqbP2Y+p62QrOUCU819fVVLxF7hy2AFpwI9abV/4hGdoZG+mpDghKvv4350/e5Sooc9+QhjN4PFTftjUNNIINFesBnlXdMMIgHyb7k9SM52UWbsVbdPOgLSvMetaioFQEFptr+Jm8lpS1vATft4wROBaNo4kzu7b3/nsCrSbRUVIbm1Uxvr8OQbkRt1W+WCfh9cy2is0tGqXGdalmPSii8G7KdIeWkWvWopwCPRwKnaI3Cc0zVMLHKFYUE1LfKScNxMHb76Ua14lfz7bACq96AqaVfgtebPU2EiBQ18gCC48IQwutqgOk8G6jSh/G+3flTUz1j3lcIdYtmp87atkzINFsek9OILSyAH/l76s8p+Y6CFLXyLlODD1IlFkrVPZWLW0ov19sIXYk/ygMEdqUMIURKHRKfNDlAAWVtZ9QdEwr0q5CmAGGwq1ByRHtK/xuikry6O/kHwjRsE97vTe21SUhawjdaezeezpAxj8+0JZf/ajR09wcEIE2MmwfncYCEciqc5tJvksdatobZUGFRtuhGJ6urAt5iMVVk8p1ctlMhJoMNPUaiIrg7sbYkFu3QbvgO8KmGDejF4m5gvRTF1/hId1PFL7td
+                key <redacted>
                 certificate "-----BEGIN CERTIFICATE-----
 <REDACTED-CERTIFICATE>
 -----END CERTIFICATE-----
@@ -2023,7 +2023,7 @@
             access-group SNMPv2-RO-Community {
                 security-level no-auth-no-priv
                 community-entry RO-Community {
-                    community $aes1$AWBpAhWLuP1acG8=$A6lGNrYiHPX93kJSaDly/g==
+                    community <redacted>
                 }
             }
             network-instance mgmt {
