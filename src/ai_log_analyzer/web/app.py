@@ -650,7 +650,16 @@ def create_app() -> Flask:
         events: list[LogEvent] = []
 
         if source == "frr":
-            containers = body.get("containers") or frr.list_lab_containers()
+            requested = body.get("containers")
+            if requested is not None and not isinstance(requested, list):
+                return jsonify({"error": "containers must be a list of names"}), 400
+            containers, rejected = frr.authorize_lab_containers(requested)
+            if rejected:
+                return jsonify({
+                    "error": "containers outside the lab allow-list",
+                    "rejected": rejected,
+                    "hint": "Only bundled FRR / containerlab nodes may be read via docker logs",
+                }), 403
             if not containers:
                 return jsonify({"error": "No FRR containers found running"}), 404
             for c in containers:

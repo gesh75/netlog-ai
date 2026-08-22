@@ -129,3 +129,29 @@ def list_lab_containers(
         return []
     names = [n.strip() for n in proc.stdout.splitlines() if n.strip()]
     return sorted(n for n in names if n.startswith(prefix_filter) or n in name_filter)
+
+
+def is_lab_container(name: str) -> bool:
+    """True if `name` is in the running bundled-lab inventory.
+
+    ``list_lab_containers`` is the authorization boundary for docker logs /
+    docker exec from the web API. Caller-supplied names must pass this check
+    so a request cannot read an unrelated container on the same Docker host.
+    """
+    if not isinstance(name, str) or not name:
+        return False
+    return name in set(list_lab_containers())
+
+
+def authorize_lab_containers(requested: list | None) -> tuple[list[str], list[str]]:
+    """Split caller-supplied names into (allowed, rejected) against the inventory.
+
+    ``requested`` of None / empty means "use the full running inventory".
+    """
+    inventory = list_lab_containers()
+    allow = set(inventory)
+    if not requested:
+        return inventory, []
+    names = [str(c) for c in requested]
+    rejected = [c for c in names if c not in allow]
+    return [c for c in names if c in allow], rejected

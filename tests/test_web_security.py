@@ -127,6 +127,83 @@ def test_directory_source_pattern_cannot_escape_root(client, monkeypatch, tmp_pa
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# /api/analyze {source:"frr"} docker-logs allow-list
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_frr_source_rejects_containers_outside_lab_allowlist(client, monkeypatch):
+    """Caller-supplied container names must be in list_lab_containers().
+    Otherwise docker logs would read any container on the host."""
+    import ai_log_analyzer.adapters.frr as frr
+
+    monkeypatch.setattr(frr, "list_lab_containers", lambda: ["de-fra-core-01"])
+    called: list[str] = []
+
+    def _should_not_run(container, tail=500, since=None):
+        called.append(container)
+        return []
+
+    monkeypatch.setattr(frr, "frr_docker_logs", _should_not_run)
+    r = client.post("/api/analyze", json={
+        "source": "frr",
+        "containers": ["postgres"],
+        "use_llm": False,
+    })
+    assert r.status_code == 403
+    body = r.get_json()
+    assert "allow-list" in body["error"]
+    assert body["rejected"] == ["postgres"]
+    assert called == []
+
+
+@pytest.mark.unit
+def test_frr_source_rejects_mixed_allowlist_and_foreign(client, monkeypatch):
+    """A mixed list fails closed — do not silently analyze the allowed subset."""
+    import ai_log_analyzer.adapters.frr as frr
+
+    monkeypatch.setattr(frr, "list_lab_containers", lambda: ["de-fra-core-01"])
+    called: list[str] = []
+    monkeypatch.setattr(
+        frr, "frr_docker_logs",
+        lambda container, tail=500, since=None: called.append(container) or [],
+    )
+    r = client.post("/api/analyze", json={
+        "source": "frr",
+        "containers": ["de-fra-core-01", "vault"],
+        "use_llm": False,
+    })
+    assert r.status_code == 403
+    assert r.get_json()["rejected"] == ["vault"]
+    assert called == []
+
+
+@pytest.mark.unit
+def test_frr_source_allows_inventory_container(client, monkeypatch):
+    import ai_log_analyzer.adapters.frr as frr
+    from ai_log_analyzer.classifier import LogEvent
+
+    monkeypatch.setattr(frr, "list_lab_containers", lambda: ["de-fra-core-01"])
+
+    def _logs(container, tail=500, since=None):
+        return [LogEvent(
+            timestamp="2026-05-03T23:21:06",
+            hostname=container,
+            appname="watchfrr",
+            severity_raw="info",
+            message="zebra state -> up : connect succeeded",
+        )]
+
+    monkeypatch.setattr(frr, "frr_docker_logs", _logs)
+    r = client.post("/api/analyze", json={
+        "source": "frr",
+        "containers": ["de-fra-core-01"],
+        "use_llm": False,
+    })
+    assert r.status_code == 200
+    assert len(r.get_json()["classified_events"]) >= 1
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # /api/llm/status redaction
 # ──────────────────────────────────────────────────────────────────────────────
 
