@@ -225,6 +225,31 @@ def test_frr_source_rejects_non_list_containers(client, monkeypatch):
 
 
 @pytest.mark.unit
+def test_frr_source_rejects_flag_like_and_non_string_names(client, monkeypatch):
+    import ai_log_analyzer.adapters.frr as frr
+
+    called: list[str] = []
+    monkeypatch.setattr(frr, "list_lab_containers", lambda: ["de-fra-core-01"])
+    monkeypatch.setattr(
+        frr, "frr_docker_logs",
+        lambda container, tail=500, since=None: called.append(container) or [],
+    )
+    r = client.post("/api/analyze", json={
+        "source": "frr",
+        "containers": ["--privileged"],
+        "use_llm": False,
+    })
+    assert r.status_code == 400
+    r = client.post("/api/analyze", json={
+        "source": "frr",
+        "containers": [123],
+        "use_llm": False,
+    })
+    assert r.status_code == 400
+    assert called == []
+
+
+@pytest.mark.unit
 def test_optimize_does_not_docker_exec_non_lab_hostname(client, monkeypatch):
     """ /api/optimize FRR fallback must not docker-exec an arbitrary hostname. """
     from ai_log_analyzer.adapters import frr, network_tool as nt

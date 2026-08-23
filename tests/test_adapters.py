@@ -39,6 +39,42 @@ def test_lab_container_inventory_excludes_unrelated_containerlab_nodes(monkeypat
 
 
 @pytest.mark.unit
+def test_lab_container_inventory_excludes_country_prefix_overmatch(monkeypatch):
+    """de-/us- prefixes used to authorize dev-* and us-east-* containers."""
+    monkeypatch.setattr(frr.shutil, "which", lambda _binary: "/usr/bin/docker")
+    monkeypatch.setattr(
+        frr.subprocess,
+        "run",
+        Mock(return_value=Mock(stdout="\n".join((
+            "de-fra-core-01",
+            "dev-postgres",
+            "demo-redis",
+            "uk-lon-edge-01",
+            "us-east-cache",
+            "user-api",
+            "nl-ams-core-01",
+            "us-nyc-core-01",
+        )))),
+    )
+
+    assert frr.list_lab_containers() == [
+        "de-fra-core-01",
+        "nl-ams-core-01",
+        "uk-lon-edge-01",
+        "us-nyc-core-01",
+    ]
+    assert frr.is_lab_container("dev-postgres") is False
+    assert frr.is_lab_container("us-east-cache") is False
+    assert frr.is_lab_container("--privileged") is False
+    allowed, rejected = frr.authorize_lab_containers(["de-fra-core-01", "dev-postgres"])
+    assert allowed == ["de-fra-core-01"]
+    assert rejected == ["dev-postgres"]
+    allowed, rejected = frr.authorize_lab_containers([{"name": "de-fra-core-01"}])
+    assert allowed == []
+    assert rejected == [repr({"name": "de-fra-core-01"})]
+
+
+@pytest.mark.unit
 def test_frr_line_with_id():
     ev = parse_frr_line(
         "2026/05/03 23:21:06 WATCHFRR: [QDG3Y-BY5TN] zebra state -> up : connect succeeded",

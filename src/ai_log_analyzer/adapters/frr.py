@@ -105,9 +105,22 @@ def frr_docker_logs(
             yield ev
 
 
+# Docker container names: [a-zA-Z0-9][a-zA-Z0-9_.-]*
+# Reject flag-like / empty / non-string values before they reach docker argv.
+_DOCKER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+def is_docker_name(name: object) -> bool:
+    """True if `name` is a well-formed docker container name (not a flag / empty)."""
+    return isinstance(name, str) and bool(_DOCKER_NAME_RE.fullmatch(name))
+
+
 def list_lab_containers(
     prefix_filter: tuple[str, ...] = (
-        "de-", "uk-", "nl-", "us-",  # original FRR site-coded lab
+        # POP codes from the bundled FRR lab (de-fra-core-01, uk-lon-edge-01, …).
+        # Country-only prefixes (de-, us-) are too broad: they match
+        # dev-postgres, demo-db, us-east-cache, user-api on the same host.
+        "de-fra-", "uk-lon-", "nl-ams-", "us-nyc-",
     ),
     name_filter: tuple[str, ...] = (
         # Nodes in the bundled containerlab multi-vendor fabric.  Do not use
@@ -138,15 +151,16 @@ def is_lab_container(name: str) -> bool:
     docker exec from the web API. Caller-supplied names must pass this check
     so a request cannot read an unrelated container on the same Docker host.
     """
-    if not isinstance(name, str) or not name:
+    if not is_docker_name(name):
         return False
     return name in set(list_lab_containers())
 
 
-def authorize_lab_containers(requested: list | None) -> tuple[list[str], list[str]]:
+def authorize_lab_containers(requested: list[str] | None) -> tuple[list[str], list[str]]:
     """Split caller-supplied names into (allowed, rejected) against the inventory.
 
     ``requested`` of None / empty means "use the full running inventory".
+    Non-string, empty, or flag-like values are rejected (never coerced).
     """
     inventory = list_lab_containers()
     allow = set(inventory)
