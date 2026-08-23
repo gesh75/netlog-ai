@@ -8,6 +8,11 @@ loose semantic versioning.
 
 ### Fixed
 
+- Bind `/api/analyze` (`source=frr`) and the `/api/optimize` docker-exec fallback
+  to the bundled-lab inventory. Caller-supplied container names outside
+  `list_lab_containers()` are rejected (403, fail-closed on mixed lists). Site
+  prefixes are POP-scoped (`de-fra-`, `uk-lon-`, `nl-ams-`, `us-nyc-`) so
+  `dev-*` / `us-east-*` containers cannot ride a country-level allow-list.
 - Secret-sanitize cross-run template memory before persistence and force its JSON
   file to owner-only permissions.
 
