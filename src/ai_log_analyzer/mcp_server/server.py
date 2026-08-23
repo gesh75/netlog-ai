@@ -53,21 +53,24 @@ def _resolve_sites_dir() -> Path:
 _SITES_DIR = _resolve_sites_dir()
 
 
-def _mcp_package_version() -> str:
+def _mcp_package_version() -> str | None:
     """Best-effort installed ``mcp`` version.
 
-    SDK 2.x does not set ``mcp.__version__``; fall back to packaging metadata so
-    an incompatible-major error can name the version that is actually installed.
+    Returns ``None`` when the distribution is not importable (absent SDK).
+    SDK 2.x does not set ``mcp.__version__``; fall back to packaging metadata
+    so an incompatible-major error can name the version that is actually
+    installed.
     """
     try:
         import mcp as installed
     except ImportError:
-        return "unknown"
+        return None
     ver = getattr(installed, "__version__", None)
     if ver:
         return str(ver)
     try:
         from importlib.metadata import PackageNotFoundError, version
+
         return version("mcp")
     except PackageNotFoundError:
         return "unknown"
@@ -88,14 +91,12 @@ def _build_server():
     except ImportError as exc:
         # Distinguish "SDK absent" from "SDK present but wrong major" so the next
         # break reports itself accurately (issue #17).
-        try:
-            import mcp as _mcp  # noqa: F401
-        except ImportError:
+        ver = _mcp_package_version()
+        if ver is None:
             raise RuntimeError(
                 "MCP SDK not installed. Run `pip install 'mcp>=2,<3'` "
-                "or `pip install netlog-ai[mcp]`."
+                "or `pip install 'netlog-ai[mcp]'`."
             ) from exc
-        ver = _mcp_package_version()
         raise RuntimeError(
             f"MCP SDK 2.x required (MCPServer at mcp.server.mcpserver); "
             f"found mcp {ver}. Upgrade with `pip install 'mcp>=2,<3'`."

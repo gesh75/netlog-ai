@@ -3,8 +3,9 @@
 Ensures `_build_server()` constructs an `MCPServer`, every `@mcp.tool()`
 wrapper registers, and the ImportError handler distinguishes "SDK absent"
 from "SDK present but the 2.x API is missing" (issue #17).
-Skipped at module level only when the MCP SDK is not installed — the
-incompatibility tests stub `sys.modules` and do not need a real 2.x install.
+
+Tests that stub `sys.modules` do not require a real MCP install. Tests that
+construct a live server skip when the extra is not installed.
 """
 from __future__ import annotations
 
@@ -14,8 +15,6 @@ import sys
 import types
 
 import pytest
-
-pytest.importorskip("mcp")
 
 EXPECTED_TOOLS = {
     "list_connector_kinds",
@@ -70,6 +69,7 @@ def _block_mcp_imports(monkeypatch: pytest.MonkeyPatch, *, allow_root: types.Mod
 @pytest.mark.unit
 def test_build_server_registers_expected_tools():
     """_build_server() must construct MCPServer and register the public tool set."""
+    pytest.importorskip("mcp")
     from mcp.server.mcpserver import MCPServer
 
     from ai_log_analyzer.mcp_server.server import _build_server
@@ -78,7 +78,11 @@ def test_build_server_registers_expected_tools():
     assert isinstance(srv, MCPServer)
     assert srv.name == "netlog-ai"
     names = {tool.name for tool in asyncio.run(srv.list_tools())}
-    assert EXPECTED_TOOLS <= names
+    assert names == EXPECTED_TOOLS
+
+    result = asyncio.run(srv.call_tool("list_connector_kinds", {}))
+    assert result.is_error is False
+    assert "kinds" in (result.structured_content or {})
 
 
 @pytest.mark.unit
@@ -89,7 +93,9 @@ def test_build_server_missing_sdk_reports_not_installed(monkeypatch: pytest.Monk
 
     with pytest.raises(RuntimeError, match=r"MCP SDK not installed") as excinfo:
         _build_server()
-    assert "2.x required" not in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "2.x required" not in message
+    assert "netlog-ai[mcp]" in message
 
 
 @pytest.mark.unit
@@ -115,7 +121,30 @@ def test_mcp_package_version_uses_metadata_when_dunder_missing(monkeypatch: pyte
     from ai_log_analyzer.mcp_server.server import _mcp_package_version
 
     monkeypatch.setitem(sys.modules, "mcp", types.ModuleType("mcp"))
-    assert _mcp_package_version() == importlib.metadata.version("mcp")
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "2.0.0-test")
+    assert _mcp_package_version() == "2.0.0-test"
+
+
+@pytest.mark.unit
+def test_mcp_package_version_unknown_when_metadata_missing(monkeypatch: pytest.MonkeyPatch):
+    import importlib.metadata
+
+    from ai_log_analyzer.mcp_server.server import _mcp_package_version
+
+    def _missing(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setitem(sys.modules, "mcp", types.ModuleType("mcp"))
+    monkeypatch.setattr(importlib.metadata, "version", _missing)
+    assert _mcp_package_version() == "unknown"
+
+
+@pytest.mark.unit
+def test_mcp_package_version_none_when_sdk_absent(monkeypatch: pytest.MonkeyPatch):
+    _block_mcp_imports(monkeypatch, allow_root=None)
+    from ai_log_analyzer.mcp_server.server import _mcp_package_version
+
+    assert _mcp_package_version() is None
 
 
 @pytest.mark.unit
