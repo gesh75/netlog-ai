@@ -77,7 +77,7 @@ flowchart TB
     subgraph ENTRY["Entrypoints"]
         WEB["web/ - Flask plus vanilla-JS SPA, port 6060, ~30 api routes"]
         CLI["cli.py - serve, analyze, mcp"]
-        MCP["mcp_server/ - FastMCP stdio"]
+        MCP["mcp_server/ - MCPServer stdio"]
     end
 
     subgraph INGEST["Ingest"]
@@ -327,7 +327,7 @@ flowchart TB
 | **Ingest** | `requests` · raw AF_UNIX socket HTTP · `subprocess` (docker CLI) · optional tfsm-fire / TextFSM (upstream withdrawn 2026-07 — manual install only, see [TFSM_AUTO_PARSER.md](TFSM_AUTO_PARSER.md)) |
 | **Intelligence** | Ollama · Docker Model Runner (OpenAI-compat) · Anthropic Claude (`claude-haiku-4-5`) · rule-based KB |
 | **Security** | `hashlib` (sha256 stable tokens) · `ipaddress` · sanitize-before-LLM gate · X-API-Token · CORS allow-list |
-| **Agent surface** | MCP SDK (FastMCP, optional) over stdio / streamable-http |
+| **Agent surface** | MCP SDK 2.x (`MCPServer`, optional) over stdio / streamable-http |
 | **Packaging** | `pyproject.toml` console scripts (`ai-log-analyzer` / `netlog-ai`) · Docker · docker-compose |
 
 ---

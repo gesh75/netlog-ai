@@ -635,7 +635,7 @@
     subgraph ENTRY["Entrypoints"]
         WEB["web/ Flask + vanilla-JS SPA :6060"]
         CLI["cli.py serve analyze containers mcp"]
-        MCP["mcp_server/ FastMCP stdio"]
+        MCP["mcp_server/ MCPServer stdio"]
     end
     subgraph INGEST["Ingest"]
         SRC["sources/ kibana splunk loki syslog librenms"]
@@ -857,7 +857,7 @@ pytest --cov=src --cov-report=term-missing</pre>
     "Python 3.10+ (frozen dataclasses, typing.Protocol, re)", "Flask 3", "flask-cors", "gunicorn",
     "vanilla JS (no build)", "Cytoscape.js + ELK", "requests", "raw AF_UNIX socket HTTP",
     "subprocess (docker CLI)", "Ollama", "Docker Model Runner (OpenAI-compat)",
-    "Anthropic Claude (claude-haiku-4-5)", "rule-based KB", "MCP SDK (FastMCP)",
+    "Anthropic Claude (claude-haiku-4-5)", "rule-based KB", "MCP SDK 2.x (MCPServer)",
     "tfsm-fire / TextFSM (optional)", "pytest + pytest-cov + ruff", "Docker + docker-compose"
   ];
 
@@ -870,7 +870,7 @@ pytest --cov=src --cov-report=term-missing</pre>
     { name: "sources/", tech: "requests · typing.Protocol", resp: "Pluggable connector layer (LogSource Protocol + SourceManager): kibana, splunk, loki, syslog UDP/TCP listener, librenms — one config dict, hot-pluggable." },
     { name: "adapters/", tech: "subprocess (docker CLI) · TextFSM", resp: "Local ingest adapters: frr (docker logs → LogEvent), file (RFC3164/5424/Junos/freeform parser), network_tool, tfsm_auto (optional TextFSM auto-detect)." },
     { name: "web/app.py", tech: "Flask 3 · vanilla JS · Cytoscape.js + ELK", resp: "Flask create_app() exposing ~31 API routes (incl. /api/correlate and /api/triage — the Device-tab cross-source correlation and per-device triage surfaces) plus a no-build vanilla-JS SPA (index.html + app.js) on port 6060." },
-    { name: "mcp_server/server.py", tech: "MCP SDK (FastMCP) · stdio", resp: "Agent surface: FastMCP stdio server exposing list_sources, add_source, fetch_logs, search_logs, analyze_logs, get_top_offenders, correlate_sources, analyze_device, list_sites, analyze_site + healthcheck/inventory." },
+    { name: "mcp_server/server.py", tech: "MCP SDK 2.x (MCPServer) · stdio", resp: "Agent surface: MCPServer stdio server exposing list_sources, add_source, fetch_logs, search_logs, analyze_logs, get_top_offenders, correlate_sources, analyze_device, list_sites, analyze_site + healthcheck/inventory." },
     { name: "cli.py", tech: "Python argparse", resp: "Console entrypoint (ai-log-analyzer / netlog-ai) with serve, analyze, containers, and mcp subcommands." },
     { name: "topology_infer.py", tech: "Python", resp: "Multi-signal edge inference (BGP, MLAG, descriptions, subnets) feeding the multi-layer topology graph builder (topology.py)." },
     { name: "site_optimize.py", tech: "Python", resp: "Site-wide cross-device gap finder emitting split scores: fabric_design_score and operational_readiness_score with ALLOWED_HOSTNAMES anchoring." }

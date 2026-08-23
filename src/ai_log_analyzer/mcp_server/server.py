@@ -53,12 +53,35 @@ def _resolve_sites_dir() -> Path:
 _SITES_DIR = _resolve_sites_dir()
 
 
+def _mcp_package_version() -> str:
+    """Best-effort installed ``mcp`` version.
+
+    SDK 2.x does not set ``mcp.__version__``; fall back to packaging metadata so
+    an incompatible-major error can name the version that is actually installed.
+    """
+    try:
+        import mcp as installed
+    except ImportError:
+        return "unknown"
+    ver = getattr(installed, "__version__", None)
+    if ver:
+        return str(ver)
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+        return version("mcp")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 def _build_server():
     """Construct the MCPServer (MCP SDK 2.x). Deferred import so the rest of the
     package works even when the MCP SDK isn't installed.
 
     MCP SDK 2.0 renamed FastMCP → MCPServer and moved the import path to
-    `mcp.server.mcpserver`. The decorator surface (`@mcp.tool()`) is unchanged.
+    `mcp.server.mcpserver` with no 1.x shim. Dual-major support is not offered:
+    this project and mcp 2.x both require Python >=3.10, and a fallback import
+    would hide the next API move as a missing dependency again.
+    The decorator surface (`@mcp.tool()`) is unchanged.
     """
     try:
         from mcp.server.mcpserver import MCPServer
@@ -66,13 +89,13 @@ def _build_server():
         # Distinguish "SDK absent" from "SDK present but wrong major" so the next
         # break reports itself accurately (issue #17).
         try:
-            import mcp as _mcp
+            import mcp as _mcp  # noqa: F401
         except ImportError:
             raise RuntimeError(
                 "MCP SDK not installed. Run `pip install 'mcp>=2,<3'` "
                 "or `pip install netlog-ai[mcp]`."
             ) from exc
-        ver = getattr(_mcp, "__version__", "unknown")
+        ver = _mcp_package_version()
         raise RuntimeError(
             f"MCP SDK 2.x required (MCPServer at mcp.server.mcpserver); "
             f"found mcp {ver}. Upgrade with `pip install 'mcp>=2,<3'`."
