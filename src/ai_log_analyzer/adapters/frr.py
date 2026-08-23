@@ -152,6 +152,13 @@ def authorize_lab_containers(requested: list | None) -> tuple[list[str], list[st
     allow = set(inventory)
     if not requested:
         return inventory, []
-    names = [str(c) for c in requested]
-    rejected = [c for c in names if c not in allow]
-    return [c for c in names if c in allow], rejected
+    names: list[str] = []
+    rejected: list[str] = []
+    for c in requested:
+        # Exact inventory name only. Do not coerce ints/bools via str() —
+        # a non-string must never become an authorized docker target.
+        if not isinstance(c, str) or not c or c not in allow:
+            rejected.append(c if isinstance(c, str) else repr(c))
+        else:
+            names.append(c)
+    return names, rejected

@@ -758,7 +758,7 @@ def create_app() -> Flask:
             # SSH failed — fall through to docker exec if it's a lab container
 
         # docker-exec fallback for FRR lab containers
-        if hostname in frr.list_lab_containers():
+        if frr.is_lab_container(hostname):
             try:
                 container_cmd = _parse_frr_command(command)
             except BadCommand as exc:

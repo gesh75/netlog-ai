@@ -203,6 +203,74 @@ def test_frr_source_allows_inventory_container(client, monkeypatch):
     assert len(r.get_json()["classified_events"]) >= 1
 
 
+@pytest.mark.unit
+def test_frr_source_rejects_non_list_containers(client, monkeypatch):
+    """A string would otherwise iterate as characters and miss the allow-list."""
+    import ai_log_analyzer.adapters.frr as frr
+
+    monkeypatch.setattr(frr, "list_lab_containers", lambda: ["de-fra-core-01"])
+    called: list[str] = []
+    monkeypatch.setattr(
+        frr, "frr_docker_logs",
+        lambda container, tail=500, since=None: called.append(container) or [],
+    )
+    r = client.post("/api/analyze", json={
+        "source": "frr",
+        "containers": "postgres",
+        "use_llm": False,
+    })
+    assert r.status_code == 400
+    assert "must be a list" in r.get_json()["error"]
+    assert called == []
+
+
+@pytest.mark.unit
+def test_optimize_does_not_docker_exec_non_lab_hostname(client, monkeypatch):
+    """ /api/optimize FRR fallback must not docker-exec an arbitrary hostname. """
+    from ai_log_analyzer.adapters import frr, network_tool as nt
+
+    monkeypatch.setattr(nt, "is_available", lambda timeout=1.0: False)
+    monkeypatch.setattr(nt, "DOCKER_EXEC_FALLBACK", True)
+    monkeypatch.setattr(frr, "is_lab_container", lambda _name: False)
+    ran: list[int] = []
+
+    def _run(*_a, **_k):
+        ran.append(1)
+        raise AssertionError("docker exec must not run for a non-lab hostname")
+
+    monkeypatch.setattr(nt.shutil, "which", lambda _b: "/usr/bin/docker")
+    monkeypatch.setattr(nt.subprocess, "run", _run)
+    r = client.post("/api/optimize", json={
+        "hostname": "postgres",
+        "platform": "frr",
+    })
+    assert r.status_code == 502
+    assert ran == []
+
+
+@pytest.mark.unit
+def test_run_does_not_docker_exec_non_lab_hostname(client, monkeypatch):
+    """ /api/run docker-exec fallback must stay inside the lab inventory. """
+    from ai_log_analyzer.adapters import frr, network_tool as nt
+
+    monkeypatch.setattr(nt, "is_available", lambda timeout=1.0: False)
+    monkeypatch.setattr(frr, "is_lab_container", lambda _name: False)
+    ran: list[int] = []
+
+    def _run(*_a, **_k):
+        ran.append(1)
+        raise AssertionError("docker exec must not run for a non-lab hostname")
+
+    monkeypatch.setattr(nt.shutil, "which", lambda _b: "/usr/bin/docker")
+    monkeypatch.setattr(nt.subprocess, "run", _run)
+    r = client.post("/api/run", json={
+        "hostname": "postgres",
+        "command": "show version",
+    })
+    assert r.status_code == 503
+    assert ran == []
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # /api/llm/status redaction
 # ──────────────────────────────────────────────────────────────────────────────

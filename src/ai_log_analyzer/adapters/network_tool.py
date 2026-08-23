@@ -177,7 +177,19 @@ def container_run(container: str, command: list[str], timeout: float = 30.0) -> 
     """Run a command inside a docker container directly. Bypasses DCN_Network_Tool.
 
     `command` is a list of argv tokens (no shell). Safe by construction.
+
+    The container must be in the bundled-lab inventory — the same
+    authorization boundary ``/api/run`` already enforces at the route.
     """
+    from ai_log_analyzer.adapters import frr
+    if not frr.is_lab_container(container):
+        return CommandResult(
+            ok=False,
+            hostname=container,
+            command=" ".join(command),
+            output="",
+            error="container is not in the lab allow-list",
+        )
     if not shutil.which("docker"):
         return CommandResult(ok=False, hostname=container, command=" ".join(command),
                              output="", error="docker CLI not found")
