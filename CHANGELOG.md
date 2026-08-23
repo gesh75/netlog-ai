@@ -6,6 +6,10 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-23
+
+Security and hardening release.
+
 ### Fixed
 
 - Bind `/api/analyze` (`source=frr`) and the `/api/optimize` docker-exec fallback
@@ -15,6 +19,19 @@ loose semantic versioning.
   `dev-*` / `us-east-*` containers cannot ride a country-level allow-list.
 - Secret-sanitize cross-run template memory before persistence and force its JSON
   file to owner-only permissions.
+- Protect incident search endpoints (`/api/incidents/similar`) with the API token.
+- Bound custom classification regexes to prevent ReDoS.
+- Sanitize outbound webhook payloads.
+- Redact credentials from bundled site configuration samples.
+- Fix Unicode casefold bypass in the classifier literal gate.
+- Bound executive-summary hostname anchors.
+- Bound TextFSM demo template scan.
+
+### Notes
+
+- The MCP extra is already `mcp>=2,<3` on main (server code ported to
+  `mcp.server.mcpserver.MCPServer`). Formal packaging/test lock-in remains in
+  open PR #33 and will ship in a follow-up release.
 
 ## [0.5.1] - 2026-07-28
 
