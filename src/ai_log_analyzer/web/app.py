@@ -653,6 +653,8 @@ def create_app() -> Flask:
             requested = body.get("containers")
             if requested is not None and not isinstance(requested, list):
                 return jsonify({"error": "containers must be a list of names"}), 400
+            if requested is not None and any(not frr.is_docker_name(c) for c in requested):
+                return jsonify({"error": "containers must be a list of docker names"}), 400
             containers, rejected = frr.authorize_lab_containers(requested)
             if rejected:
                 return jsonify({
