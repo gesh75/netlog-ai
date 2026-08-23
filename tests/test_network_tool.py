@@ -130,6 +130,26 @@ def test_fetch_running_config_docker_fallback_requires_lab_container(monkeypatch
 
 
 @pytest.mark.unit
+def test_container_run_skips_non_lab_container(monkeypatch):
+    """container_run is the /api/run docker-exec primitive — same allow-list."""
+    from ai_log_analyzer.adapters import frr
+
+    monkeypatch.setattr(frr, "is_lab_container", lambda _name: False)
+    ran = []
+
+    def _run(*_a, **_k):
+        ran.append(1)
+        raise AssertionError("docker exec must not run for a non-lab container")
+
+    monkeypatch.setattr(network_tool.shutil, "which", lambda _b: "/usr/bin/docker")
+    monkeypatch.setattr(network_tool.subprocess, "run", _run)
+    result = network_tool.container_run("postgres", ["vtysh", "-c", "show version"])
+    assert result.ok is False
+    assert "allow-list" in result.error
+    assert ran == []
+
+
+@pytest.mark.unit
 def test_list_devices_handles_list_response():
     resp = MagicMock(status_code=200)
     resp.json.return_value = [{"hostname": "h1"}, {"hostname": "h2"}]

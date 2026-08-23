@@ -30,6 +30,12 @@ def test_lab_container_inventory_excludes_unrelated_containerlab_nodes(monkeypat
     assert allowed == ["de-fra-core-01"]
     assert rejected == ["postgres"]
     assert frr.authorize_lab_containers(None)[0] == ["clab-clos-evpn-leaf1", "de-fra-core-01"]
+    # Non-strings and empty names must not stringify into a coincidental match
+    allowed, rejected = frr.authorize_lab_containers(["de-fra-core-01", 1, None, ""])
+    assert allowed == ["de-fra-core-01"]
+    assert rejected == ["1", "None", ""]
+    assert frr.is_lab_container(None) is False  # type: ignore[arg-type]
+    assert frr.is_lab_container(1) is False  # type: ignore[arg-type]
 
 
 @pytest.mark.unit
