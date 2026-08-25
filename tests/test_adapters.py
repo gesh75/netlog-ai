@@ -23,6 +23,55 @@ def test_lab_container_inventory_excludes_unrelated_containerlab_nodes(monkeypat
     )
 
     assert frr.list_lab_containers() == ["clab-clos-evpn-leaf1", "de-fra-core-01"]
+    assert frr.is_lab_container("de-fra-core-01") is True
+    assert frr.is_lab_container("postgres") is False
+    assert frr.is_lab_container("") is False
+    allowed, rejected = frr.authorize_lab_containers(["de-fra-core-01", "postgres"])
+    assert allowed == ["de-fra-core-01"]
+    assert rejected == ["postgres"]
+    assert frr.authorize_lab_containers(None)[0] == ["clab-clos-evpn-leaf1", "de-fra-core-01"]
+    # Non-strings and empty names must not stringify into a coincidental match
+    allowed, rejected = frr.authorize_lab_containers(["de-fra-core-01", 1, None, ""])
+    assert allowed == ["de-fra-core-01"]
+    assert rejected == ["1", "None", ""]
+    assert frr.is_lab_container(None) is False  # type: ignore[arg-type]
+    assert frr.is_lab_container(1) is False  # type: ignore[arg-type]
+
+
+@pytest.mark.unit
+def test_lab_container_inventory_excludes_country_prefix_overmatch(monkeypatch):
+    """de-/us- prefixes used to authorize dev-* and us-east-* containers."""
+    monkeypatch.setattr(frr.shutil, "which", lambda _binary: "/usr/bin/docker")
+    monkeypatch.setattr(
+        frr.subprocess,
+        "run",
+        Mock(return_value=Mock(stdout="\n".join((
+            "de-fra-core-01",
+            "dev-postgres",
+            "demo-redis",
+            "uk-lon-edge-01",
+            "us-east-cache",
+            "user-api",
+            "nl-ams-core-01",
+            "us-nyc-core-01",
+        )))),
+    )
+
+    assert frr.list_lab_containers() == [
+        "de-fra-core-01",
+        "nl-ams-core-01",
+        "uk-lon-edge-01",
+        "us-nyc-core-01",
+    ]
+    assert frr.is_lab_container("dev-postgres") is False
+    assert frr.is_lab_container("us-east-cache") is False
+    assert frr.is_lab_container("--privileged") is False
+    allowed, rejected = frr.authorize_lab_containers(["de-fra-core-01", "dev-postgres"])
+    assert allowed == ["de-fra-core-01"]
+    assert rejected == ["dev-postgres"]
+    allowed, rejected = frr.authorize_lab_containers([{"name": "de-fra-core-01"}])
+    assert allowed == []
+    assert rejected == [repr({"name": "de-fra-core-01"})]
 
 
 @pytest.mark.unit

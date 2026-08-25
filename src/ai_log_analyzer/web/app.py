@@ -650,7 +650,18 @@ def create_app() -> Flask:
         events: list[LogEvent] = []
 
         if source == "frr":
-            containers = body.get("containers") or frr.list_lab_containers()
+            requested = body.get("containers")
+            if requested is not None and not isinstance(requested, list):
+                return jsonify({"error": "containers must be a list of names"}), 400
+            if requested is not None and any(not frr.is_docker_name(c) for c in requested):
+                return jsonify({"error": "containers must be a list of docker names"}), 400
+            containers, rejected = frr.authorize_lab_containers(requested)
+            if rejected:
+                return jsonify({
+                    "error": "containers outside the lab allow-list",
+                    "rejected": rejected,
+                    "hint": "Only bundled FRR / containerlab nodes may be read via docker logs",
+                }), 403
             if not containers:
                 return jsonify({"error": "No FRR containers found running"}), 404
             for c in containers:
@@ -749,7 +760,7 @@ def create_app() -> Flask:
             # SSH failed — fall through to docker exec if it's a lab container
 
         # docker-exec fallback for FRR lab containers
-        if hostname in frr.list_lab_containers():
+        if frr.is_lab_container(hostname):
             try:
                 container_cmd = _parse_frr_command(command)
             except BadCommand as exc:
