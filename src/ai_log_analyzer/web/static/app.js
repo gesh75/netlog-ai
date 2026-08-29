@@ -839,6 +839,77 @@ function render(r) {
     }
   }
 
+  // Causal timeline
+  const tl = r.timeline || [];
+  const tlPanel = $("timeline-panel");
+  if (tlPanel) {
+    if (tl.length) {
+      tlPanel.style.display = "block";
+      $("timeline-count").textContent = `(${tl.length})`;
+      const list = $("timeline-list");
+      clear(list);
+      tl.forEach((n) => {
+        const cause = n.cause_of ? ` ← ${n.cause_of}` : "";
+        list.appendChild(el("li", {
+          text: `${n.t} · ${n.device} · ${n.severity} · ${n.title}${cause}`,
+        }));
+      });
+    } else {
+      tlPanel.style.display = "none";
+    }
+  }
+
+  // Blast radius
+  const blast = r.blast || {};
+  const bPanel = $("blast-panel");
+  if (bPanel) {
+    const devices = blast.devices || [];
+    if (devices.length) {
+      bPanel.style.display = "block";
+      $("blast-count").textContent = `(${blast.device_count || devices.length} devices)`;
+      $("blast-impact").textContent = blast.estimated_impact || "";
+      const chips = $("blast-chips");
+      clear(chips);
+      devices.forEach((d) => chips.appendChild(el("span", {
+        className: "chip",
+        text: d === blast.epicenter ? `${d} · epicenter` : d,
+      })));
+    } else {
+      bPanel.style.display = "none";
+    }
+  }
+
+  // Change window
+  const cw = r.change_window || {};
+  const cwPanel = $("changewin-panel");
+  if (cwPanel) {
+    if (cw.detected) {
+      cwPanel.style.display = "block";
+      const hosts = (cw.devices || []).join(", ") || "unknown";
+      $("changewin-msg").textContent =
+        `${cw.count} config-commit event(s) on ${hosts}. Treat as change-induced until proven otherwise.`;
+      const samples = $("changewin-samples");
+      clear(samples);
+      (cw.samples || []).forEach((s) => samples.appendChild(el("li", { className: "row-msg", text: s })));
+    } else {
+      cwPanel.style.display = "none";
+    }
+  }
+
+  // Sanitize diff
+  const sd = r.sanitize_diff || {};
+  const sdPanel = $("sanitize-panel");
+  if (sdPanel) {
+    if (sd.total) {
+      sdPanel.style.display = "block";
+      const rules = Object.entries(sd.by_rule || {}).map(([k, v]) => `${k}×${v}`).join(" · ");
+      $("sanitize-count").textContent = `(${sd.total} redactions${rules ? " · " + rules : ""})`;
+      $("sanitize-out").textContent = sd.sanitized || "";
+    } else {
+      sdPanel.style.display = "none";
+    }
+  }
+
   // Events
   $("events-panel").style.display = "block";
   const totalEvents = (r.classified_events || []).length;
@@ -2721,6 +2792,61 @@ function toggleLiveTail() {
   $("tail-btn").textContent = "⏸ Stop Live Tail";
 }
 
+async function refreshRules() {
+  const list = $("rule-list");
+  const status = $("rule-status");
+  if (!list) return;
+  try {
+    const data = await fetchJSON("/api/rules");
+    clear(list);
+    const custom = data.custom || [];
+    if (!custom.length) {
+      list.appendChild(el("li", {
+        className: "row-msg",
+        text: `Built-in KB: ${data.builtin_count} patterns. No custom rules yet.`,
+      }));
+    } else {
+      custom.forEach((r) => {
+        list.appendChild(el("li", {
+          text: `[${r.severity}/${r.category}] ${r.description} — /${r.pattern}/`,
+        }));
+      });
+    }
+  } catch (err) {
+    if (status) status.textContent = "Could not load rules.";
+  }
+}
+
+async function addCustomRule() {
+  const status = $("rule-status");
+  const pattern = ($("rule-pattern")?.value || "").trim();
+  const severity = $("rule-severity")?.value || "high";
+  const category = ($("rule-category")?.value || "custom").trim() || "custom";
+  const description = ($("rule-desc")?.value || "").trim() || "Custom rule match";
+  if (!pattern) {
+    if (status) status.textContent = "Pattern is required.";
+    return;
+  }
+  try {
+    const res = await fetch("/api/rules", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ rules: [{ pattern, severity, category, description }] }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.added) {
+      if (status) status.textContent = (data.errors || [data.error || "rejected"]).join("; ");
+      return;
+    }
+    if (status) status.textContent = `Added. ${data.custom_total} custom rule(s) loaded.`;
+    $("rule-pattern").value = "";
+    $("rule-desc").value = "";
+    refreshRules();
+  } catch {
+    if (status) status.textContent = "Add failed.";
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   // Sidebar tabs
   document.querySelectorAll(".side-tab").forEach((tab) => {
@@ -2780,6 +2906,9 @@ document.addEventListener("DOMContentLoaded", () => {
   loadContainers();
   refreshLLMStatus();
   refreshNetToolStatus();
+  refreshRules();
+  const ruleBtn = $("rule-add-btn");
+  if (ruleBtn) ruleBtn.addEventListener("click", addCustomRule);
   refreshRecentPathsDatalist();   // hydrate File Path autocomplete from localStorage
 
   // Sidebar overflow detection — toggles the bottom-fade scroll hint when the

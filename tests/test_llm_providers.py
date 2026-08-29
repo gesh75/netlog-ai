@@ -18,6 +18,7 @@ def test_default_state_has_three_providers():
     state = llm.get_state()
     ids = [p["id"] for p in state["providers_available"]]
     assert "ollama" in ids and "local" in ids and "claude" in ids
+    assert "grok" in ids
 
 
 @pytest.mark.unit
@@ -57,6 +58,20 @@ def test_set_provider_claude_succeeds_with_key():
     llm._state["anthropic_api_key"] = "sk-test"
     ok, msg = llm.set_provider("claude")
     assert ok and msg == "claude"
+
+
+@pytest.mark.unit
+def test_set_provider_grok_requires_api_key():
+    llm._state["xai_api_key"] = ""
+    ok, msg = llm.set_provider("grok")
+    assert not ok and "XAI_API_KEY" in msg
+
+
+@pytest.mark.unit
+def test_set_provider_grok_succeeds_with_key():
+    llm._state["xai_api_key"] = "xai-test"
+    ok, msg = llm.set_provider("grok")
+    assert ok and msg == "grok"
 
 
 @pytest.mark.unit

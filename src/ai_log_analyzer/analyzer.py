@@ -16,8 +16,9 @@ from ai_log_analyzer.classifier import (
     iter_classify,
 )
 from ai_log_analyzer.patterns import TemplateMiner, apply_template_store
-from ai_log_analyzer.sanitize import sanitize
+from ai_log_analyzer.sanitize import sanitize, sanitize_report
 from ai_log_analyzer.stability import StabilityTracker
+from ai_log_analyzer.causal import blast_radius, build_timeline, change_window
 
 
 # Recovery events are classified as medium because they're useful in the
@@ -97,6 +98,10 @@ class AnalysisResult:
     generated_at: str
     unknown_patterns: dict = field(default_factory=dict)
     stability: dict = field(default_factory=dict)
+    timeline: list = field(default_factory=list)
+    blast: dict = field(default_factory=dict)
+    change_window: dict = field(default_factory=dict)
+    sanitize_diff: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -113,6 +118,10 @@ class AnalysisResult:
             "generated_at": self.generated_at,
             "unknown_patterns": self.unknown_patterns,
             "stability": self.stability,
+            "timeline": self.timeline,
+            "blast": self.blast,
+            "change_window": self.change_window,
+            "sanitize_diff": self.sanitize_diff,
         }
 
 
@@ -612,6 +621,28 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
             a.recurrence = store.recurrence(a.description)
         store.record([a.to_dict() for a in action_items], generated_at)
 
+    stab = tracker.report()
+    samples = "\n".join(
+        m for a in action_items[:6] for m in (a.sample_messages or [])[:2]
+    )
+    sdiff = (
+        sanitize_report(samples, mask_pii=True)
+        if samples else {"sanitized": "", "total": 0, "by_rule": {}}
+    )
+    sdiff = {
+        "original": samples,
+        "sanitized": sdiff.get("sanitized", ""),
+        "total": sdiff.get("total", 0),
+        "by_rule": sdiff.get("by_rule", {}),
+    }
+    cw = change_window(top_events)
+    if cw["detected"]:
+        hosts = ", ".join(cw["devices"][:4]) or "unknown"
+        summary.append(
+            f"Change window: {cw['count']} config-commit event(s) on {hosts} "
+            "inside this window — treat as change-induced until proven otherwise."
+        )
+
     return AnalysisResult(
         score=score, grade=grade, grade_label=grade_label,
         severity_counts=sev_counts, category_counts=cat_counts,
@@ -621,7 +652,11 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
         llm_powered=any_llm,
         generated_at=generated_at,
         unknown_patterns=miner.to_dict(top_n=10),
-        stability=tracker.report(),
+        stability=stab,
+        timeline=build_timeline(top_events),
+        blast=blast_radius(action_items, stab),
+        change_window=cw,
+        sanitize_diff=sdiff,
     )
 
 

@@ -300,6 +300,28 @@ def create_app() -> Flask:
         return jsonify({"added": added, "errors": errors,
                         "custom_total": len(_clf.custom_rules())}), status
 
+    @app.route("/api/sanitize-diff", methods=["POST"])
+    @require_api_token
+    def api_sanitize_diff():
+        """Preview the sanitize-before-LLM gate on pasted text.
+
+        Body: {"text": "..."}. Returns original, sanitized, total, by_rule.
+        """
+        from ai_log_analyzer.sanitize import sanitize_report
+        body = request.get_json(silent=True) or {}
+        text = body.get("text")
+        if not isinstance(text, str):
+            return jsonify({"error": "body must be {\"text\": \"...\"}"}), 400
+        # Bound the preview so a huge paste can't pin a worker.
+        text = text[:200_000]
+        report = sanitize_report(text, mask_pii=True)
+        return jsonify({
+            "original": text,
+            "sanitized": report["sanitized"],
+            "total": report["total"],
+            "by_rule": report["by_rule"],
+        })
+
     # ── Inventory ─────────────────────────────────────────────────────────
     @app.route("/api/lab/containers", methods=["GET"])
     def lab_containers():

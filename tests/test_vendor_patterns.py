@@ -78,6 +78,44 @@ def test_srlinux_interface_oper_down():
     assert e.description == "Interface link down"
 
 
+# ── SONiC ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("msg,app,severity,description", [
+    ("orchagent dumped core after exception in routeOrch", "orchagent",
+     "critical", "SONiC orchagent crash"),
+    ("syncd segfault in sai_create_route_entry", "syncd",
+     "critical", "SONiC syncd/ASIC crash"),
+    ("swss failed to apply fdb update", "swss",
+     "high", "SONiC SWSS failure"),
+    ("teamd: slave Ethernet4 link down, failover", "teamd",
+     "high", "SONiC teamd LAG member down"),
+    ("ConfigDB update applied via sonic-cfggen", "configdb",
+     "low", "SONiC ConfigDB change"),
+])
+def test_sonic_patterns(msg, app, severity, description):
+    e = _classify_one(msg, appname=app)
+    assert (e.severity, e.description) == (severity, description)
+
+
+# ── Cumulus Linux / NVUE ─────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("msg,app,severity,description", [
+    ("clagd: peer 10.0.0.2 down (heartbeat timeout)", "clagd",
+     "high", "Cumulus clagd peer down"),
+    ("switchd crashed, restarting", "switchd",
+     "critical", "Cumulus switchd crash"),
+    ("ifupdown2: unable to bring up swp1", "ifupdown2",
+     "high", "Cumulus ifupdown2 failure"),
+    ("ptmd: link swp1 down (BFD timeout)", "ptmd",
+     "high", "Cumulus PTMD link/BFD down"),
+    ("nvue commit applied by ops", "nvue",
+     "low", "Cumulus NVUE/NCLU config commit"),
+])
+def test_cumulus_patterns(msg, app, severity, description):
+    e = _classify_one(msg, appname=app)
+    assert (e.severity, e.description) == (severity, description)
+
+
 # ── Confidence scores ────────────────────────────────────────────────────────
 
 def test_confidence_kb_match():
