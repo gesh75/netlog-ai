@@ -6,6 +6,10 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-29
+
+Causal console release.
+
 ### Added
 
 - **xAI Grok LLM provider** (`LLM_PROVIDER=grok`, `XAI_API_KEY`) — OpenAI-compatible

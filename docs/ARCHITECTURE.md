@@ -5,13 +5,15 @@
 # 🏛️ netlog-ai — Architecture
 
 **netlog-ai** is a local-first, multi-vendor network log analyzer. It ingests syslog and CLI output from
-Junos, Arista EOS, Nokia SR Linux and FRR (via pluggable connectors or local adapters), classifies events with a
-~60-pattern regex knowledge base, deduplicates them into a severity-ranked action list, and lets an LLM
-(local Ollama / Docker Model Runner, or Anthropic Claude) write a 5-phase root-cause playbook with
-copy-pastable per-vendor CLI fixes. Its defining invariant is **sanitize-before-LLM** — every config and log
-is scrubbed of secrets and public IPs before any outbound call — and it degrades gracefully to a deterministic
-rule-based KB when no model is available. The same analyzer core is exposed three ways: a no-build Flask +
-vanilla-JS dashboard (port 6060), a CLI, and an MCP server for agent clients like Claude Code.
+Junos, Arista EOS, Nokia SR Linux, Cisco IOS-XE / NX-OS, SONiC, Cumulus and FRR (via pluggable connectors
+or local adapters), classifies events with an 80-pattern regex knowledge base, deduplicates them into a
+severity-ranked action list, and lets an LLM (local Ollama / Docker Model Runner, Anthropic Claude, or
+xAI Grok) write a 5-phase root-cause playbook with copy-pastable per-vendor CLI fixes. Its defining
+invariant is **sanitize-before-LLM** — every config and log is scrubbed of secrets and public IPs before
+any outbound call — and it degrades gracefully to a deterministic rule-based KB when no model is available.
+The same analyzer core is exposed three ways: a no-build Flask + vanilla-JS dashboard (port 6060), a CLI,
+and an MCP server for agent clients like Claude Code. v0.6.0 adds a causal console (timeline, blast
+radius, change-window correlator) plus a sanitize-diff viewer.
 
 ---
 
@@ -40,8 +42,8 @@ flowchart TB
     AGENT["AI Agents - Claude Code and Cursor"]
     NET(["netlog-ai analyzer core"])
     LOGS["Log Platforms - Kibana, Splunk, Loki, LibreNMS, syslog"]
-    LLM["LLM Runtimes - Ollama, Docker Model Runner, Claude"]
-    DEV["Network Devices - Junos, EOS, SR Linux, FRR"]
+    LLM["LLM Runtimes - Ollama, Docker Model Runner, Claude, Grok"]
+    DEV["Network Devices - Junos, EOS, SR Linux, FRR, SONiC, Cumulus"]
 
     OP -->|HTTP and JSON| NET
     AGENT -->|MCP stdio| NET
@@ -77,7 +79,7 @@ flowchart TB
     subgraph ENTRY["Entrypoints"]
         WEB["web/ - Flask plus vanilla-JS SPA, port 6060, ~30 api routes"]
         CLI["cli.py - serve, analyze, mcp"]
-        MCP["mcp_server/ - FastMCP stdio"]
+        MCP["mcp_server/ - MCPServer stdio"]
     end
 
     subgraph INGEST["Ingest"]
@@ -87,8 +89,9 @@ flowchart TB
 
     subgraph CORE["Analyzer Core"]
         SAN["sanitize.py - redact gate"]
-        CLS["classifier.py - ~60 regexes"]
+        CLS["classifier.py - 80 regexes"]
         ANA["analyzer.py - orchestrator"]
+        CAU["causal.py - timeline, blast, change-window"]
         SITE["site intelligence - topology, optimize, copilot"]
     end
 
@@ -100,6 +103,7 @@ flowchart TB
     WEB & CLI & MCP --> ANA
     SRC & ADP --> ANA
     ANA --> SAN --> CLS
+    ANA --> CAU
     ANA --> SITE
     ANA --> LLMC
     LLMC -.fallback.-> KB
@@ -113,7 +117,7 @@ flowchart TB
     class WEB,CLI,MCP entry
     class SRC,ADP in
     class SAN gate
-    class CLS,ANA,SITE core
+    class CLS,ANA,CAU,SITE core
     class LLMC,KB brain
 ```
 
@@ -132,18 +136,21 @@ sequenceDiagram
     participant API as Flask /api/analyze
     participant AN as analyzer.analyze
     participant CL as classifier
+    participant CA as causal
     participant SA as sanitize
     participant LK as llm and kb
 
     OP->>API: POST logs or site bundle
     API->>AN: analyze events and use_llm
-    AN->>CL: strip_ansi plus classify ~60 regex
+    AN->>CL: strip_ansi plus classify 80 regex
     CL-->>AN: ClassifiedEvents plus counts
     AN->>AN: dedup to ranked ActionItems by sev times count
+    AN->>CA: timeline blast change-window
+    CA-->>AN: timeline / blast / change_window
     loop top-N action items
         AN->>SA: scrub context secrets and public IPs
         SA-->>AN: sanitized incident context
-        AN->>LK: query ollama to local to claude
+        AN->>LK: query ollama to local to claude to grok
         alt LLM available
             LK-->>AN: 5-phase JSON playbook
         else off or failed
@@ -152,7 +159,7 @@ sequenceDiagram
     end
     AN->>AN: health_score 0 to 100 plus grade plus exec summary
     AN-->>API: AnalysisResult JSON
-    API-->>OP: score, actions, CLI, topology
+    API-->>OP: score, actions, CLI, topology, timeline
 ```
 
 ---
@@ -206,20 +213,23 @@ the tool never hard-fails on a missing model.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Ollama: provider local
+    [*] --> Ollama: provider ollama
     Ollama --> DMR: no response
     DMR --> Claude: no response or no socket
-    Claude --> RuleKB: API error or disabled
+    Claude --> Grok: no response or no key
+    Grok --> RuleKB: API error or disabled
 
     Ollama --> Done: text returned
     DMR --> Done: text returned
     Claude --> Done: text returned
+    Grok --> Done: text returned
     RuleKB --> Done: deterministic playbook
 
     Done --> [*]
 
     note right of Ollama : port 11434 native api chat
     note right of DMR : Docker Model Runner port 12434 unix socket
+    note right of Grok : xAI OpenAI-compat, sanitize-first
     note right of RuleKB : kb.lookup always emits actionable output
 ```
 
@@ -286,6 +296,7 @@ flowchart TB
         SANITIZE["sanitize.py"]
         CLASSIFIER["classifier.py"]
         ANALYZER["analyzer.py"]
+        CAUSAL["causal.py - timeline, blast, change-window"]
     end
 
     subgraph INTEL["intelligence"]
@@ -301,6 +312,7 @@ flowchart TB
 
     SOURCES & ADAPTERS --> ANALYZER
     ANALYZER --> SANITIZE --> CLASSIFIER
+    ANALYZER --> CAUSAL
     ANALYZER --> LLM
     LLM -.fallback.-> KB
     ANALYZER --> SITE
@@ -311,7 +323,7 @@ flowchart TB
     classDef site fill:#059669,stroke:#34d399,color:#fff
 
     class SOURCES,ADAPTERS in
-    class SANITIZE,CLASSIFIER,ANALYZER pipe
+    class SANITIZE,CLASSIFIER,ANALYZER,CAUSAL pipe
     class LLM,KB ai
     class TOPO,OPT,EXTRA site
 ```
@@ -325,9 +337,9 @@ flowchart TB
 | **Language** | Python 3.10+ (frozen dataclasses, `typing.Protocol`, `re`) |
 | **Web / API** | Flask 3 · flask-cors · gunicorn · vanilla JS · Cytoscape.js + ELK |
 | **Ingest** | `requests` · raw AF_UNIX socket HTTP · `subprocess` (docker CLI) · optional tfsm-fire / TextFSM (upstream withdrawn 2026-07 — manual install only, see [TFSM_AUTO_PARSER.md](TFSM_AUTO_PARSER.md)) |
-| **Intelligence** | Ollama · Docker Model Runner (OpenAI-compat) · Anthropic Claude (`claude-haiku-4-5`) · rule-based KB |
+| **Intelligence** | Ollama · Docker Model Runner (OpenAI-compat) · Anthropic Claude (`claude-haiku-4-5`) · xAI Grok (`grok-4`) · rule-based KB |
 | **Security** | `hashlib` (sha256 stable tokens) · `ipaddress` · sanitize-before-LLM gate · X-API-Token · CORS allow-list |
-| **Agent surface** | MCP SDK (FastMCP, optional) over stdio / streamable-http |
+| **Agent surface** | MCP SDK 2.x (`MCPServer`, optional) over stdio / streamable-http |
 | **Packaging** | `pyproject.toml` console scripts (`ai-log-analyzer` / `netlog-ai`) · Docker · docker-compose |
 
 ---
