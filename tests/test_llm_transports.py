@@ -32,6 +32,7 @@ def _isolated_llm_state(monkeypatch):
     arms the network tripwire for every test in this module."""
     snap = copy.deepcopy(llm._state)
     llm._state["anthropic_api_key"] = "sk-test-never-real"
+    llm._state["xai_api_key"] = ""
     monkeypatch.setattr(llm, "_SESSION", _NetworkTripwire())
     yield
     llm._state.clear()
@@ -185,6 +186,45 @@ def test_query_claude_provider_tries_claude_first(monkeypatch):
     assert called == ["claude"]
 
 
+# ── grok transport ───────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_grok_without_key_never_posts(monkeypatch):
+    llm._state["xai_api_key"] = ""
+    sess = _Session()
+    monkeypatch.setattr(llm, "_SESSION", sess)
+    assert llm._query_grok("sys", "user", 100) is None
+    assert not sess.calls
+    assert "not configured" in llm._state["last_errors"]["grok"]
+
+
+@pytest.mark.unit
+def test_grok_success_uses_openai_compat(monkeypatch):
+    llm._state["xai_api_key"] = "xai-test"
+    sess = _Session(_Resp(200, {"choices": [{"message": {"content": "playbook"}}]}))
+    monkeypatch.setattr(llm, "_SESSION", sess)
+    assert llm._query_grok("sys", "user", 200) == "playbook"
+    call = sess.calls[0]
+    assert call["url"].endswith("/chat/completions")
+    assert call["headers"]["Authorization"] == "Bearer xai-test"
+    assert call["json"]["model"] == llm._state["xai_model"]
+    assert "grok" not in llm._state["last_errors"]
+
+
+@pytest.mark.unit
+def test_query_grok_provider_tries_grok_first(monkeypatch):
+    llm._state["enabled"] = True
+    llm._state["provider"] = "grok"
+    llm._state["xai_api_key"] = "xai-test"
+    called: list[str] = []
+    monkeypatch.setitem(llm._PROVIDERS, "grok",
+                        lambda *a: called.append("grok") or "grok says hi")
+    monkeypatch.setitem(llm._PROVIDERS, "ollama",
+                        lambda *a: pytest.fail("fallback ran despite success"))
+    assert llm.query("sys", "user") == "grok says hi"
+    assert called == ["grok"]
+
+
 @pytest.mark.unit
 def test_query_claude_only_never_falls_back(monkeypatch):
     llm._state["enabled"] = True
@@ -203,7 +243,7 @@ def test_query_claude_only_never_falls_back(monkeypatch):
 def test_query_all_providers_fail_returns_none(monkeypatch):
     llm._state["enabled"] = True
     llm._state["provider"] = "ollama"
-    for name in ("ollama", "local", "claude"):
+    for name in ("ollama", "local", "claude", "grok"):
         monkeypatch.setitem(llm._PROVIDERS, name, lambda *a: None)
     assert llm.query("sys", "user") is None
 

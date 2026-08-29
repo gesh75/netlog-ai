@@ -315,3 +315,24 @@ def test_llm_status_full_in_dev_mode(client, monkeypatch):
     monkeypatch.setattr(web_app, "API_TOKEN", "")
     state = client.get("/api/llm/status").get_json()
     assert "last_errors" in state
+
+
+@pytest.mark.unit
+def test_sanitize_diff_redacts_and_reports_rules(client, monkeypatch):
+    monkeypatch.setattr(web_app, "API_TOKEN", "")
+    r = client.post("/api/sanitize-diff", json={
+        "text": 'snmp-server community mySecret ro\nssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDx' + "X" * 80,
+    })
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["total"] >= 1
+    assert "mySecret" not in body["sanitized"]
+    assert "AAAAB3NzaC1yc2EAAAADAQAB" not in body["sanitized"]
+    assert body["by_rule"]
+
+
+@pytest.mark.unit
+def test_sanitize_diff_rejects_non_string(client, monkeypatch):
+    monkeypatch.setattr(web_app, "API_TOKEN", "")
+    r = client.post("/api/sanitize-diff", json={"text": 12})
+    assert r.status_code == 400

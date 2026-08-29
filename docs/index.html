@@ -339,6 +339,7 @@
       <a href="#dataflow">Data flow</a>
       <a href="#stack">Tech</a>
       <a href="#components">Components</a>
+      <a href="#roadmap">Roadmap</a>
       <a href="#quickstart">Quickstart</a>
       <a class="nav-cta" href="https://github.com/gesh75/netlog-ai" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
@@ -350,13 +351,13 @@
   <section class="hero" id="hero" aria-label="Introduction">
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <span class="tagchip"><span class="spark" aria-hidden="true"></span>local-first · sanitize-before-LLM</span>
+        <span class="tagchip"><span class="spark" aria-hidden="true"></span>v0.5.2 · 0.6 in flight · local-first · sanitize-before-LLM</span>
         <h1 class="hero-title">netlog-ai</h1>
         <p class="hero-tag">Network logs in. <b>Ranked actions out.</b> A local, sanitize-first, multi-vendor AI log analyzer that turns raw syslog and CLI output into prioritized, copy-pastable root-cause playbooks.</p>
 
         <div class="chips" id="chips" role="list" aria-label="Project statistics">
-          <div class="chip" role="listitem"><div class="num" data-count="369">369</div><div class="lbl">tests collected</div></div>
-          <div class="chip" role="listitem"><div class="num" data-count="71">71</div><div class="lbl">regex patterns</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="423">423</div><div class="lbl">tests collected</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="80">80</div><div class="lbl">regex patterns</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="5">5</div><div class="lbl">log connectors</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="30">30</div><div class="lbl">demo devices</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="12">12</div><div class="lbl">MCP tools</div></div>
@@ -558,7 +559,7 @@
       <h2 class="title" id="overview-h">Network logs in. Ranked actions out.</h2>
       <div class="overview-grid">
         <div class="reveal">
-          <p class="lead">netlog-ai is a local-first, multi-vendor network log analyzer. It ingests syslog and CLI output from Junos, Arista EOS, Nokia SR Linux, and FRR, classifies events with a regex knowledge base, and deduplicates them into a severity-ranked action list. A local or cloud LLM then writes a 5-phase root-cause playbook with copy-pastable per-vendor CLI fixes — or, when no model is available, the tool degrades gracefully to a deterministic rule-based knowledge base.</p>
+          <p class="lead">netlog-ai is a local-first, multi-vendor network log analyzer. It ingests syslog and CLI output from Junos, Arista EOS, Nokia SR Linux, Cisco IOS-XE / NX-OS, SONiC, Cumulus, and FRR, classifies events with a regex knowledge base, and deduplicates them into a severity-ranked action list. A local or cloud LLM (Ollama, Docker Model Runner, Claude, or Grok) then writes a 5-phase root-cause playbook with copy-pastable per-vendor CLI fixes — or, when no model is available, the tool degrades gracefully to a deterministic rule-based knowledge base.</p>
           <p class="lead" style="margin-top:16px">Built for NOC operators and network engineers who need actionable, on-prem AI analysis without shipping data to a SaaS.</p>
           <div class="invariant">
             <div class="k">🛡️ Defining invariant — sanitize before LLM</div>
@@ -569,7 +570,7 @@
           <p style="margin:0 0 14px; font-weight:700; color:var(--ink)">The pipeline at a glance</p>
           <div class="mini-pipe">
             <div class="step"><span class="b">1</span> Ingest from any source → normalize to immutable LogEvents</div>
-            <div class="step"><span class="b">2</span> strip_ansi + 71 regexes → severity &amp; category</div>
+            <div class="step"><span class="b">2</span> strip_ansi + 80 regexes → severity &amp; category</div>
             <div class="step"><span class="b">3</span> Dedup into ranked ActionItems (sev × count)</div>
             <div class="step gate"><span class="b">🛡</span> Sanitize gate scrubs secrets &amp; public IPs</div>
             <div class="step"><span class="b">4</span> LLM chain → 5-phase playbook (or rule KB)</div>
@@ -605,7 +606,7 @@
     AGENT["AI Agents - Claude Code and Cursor"]
     NET(["netlog-ai analyzer core"])
     LOGS["Log Platforms - Kibana Splunk Loki LibreNMS syslog"]
-    LLM["LLM Runtimes - Ollama DMR Claude"]
+    LLM["LLM Runtimes - Ollama DMR Claude Grok"]
     DEV["Network Devices - Junos EOS SR Linux FRR"]
 
     OP -->|HTTP and JSON| NET
@@ -635,7 +636,7 @@
     subgraph ENTRY["Entrypoints"]
         WEB["web/ Flask + vanilla-JS SPA :6060"]
         CLI["cli.py serve analyze containers mcp"]
-        MCP["mcp_server/ FastMCP stdio"]
+        MCP["mcp_server/ MCPServer stdio"]
     end
     subgraph INGEST["Ingest"]
         SRC["sources/ kibana splunk loki syslog librenms"]
@@ -643,7 +644,7 @@
     end
     subgraph CORE["Analyzer Core"]
         SAN["sanitize.py redact gate"]
-        CLS["classifier.py 71 regexes"]
+        CLS["classifier.py 80 regexes"]
         ANA["analyzer.py orchestrator"]
         SITE["site intel topology optimize copilot"]
     end
@@ -699,13 +700,13 @@
 
     OP->>API: POST logs or site bundle
     API->>AN: analyze events and use_llm
-    AN->>CL: strip_ansi plus classify 71 regex
+    AN->>CL: strip_ansi plus classify 80 regex
     CL-->>AN: ClassifiedEvents plus counts
     AN->>AN: dedup to ranked ActionItems by sev x count
     loop top-N action items
         AN->>SA: scrub secrets and public IPs
         SA-->>AN: sanitized incident context
-        AN->>LK: query Ollama to DMR to Claude
+        AN->>LK: query Ollama to DMR to Claude to Grok
         alt LLM available
             LK-->>AN: 5-phase JSON playbook
         else off or failed
@@ -812,6 +813,21 @@ pytest --cov=src --cov-report=term-missing</pre>
       </div>
     </div>
   </section>
+
+  <!-- ROADMAP -->
+  <section id="roadmap" aria-labelledby="road-h">
+    <div class="wrap">
+      <p class="eyebrow">Status + plan</p>
+      <h2 class="title" id="road-h">From 0.5.2 into 0.6</h2>
+      <p class="lead" style="margin-bottom:30px">v0.5.2 is the security-hardened tree on PyPI. 0.6 is the causal console: Grok as a first-class sanitize-first backend, a timeline of the incident, blast-radius, change-window correlation, a sanitize-diff viewer, a custom-rule editor, and SONiC + Cumulus classifier coverage.</p>
+      <div class="grid features">
+        <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>0.5.2 — shipped</h3><p>Fail-closed docker-exec allow-list, POP-scoped site prefixes, secret-sanitized template memory, incident-search API token, bounded custom regex, webhook payload sanitize. 369 tests at that tag.</p></article>
+        <article class="card feat reveal"><div class="ico" aria-hidden="true">▶</div><h3>0.6.0 — building</h3><p>Grok (xAI) provider, causal timeline, blast-radius estimator, change-window correlator, sanitize-diff API + UI, custom-rule editor, SONiC orchagent/syncd/swss/teamd + Cumulus clagd/switchd/NVUE patterns.</p></article>
+        <article class="card feat reveal"><div class="ico" aria-hidden="true">·</div><h3>0.7.0 — planned</h3><p>Multi-site comparison, Slack/Teams webhook simulator with redaction, cross-run Drain template UI, voice incident brief, PDF executive one-pager from the console.</p></article>
+      </div>
+    </div>
+  </section>
+
 </main>
 
 <footer>
@@ -835,8 +851,6 @@ pytest --cov=src --cov-report=term-missing</pre>
 <button type="button" id="toTop" aria-label="Back to top" title="Back to top">↑</button>
 
 <script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /* ---------- Data ---------- */
@@ -846,10 +860,12 @@ pytest --cov=src --cov-report=term-missing</pre>
     { icon: "🤖", title: "MCP server mode", desc: "The analyzer core is agent-callable over stdio from Claude Code / Cursor / Continue, exposing analyze_logs, fetch_logs, get_top_offenders, correlate_sources, analyze_device, and analyze_site." },
     { icon: "🔗", title: "Cross-source correlation", desc: "The Device tab's Correlate Sources view scans every registered source and tags each host confirmed (flagged by ≥ 2 independent sources) or suspected (1 only) in a sortable, severity-coded table — single-source noise is filtered before escalation." },
     { icon: "🔬", title: "Per-device triage", desc: "The Device tab's Triage Device panel returns one host's verdict, a 0–100 health score ring, a severity histogram, top processes, and frequency-deduped error patterns in a single anchored view." },
-    { icon: "🔎", title: "Multi-vendor classify & prioritize", desc: "71 regex patterns across Junos, Arista EOS, FRR, IOS and RFC-3164/5424 dedup into a severity × count ranked action list with recovery events excluded." },
-    { icon: "🧠", title: "Local-first LLM, graceful fallback", desc: "Provider chain walks Ollama → Docker Model Runner → Anthropic Claude, then degrades to a deterministic rule-based KB so the tool never hard-fails on a missing model." },
+    { icon: "🔎", title: "Multi-vendor classify & prioritize", desc: "80 regex patterns across Junos, EOS, FRR, IOS-XE, NX-OS, SR Linux, SONiC, Cumulus and RFC-3164/5424 dedup into a severity × count ranked action list with recovery events excluded." },
+    { icon: "🧠", title: "Local-first LLM, graceful fallback", desc: "Provider chain walks Ollama → Docker Model Runner → Anthropic Claude → xAI Grok, then degrades to a deterministic rule-based KB so the tool never hard-fails on a missing model. Grok is sanitize-first — it never sees unsanitized logs." },
     { icon: "🗺️", title: "Multi-layer topology", desc: "Cytoscape.js + ELK renders PHYSICAL, BGP, OSPF, and VXLAN as separate overlays on the same fabric, with AS/RID/VTEP on nodes and inferred link speed on edges." },
     { icon: "📄", title: "Executable remediation + reports", desc: "Every finding ships Junos set lines, EOS running-config patches, and FRR vtysh commands plus rollback/verify steps, exportable as Markdown/HTML/CSV/PDF." },
+    { icon: "⏱", title: "Causal timeline + blast radius", desc: "0.6 causal console: chronological incident chain with cause links (link-down → BGP/OSPF/LAG, config-commit → critical), a blast-radius estimator naming the epicenter, and a change-window correlator that flags commits inside the same window." },
+    { icon: "🛡", title: "Sanitize diff + custom rule editor", desc: "See exactly what the LLM is allowed to see (per-rule redaction counts) and extend the classifier at runtime from the UI — custom rules run before the built-in KB." },
     { icon: "⌨️", title: "Keyboard-first, accessible PWA", desc: "WCAG-AA dark dashboard with 1/2/3 tab switching, Cmd/Ctrl+Enter to run, ARIA roles, prefers-reduced-motion, and an installable PWA manifest." }
   ];
 
@@ -857,22 +873,23 @@ pytest --cov=src --cov-report=term-missing</pre>
     "Python 3.10+ (frozen dataclasses, typing.Protocol, re)", "Flask 3", "flask-cors", "gunicorn",
     "vanilla JS (no build)", "Cytoscape.js + ELK", "requests", "raw AF_UNIX socket HTTP",
     "subprocess (docker CLI)", "Ollama", "Docker Model Runner (OpenAI-compat)",
-    "Anthropic Claude (claude-haiku-4-5)", "rule-based KB", "MCP SDK (FastMCP)",
+    "Anthropic Claude (claude-haiku-4-5)", "xAI Grok (grok-4)", "rule-based KB", "MCP SDK (MCPServer)",
     "tfsm-fire / TextFSM (optional)", "pytest + pytest-cov + ruff", "Docker + docker-compose"
   ];
 
   const components = [
     { name: "analyzer.py", tech: "Python · frozen dataclasses", resp: "End-to-end pipeline orchestrator: classify → dedup into ranked ActionItems → sanitize → deep-analyze top-N → health score → assemble AnalysisResult." },
     { name: "sanitize.py", tech: "re · ipaddress · hashlib", resp: "Always-on pre-LLM redaction gate: scrubs shadow hashes ($1$/$5$/$6$), Junos $9$, SSH keys, SNMP/RADIUS/TACACS+/IPsec PSKs, and replaces public IPv4 with stable PUB-&lt;hash&gt; pseudonym tokens (a public IP is never sent to the LLM in clear text) before any outbound call." },
-    { name: "classifier.py", tech: "Python regex", resp: "Deterministic event classifier: 71 regex patterns across Junos/EOS/FRR/IOS/RFC-3164/5424 with severity + category lookup; strip_ansi removes VT100 escapes at the LogEvent → ClassifiedEvent boundary." },
-    { name: "llm.py", tech: "requests · AF_UNIX HTTP · Anthropic API", resp: "Provider fallback chain: Ollama (:11434) → Docker Model Runner (:12434 TCP + Unix socket) → Anthropic Claude (claude-haiku-4-5); returns None to trigger the rule-based KB." },
+    { name: "classifier.py", tech: "Python regex", resp: "Deterministic event classifier: 80 regex patterns across Junos/EOS/FRR/IOS-XE/NX-OS/SR Linux/SONiC/Cumulus with severity + category lookup; strip_ansi removes VT100 escapes at the LogEvent → ClassifiedEvent boundary." },
+    { name: "llm.py", tech: "requests · AF_UNIX HTTP · Anthropic API", resp: "Provider fallback chain: Ollama (:11434) → Docker Model Runner (:12434 TCP + Unix socket) → Anthropic Claude → xAI Grok; returns None to trigger the rule-based KB." },
     { name: "kb.py", tech: "Python", resp: "Rule-based deep-analysis knowledge base producing deterministic 5-phase playbooks when no LLM is available." },
     { name: "sources/", tech: "requests · typing.Protocol", resp: "Pluggable connector layer (LogSource Protocol + SourceManager): kibana, splunk, loki, syslog UDP/TCP listener, librenms — one config dict, hot-pluggable." },
     { name: "adapters/", tech: "subprocess (docker CLI) · TextFSM", resp: "Local ingest adapters: frr (docker logs → LogEvent), file (RFC3164/5424/Junos/freeform parser), network_tool, tfsm_auto (optional TextFSM auto-detect)." },
     { name: "web/app.py", tech: "Flask 3 · vanilla JS · Cytoscape.js + ELK", resp: "Flask create_app() exposing ~31 API routes (incl. /api/correlate and /api/triage — the Device-tab cross-source correlation and per-device triage surfaces) plus a no-build vanilla-JS SPA (index.html + app.js) on port 6060." },
-    { name: "mcp_server/server.py", tech: "MCP SDK (FastMCP) · stdio", resp: "Agent surface: FastMCP stdio server exposing list_sources, add_source, fetch_logs, search_logs, analyze_logs, get_top_offenders, correlate_sources, analyze_device, list_sites, analyze_site + healthcheck/inventory." },
+    { name: "mcp_server/server.py", tech: "MCP SDK (MCPServer) · stdio", resp: "Agent surface: MCP 2.x stdio server exposing list_sources, add_source, fetch_logs, search_logs, analyze_logs, get_top_offenders, correlate_sources, analyze_device, list_sites, analyze_site + healthcheck/inventory." },
     { name: "cli.py", tech: "Python argparse", resp: "Console entrypoint (ai-log-analyzer / netlog-ai) with serve, analyze, containers, and mcp subcommands." },
     { name: "topology_infer.py", tech: "Python", resp: "Multi-signal edge inference (BGP, MLAG, descriptions, subnets) feeding the multi-layer topology graph builder (topology.py)." },
+    { name: "causal.py", tech: "Python", resp: "0.6 causal console: chronological timeline with cause links, blast-radius estimator, and change-window correlator. Wired into analyze() so Flask, CLI and MCP share the same surfaces." },
     { name: "site_optimize.py", tech: "Python", resp: "Site-wide cross-device gap finder emitting split scores: fabric_design_score and operational_readiness_score with ALLOWED_HOSTNAMES anchoring." }
   ];
 
@@ -894,16 +911,19 @@ pytest --cov=src --cov-report=term-missing</pre>
       <div class="tline"><b>Tech:</b> ${c.tech}</div>
     </article>`).join('');
 
-  /* ---------- Mermaid ---------- */
-  mermaid.initialize({
-    startOnLoad: true,
-    theme: 'dark',
-    securityLevel: 'strict',
-    themeVariables: {
-      primaryColor: '#1e293b', primaryTextColor: '#e2e8f0', lineColor: '#64748b',
-      primaryBorderColor: '#475569', fontFamily: 'ui-sans-serif, system-ui, sans-serif'
-    }
-  });
+  /* ---------- Mermaid (optional; counters must not depend on it) ---------- */
+  try {
+    const { default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      securityLevel: 'strict',
+      themeVariables: {
+        primaryColor: '#1e293b', primaryTextColor: '#e2e8f0', lineColor: '#64748b',
+        primaryBorderColor: '#475569', fontFamily: 'ui-sans-serif, system-ui, sans-serif'
+      }
+    });
+  } catch (e) { console.warn('mermaid skipped', e); }
 
   /* ---------- Copy buttons ---------- */
   document.querySelectorAll('.copy-btn').forEach(btn => {
@@ -945,12 +965,16 @@ pytest --cov=src --cov-report=term-missing</pre>
   const counters = document.querySelectorAll('[data-count]');
   const animateCount = (el) => {
     const target = parseInt(el.dataset.count, 10);
-    if (reduceMotion) { el.textContent = target; return; }
-    const dur = 1100; const start = performance.now();
+    // Always paint the final number first so a stalled rAF / failed module
+    // never leaves the chip at 0 (the previous GitHub Pages bug).
+    el.textContent = String(target);
+    if (reduceMotion || !Number.isFinite(target) || target <= 0) return;
+    const from = Math.max(0, target - Math.min(40, Math.floor(target * 0.25)));
+    const dur = 700; const start = performance.now();
     const tick = (now) => {
       const p = Math.min((now - start) / dur, 1);
       const eased = 1 - Math.pow(1 - p, 3);
-      el.textContent = Math.round(target * eased);
+      el.textContent = String(Math.round(from + (target - from) * eased));
       if (p < 1) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
