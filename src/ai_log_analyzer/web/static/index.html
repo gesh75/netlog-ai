@@ -1146,12 +1146,37 @@
             <option value="local"       title="Docker Model Runner — local LLM via Docker">Docker Model Runner</option>
             <option value="claude"      title="Anthropic Claude with local fallback if unreachable">Claude + fallback</option>
             <option value="claude-only" title="Anthropic Claude only — no fallback">Claude Only</option>
+            <option value="grok"        title="xAI Grok — sanitize-first, OpenAI-compatible">Grok (xAI)</option>
           </select>
           <label style="display:flex;align-items:center;gap:8px;text-transform:none;">
             <input id="use-llm" type="checkbox" checked style="width:auto;margin:0;">
             <span style="font-size:12px;">Use LLM for deep analysis</span>
           </label>
           <div id="status"></div>
+        </div>
+      </details>
+
+      <details class="side-section" id="rules-section">
+        <summary>Custom rules</summary>
+        <div class="side-section-body">
+          <p class="row-msg" style="margin:0 0 8px;">Checked before the built-in KB. Runtime-only unless you persist them via <code>AI_LOG_ANALYZER_CUSTOM_RULES</code>.</p>
+          <label for="rule-pattern">Pattern</label>
+          <input id="rule-pattern" type="text" placeholder="bgp.*hold.?timer" autocomplete="off">
+          <label for="rule-severity">Severity</label>
+          <select id="rule-severity">
+            <option value="critical">critical</option>
+            <option value="high" selected>high</option>
+            <option value="medium">medium</option>
+            <option value="low">low</option>
+            <option value="info">info</option>
+          </select>
+          <label for="rule-category">Category</label>
+          <input id="rule-category" type="text" placeholder="routing" autocomplete="off">
+          <label for="rule-desc">Description</label>
+          <input id="rule-desc" type="text" placeholder="Site-specific BGP hold timer" autocomplete="off">
+          <button id="rule-add-btn" type="button" class="tiny" style="width:auto;margin-top:8px;">Add rule</button>
+          <div id="rule-status" class="row-msg" style="margin-top:6px;"></div>
+          <ul id="rule-list" class="summary" style="margin-top:8px;"></ul>
         </div>
       </details>
 
@@ -1493,6 +1518,30 @@
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+
+    <div class="panel" id="timeline-panel" style="display:none;">
+      <h2>⏱ Causal timeline <span class="h2-count" id="timeline-count"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Chronological chain of the incident. A later node shows <em>caused by</em> when a link-down, BGP drop, or config commit likely precipitated it.</p>
+      <ol id="timeline-list" class="summary"></ol>
+    </div>
+
+    <div class="panel" id="blast-panel" style="display:none;">
+      <h2>💥 Blast radius <span class="h2-count" id="blast-count"></span></h2>
+      <p class="row-msg" id="blast-impact" style="margin:0 0 8px;"></p>
+      <div id="blast-chips" class="chip-pick-actions"></div>
+    </div>
+
+    <div class="panel" id="changewin-panel" style="display:none;">
+      <h2>🪟 Change window</h2>
+      <p class="row-msg" id="changewin-msg" style="margin:0 0 8px;"></p>
+      <ul id="changewin-samples" class="summary"></ul>
+    </div>
+
+    <div class="panel" id="sanitize-panel" style="display:none;">
+      <h2>🛡 Sanitize diff <span class="h2-count" id="sanitize-count"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">What the LLM is allowed to see. Secrets, SSH keys, SNMP/RADIUS, and public IPs are gone before any outbound call.</p>
+      <pre id="sanitize-out" class="row-msg" style="white-space:pre-wrap;max-height:220px;overflow:auto;"></pre>
     </div>
 
     <div class="panel" id="optimize-panel" style="display:none;">

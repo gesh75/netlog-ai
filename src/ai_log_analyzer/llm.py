@@ -1,9 +1,10 @@
-"""Pluggable LLM client with four providers:
+"""Pluggable LLM client with five providers:
 
   - "ollama"      : Ollama native API (gemma3 / qwen2.5-coder / llama3.2) — preferred local
   - "local"       : Docker Model Runner (OpenAI-compatible) via TCP or Unix socket
   - "claude"      : Anthropic Claude direct API
   - "claude-only" : Claude only (never call local)
+  - "grok"        : xAI Grok (OpenAI-compatible) — sanitize-first, first-class in 0.6
 
 Provider is selectable at runtime via set_provider() — used by /api/llm/provider.
 Always returns either a cleaned string or None (caller falls back to rule-based KB).
@@ -40,7 +41,7 @@ def _cached_probe(name: str, fn: Callable[[], bool]) -> bool:
 
 # ── Config (env-driven, mutable at runtime via set_provider) ──────────────────
 _state: dict[str, object] = {
-    # ollama | local | claude | claude-only
+    # ollama | local | claude | claude-only | grok
     "provider":           os.environ.get("LLM_PROVIDER", "ollama").lower(),
     "enabled":            os.environ.get("LLM_ENABLED", "true").lower() == "true",
     # Ollama (native API)
@@ -52,12 +53,16 @@ _state: dict[str, object] = {
     # Anthropic
     "anthropic_api_key":  os.environ.get("ANTHROPIC_API_KEY", ""),
     "anthropic_model":    os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+    # xAI Grok (OpenAI-compatible chat completions)
+    "xai_api_key":        os.environ.get("XAI_API_KEY", ""),
+    "xai_model":          os.environ.get("XAI_MODEL", "grok-4"),
+    "xai_url":            os.environ.get("XAI_URL", "https://api.x.ai/v1"),
     "timeout":            int(os.environ.get("LLM_TIMEOUT", "120")),
     # Last error per provider — exposed via /api/llm/status for the UI
     "last_errors":        {},
 }
 
-_VALID_PROVIDERS = {"ollama", "local", "claude", "claude-only"}
+_VALID_PROVIDERS = {"ollama", "local", "claude", "claude-only", "grok"}
 
 # Unix sockets for Docker Model Runner (auto-discovered)
 _DOCKER_SOCKETS: list[str] = [
@@ -82,6 +87,8 @@ def get_state() -> dict[str, object]:
         "local_model":         _state["local_model"],
         "anthropic_model":     _state["anthropic_model"],
         "anthropic_key_set":   bool(_state["anthropic_api_key"]),
+        "xai_model":           _state["xai_model"],
+        "xai_key_set":         bool(_state["xai_api_key"]),
         "providers_available": _list_available_providers(),
         "last_errors":         dict(_state.get("last_errors", {})),
     }
@@ -106,6 +113,8 @@ def set_provider(provider: str) -> tuple[bool, str]:
         return False, f"provider must be one of: {sorted(_VALID_PROVIDERS)}"
     if p in ("claude", "claude-only") and not _state["anthropic_api_key"]:
         return False, "ANTHROPIC_API_KEY not configured — cannot select claude provider"
+    if p == "grok" and not _state["xai_api_key"]:
+        return False, "XAI_API_KEY not configured — cannot select grok provider"
     _state["provider"] = p
     return True, p
 
@@ -119,9 +128,10 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> Option
     """Run an LLM query honoring the configured provider. Returns text or None on full failure.
 
     Fallback chain when primary provider fails:
-      ollama   → docker-runner → claude (if key set)
-      local    → ollama        → claude (if key set)
-      claude   → ollama        → docker-runner
+      ollama   → docker-runner → claude (if key set) → grok (if key set)
+      local    → ollama        → claude (if key set) → grok (if key set)
+      claude   → ollama        → docker-runner → grok (if key set)
+      grok     → ollama        → docker-runner → claude (if key set)
       claude-only → claude only (no fallback)
     """
     if not _state["enabled"]:
@@ -134,13 +144,15 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> Option
 
     order: list[str]
     if provider == "ollama":
-        order = ["ollama", "local", "claude"]
+        order = ["ollama", "local", "claude", "grok"]
     elif provider == "local":
-        order = ["local", "ollama", "claude"]
+        order = ["local", "ollama", "claude", "grok"]
     elif provider == "claude":
-        order = ["claude", "ollama", "local"]
+        order = ["claude", "ollama", "local", "grok"]
+    elif provider == "grok":
+        order = ["grok", "ollama", "local", "claude"]
     else:
-        order = ["ollama", "local", "claude"]
+        order = ["ollama", "local", "claude", "grok"]
 
     for name in order:
         text = _PROVIDERS[name](system_prompt, user_prompt, max_tokens)
@@ -229,6 +241,52 @@ def _query_claude(system_prompt: str, user_prompt: str, max_tokens: int) -> Opti
         return None
     except requests.RequestException as e:
         _record_error("claude", f"Connection error: {e}")
+        return None
+
+
+# ── xAI Grok (OpenAI-compatible) ─────────────────────────────────────────────
+
+def _query_grok(system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+    """xAI Grok via /v1/chat/completions. Sanitize-first is the caller's job."""
+    api_key = str(_state["xai_api_key"])
+    if not api_key:
+        _record_error("grok", "XAI_API_KEY not configured")
+        return None
+    base = str(_state["xai_url"]).rstrip("/")
+    payload = {
+        "model": _state["xai_model"],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.2,
+        "stream": False,
+    }
+    try:
+        r = _SESSION.post(
+            f"{base}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "content-type": "application/json",
+            },
+            json=payload,
+            timeout=int(_state["timeout"]),
+        )
+        if r.status_code != 200:
+            _record_error("grok", f"HTTP {r.status_code}: {r.text[:200]}")
+            return None
+        text = _extract_openai_text(r.json())
+        if text:
+            _clear_error("grok")
+            return text
+        _record_error("grok", "Empty content in Grok response")
+        return None
+    except requests.Timeout:
+        _record_error("grok", f"Timeout after {_state['timeout']}s")
+        return None
+    except requests.RequestException as e:
+        _record_error("grok", f"Connection error: {e}")
         return None
 
 
@@ -373,6 +431,8 @@ def _list_available_providers() -> list[dict]:
          "model": _state["local_model"]},
         {"id": "claude", "available": bool(_state["anthropic_api_key"]),
          "model": _state["anthropic_model"]},
+        {"id": "grok", "available": bool(_state["xai_api_key"]),
+         "model": _state["xai_model"]},
     ]
 
 
@@ -381,4 +441,5 @@ _PROVIDERS: dict[str, Callable[[str, str, int], Optional[str]]] = {
     "ollama": _query_ollama,
     "local":  _query_docker_runner,
     "claude": _query_claude,
+    "grok":   _query_grok,
 }

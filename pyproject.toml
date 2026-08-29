@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netlog-ai"
-version = "0.5.2"
-description = "AI-powered network syslog analyzer with pluggable LLM providers (local Docker Model Runner / Anthropic Claude) and lab adapters."
+version = "0.6.0"
+description = "AI-powered network syslog analyzer with pluggable LLM providers (local Docker Model Runner / Anthropic Claude / xAI Grok) and lab adapters."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Georgi Gaydarov" }]
-keywords = ["network", "syslog", "log-analysis", "ai", "llm", "claude", "frr", "junos", "eos", "bgp", "ospf"]
+keywords = ["network", "syslog", "log-analysis", "ai", "llm", "claude", "grok", "frr", "junos", "eos", "bgp", "ospf", "sonic", "cumulus"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: System Administrators",

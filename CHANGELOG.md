@@ -17,6 +17,36 @@ loose semantic versioning.
   this project and mcp 2.0 require Python >=3.10, and a fallback import would
   hide the next API move the same way #16 was hidden.
 
+## [0.6.0] - 2026-08-29
+
+Causal console release.
+
+### Added
+
+- **xAI Grok LLM provider** (`LLM_PROVIDER=grok`, `XAI_API_KEY`) — OpenAI-compatible
+  `/v1/chat/completions`, sanitize-first like every other backend. Joins the
+  fallback chain after Ollama / DMR / Claude. Selecting Grok without a key is
+  rejected the same way Claude is.
+- **Causal console** (`causal.py`) — chronological incident timeline with
+  cause links (link-down → BGP/OSPF/LAG, config-commit → critical), a
+  blast-radius estimator naming the epicenter, and a change-window correlator
+  that flags commits inside the same incident. Wired into `analyze()` so Flask,
+  CLI, and MCP all see `timeline` / `blast` / `change_window` / `sanitize_diff`.
+- **Sanitize-diff preview** — `POST /api/sanitize-diff` plus a UI panel that
+  shows the redacted text and per-rule counts (what the LLM is allowed to see).
+- **Custom-rule editor** in the Flask UI (runtime `POST /api/rules`, listed
+  next to the built-in KB).
+- **SONiC + Cumulus classifier patterns** — orchagent / syncd / SWSS / teamd,
+  switchd / clagd / ifupdown2 / PTMD, NVUE/NCLU and ConfigDB commits. First-match
+  specific tokens sit ahead of the generic `commit` / `link down` rules.
+  Suite 369 → **423** tests.
+
+### Changed
+
+- GitHub Pages counters paint the final number immediately (the previous
+  count-up animation could leave chips at 0 if mermaid's CDN module hung).
+- Docs: 80 regex patterns, Grok in the provider chain, 0.6 roadmap section.
+
 ## [0.5.2] - 2026-08-23
 
 Security and hardening release.
