@@ -351,7 +351,7 @@
   <section class="hero" id="hero" aria-label="Introduction">
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <span class="tagchip"><span class="spark" aria-hidden="true"></span>v0.5.2 · 0.6 in flight · local-first · sanitize-before-LLM</span>
+        <span class="tagchip"><span class="spark" aria-hidden="true"></span>v0.6.0 · causal console · sanitize-before-LLM</span>
         <h1 class="hero-title">netlog-ai</h1>
         <p class="hero-tag">Network logs in. <b>Ranked actions out.</b> A local, sanitize-first, multi-vendor AI log analyzer that turns raw syslog and CLI output into prioritized, copy-pastable root-cause playbooks.</p>
 
@@ -818,11 +818,11 @@ pytest --cov=src --cov-report=term-missing</pre>
   <section id="roadmap" aria-labelledby="road-h">
     <div class="wrap">
       <p class="eyebrow">Status + plan</p>
-      <h2 class="title" id="road-h">From 0.5.2 into 0.6</h2>
-      <p class="lead" style="margin-bottom:30px">v0.5.2 is the security-hardened tree on PyPI. 0.6 is the causal console: Grok as a first-class sanitize-first backend, a timeline of the incident, blast-radius, change-window correlation, a sanitize-diff viewer, a custom-rule editor, and SONiC + Cumulus classifier coverage.</p>
+      <h2 class="title" id="road-h">0.6.0 shipped · 0.7 next</h2>
+      <p class="lead" style="margin-bottom:30px">v0.6.0 is the causal console: Grok as a first-class sanitize-first backend, a timeline of the incident, blast-radius, change-window correlation, a sanitize-diff viewer, a custom-rule editor, and SONiC + Cumulus classifier coverage. 423 tests.</p>
       <div class="grid features">
-        <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>0.5.2 — shipped</h3><p>Fail-closed docker-exec allow-list, POP-scoped site prefixes, secret-sanitized template memory, incident-search API token, bounded custom regex, webhook payload sanitize. 369 tests at that tag.</p></article>
-        <article class="card feat reveal"><div class="ico" aria-hidden="true">▶</div><h3>0.6.0 — building</h3><p>Grok (xAI) provider, causal timeline, blast-radius estimator, change-window correlator, sanitize-diff API + UI, custom-rule editor, SONiC orchagent/syncd/swss/teamd + Cumulus clagd/switchd/NVUE patterns.</p></article>
+        <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>0.5.2 — shipped</h3><p>Fail-closed docker-exec allow-list, POP-scoped site prefixes, secret-sanitized template memory, incident-search API token, bounded custom regex, webhook payload sanitize.</p></article>
+        <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>0.6.0 — shipped</h3><p>Grok (xAI) provider, causal timeline, blast-radius estimator, change-window correlator, sanitize-diff API + UI, custom-rule editor, SONiC orchagent/syncd/swss/teamd + Cumulus clagd/switchd/NVUE/PTMD patterns.</p></article>
         <article class="card feat reveal"><div class="ico" aria-hidden="true">·</div><h3>0.7.0 — planned</h3><p>Multi-site comparison, Slack/Teams webhook simulator with redaction, cross-run Drain template UI, voice incident brief, PDF executive one-pager from the console.</p></article>
       </div>
     </div>

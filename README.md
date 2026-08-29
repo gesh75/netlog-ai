@@ -17,7 +17,7 @@
 
 [![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-423%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
-> 📓 Recent changes — cross-source correlation + per-device triage (MCP tools **and** Device-tab UI) — are in [`CHANGELOG.md`](CHANGELOG.md).
+> 📓 Recent changes — **0.6.0 causal console** (Grok, timeline, blast radius, SONiC/Cumulus) — are in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -31,6 +31,17 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 - Built for **multi-vendor reality** — not a Cisco-only tool retrofitted with a chatbot.
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
+
+## What's new — 0.6 causal console
+
+v0.6.0 (2026-08-29) ships the causal console on top of the 0.5.2 security tree:
+
+- **xAI Grok** as a first-class sanitize-first LLM backend (`LLM_PROVIDER=grok`, `XAI_API_KEY`)
+- **Causal timeline**, **blast-radius estimator**, and **change-window correlator** on every `analyze()` — Flask, CLI, and MCP share the same fields
+- **Sanitize-diff** (`POST /api/sanitize-diff` + UI) so you can see exactly what the model is allowed to see
+- **Custom-rule editor** in the Flask UI
+- **SONiC + Cumulus** classifier patterns (orchagent / syncd / SWSS / teamd, clagd / switchd / NVUE / PTMD)
+- Suite **423 tests**. Docs: <https://gesh75.github.io/netlog-ai/>
 
 ## What's new — connectors + MCP server
 
