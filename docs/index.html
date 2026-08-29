@@ -355,11 +355,11 @@
         <p class="hero-tag">Network logs in. <b>Ranked actions out.</b> A local, sanitize-first, multi-vendor AI log analyzer that turns raw syslog and CLI output into prioritized, copy-pastable root-cause playbooks.</p>
 
         <div class="chips" id="chips" role="list" aria-label="Project statistics">
-          <div class="chip" role="listitem"><div class="num" data-count="192">0</div><div class="lbl">tests collected</div></div>
-          <div class="chip" role="listitem"><div class="num" data-count="55">0</div><div class="lbl">regex patterns</div></div>
-          <div class="chip" role="listitem"><div class="num" data-count="5">0</div><div class="lbl">log connectors</div></div>
-          <div class="chip" role="listitem"><div class="num" data-count="30">0</div><div class="lbl">demo devices</div></div>
-          <div class="chip" role="listitem"><div class="num" data-count="12">0</div><div class="lbl">MCP tools</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="369">369</div><div class="lbl">tests collected</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="71">71</div><div class="lbl">regex patterns</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="5">5</div><div class="lbl">log connectors</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="30">30</div><div class="lbl">demo devices</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="12">12</div><div class="lbl">MCP tools</div></div>
         </div>
 
         <div class="cta-row">
@@ -569,7 +569,7 @@
           <p style="margin:0 0 14px; font-weight:700; color:var(--ink)">The pipeline at a glance</p>
           <div class="mini-pipe">
             <div class="step"><span class="b">1</span> Ingest from any source → normalize to immutable LogEvents</div>
-            <div class="step"><span class="b">2</span> strip_ansi + 55 regexes → severity &amp; category</div>
+            <div class="step"><span class="b">2</span> strip_ansi + 71 regexes → severity &amp; category</div>
             <div class="step"><span class="b">3</span> Dedup into ranked ActionItems (sev × count)</div>
             <div class="step gate"><span class="b">🛡</span> Sanitize gate scrubs secrets &amp; public IPs</div>
             <div class="step"><span class="b">4</span> LLM chain → 5-phase playbook (or rule KB)</div>
@@ -643,7 +643,7 @@
     end
     subgraph CORE["Analyzer Core"]
         SAN["sanitize.py redact gate"]
-        CLS["classifier.py 55 regexes"]
+        CLS["classifier.py 71 regexes"]
         ANA["analyzer.py orchestrator"]
         SITE["site intel topology optimize copilot"]
     end
@@ -699,7 +699,7 @@
 
     OP->>API: POST logs or site bundle
     API->>AN: analyze events and use_llm
-    AN->>CL: strip_ansi plus classify 55 regex
+    AN->>CL: strip_ansi plus classify 71 regex
     CL-->>AN: ClassifiedEvents plus counts
     AN->>AN: dedup to ranked ActionItems by sev x count
     loop top-N action items
@@ -846,7 +846,7 @@ pytest --cov=src --cov-report=term-missing</pre>
     { icon: "🤖", title: "MCP server mode", desc: "The analyzer core is agent-callable over stdio from Claude Code / Cursor / Continue, exposing analyze_logs, fetch_logs, get_top_offenders, correlate_sources, analyze_device, and analyze_site." },
     { icon: "🔗", title: "Cross-source correlation", desc: "The Device tab's Correlate Sources view scans every registered source and tags each host confirmed (flagged by ≥ 2 independent sources) or suspected (1 only) in a sortable, severity-coded table — single-source noise is filtered before escalation." },
     { icon: "🔬", title: "Per-device triage", desc: "The Device tab's Triage Device panel returns one host's verdict, a 0–100 health score ring, a severity histogram, top processes, and frequency-deduped error patterns in a single anchored view." },
-    { icon: "🔎", title: "Multi-vendor classify & prioritize", desc: "55 regex patterns across Junos, Arista EOS, FRR, IOS and RFC-3164/5424 dedup into a severity × count ranked action list with recovery events excluded." },
+    { icon: "🔎", title: "Multi-vendor classify & prioritize", desc: "71 regex patterns across Junos, Arista EOS, FRR, IOS and RFC-3164/5424 dedup into a severity × count ranked action list with recovery events excluded." },
     { icon: "🧠", title: "Local-first LLM, graceful fallback", desc: "Provider chain walks Ollama → Docker Model Runner → Anthropic Claude, then degrades to a deterministic rule-based KB so the tool never hard-fails on a missing model." },
     { icon: "🗺️", title: "Multi-layer topology", desc: "Cytoscape.js + ELK renders PHYSICAL, BGP, OSPF, and VXLAN as separate overlays on the same fabric, with AS/RID/VTEP on nodes and inferred link speed on edges." },
     { icon: "📄", title: "Executable remediation + reports", desc: "Every finding ships Junos set lines, EOS running-config patches, and FRR vtysh commands plus rollback/verify steps, exportable as Markdown/HTML/CSV/PDF." },
@@ -864,7 +864,7 @@ pytest --cov=src --cov-report=term-missing</pre>
   const components = [
     { name: "analyzer.py", tech: "Python · frozen dataclasses", resp: "End-to-end pipeline orchestrator: classify → dedup into ranked ActionItems → sanitize → deep-analyze top-N → health score → assemble AnalysisResult." },
     { name: "sanitize.py", tech: "re · ipaddress · hashlib", resp: "Always-on pre-LLM redaction gate: scrubs shadow hashes ($1$/$5$/$6$), Junos $9$, SSH keys, SNMP/RADIUS/TACACS+/IPsec PSKs, and replaces public IPv4 with stable PUB-&lt;hash&gt; pseudonym tokens (a public IP is never sent to the LLM in clear text) before any outbound call." },
-    { name: "classifier.py", tech: "Python regex", resp: "Deterministic event classifier: 55 regex patterns across Junos/EOS/FRR/IOS/RFC-3164/5424 with severity + category lookup; strip_ansi removes VT100 escapes at the LogEvent → ClassifiedEvent boundary." },
+    { name: "classifier.py", tech: "Python regex", resp: "Deterministic event classifier: 71 regex patterns across Junos/EOS/FRR/IOS/RFC-3164/5424 with severity + category lookup; strip_ansi removes VT100 escapes at the LogEvent → ClassifiedEvent boundary." },
     { name: "llm.py", tech: "requests · AF_UNIX HTTP · Anthropic API", resp: "Provider fallback chain: Ollama (:11434) → Docker Model Runner (:12434 TCP + Unix socket) → Anthropic Claude (claude-haiku-4-5); returns None to trigger the rule-based KB." },
     { name: "kb.py", tech: "Python", resp: "Rule-based deep-analysis knowledge base producing deterministic 5-phase playbooks when no LLM is available." },
     { name: "sources/", tech: "requests · typing.Protocol", resp: "Pluggable connector layer (LogSource Protocol + SourceManager): kibana, splunk, loki, syslog UDP/TCP listener, librenms — one config dict, hot-pluggable." },
