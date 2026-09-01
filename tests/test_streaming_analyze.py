@@ -91,6 +91,25 @@ def test_aggregate_stream_is_bounded():
     assert all(len(s.buckets) <= 512 for s in tracker._devices.values())
 
 
+@pytest.mark.unit
+def test_aggregate_stream_config_reserve_is_bounded():
+    """Config reserve stays capped even when commits outnumber top_k."""
+    def synth(n: int):
+        for i in range(n):
+            yield LogEvent(
+                timestamp=f"2026-01-01T{i % 24:02d}:{i % 60:02d}:{i % 60:02d}",
+                hostname=f"h{i % 3}", appname="mgd", severity_raw="info",
+                message="commit complete confirmed",
+            )
+
+    top, sev, cat, groups, by_host, miner, tracker, config_events = _aggregate_stream(
+        iter_classify(synth(80)), top_k=300,
+    )
+    assert cat.get("config") == 80
+    assert len(config_events) == 50
+    assert len(top) <= 80
+
+
 # ── web size guard + generator path ─────────────────────────────────────────
 
 @pytest.mark.unit

@@ -6,6 +6,14 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep low-severity config commits visible to the change-window correlator
+  and causal timeline when a 300-event severity cap would otherwise drop
+  them during a fabric-wide storm. The timeline display cap now pins a
+  bounded set of config events so a late commit cannot vanish behind 24
+  earlier flaps.
+
 ## [0.6.0] - 2026-08-29
 
 Causal console release.
