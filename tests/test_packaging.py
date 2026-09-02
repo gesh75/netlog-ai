@@ -109,6 +109,21 @@ def test_dist_name_parsing():
     assert _dist_name("textfsm>=1.1.3") not in WITHDRAWN
 
 
+def test_mcp_extras_require_sdk_2x_without_hotfix_cap():
+    """Issue #17: drop the #16 `mcp<2` hotfix now that the server targets 2.x.
+
+    Both extras must require mcp 2 or newer. A leftover `<2` (the packaging
+    hotfix) would pin us back to the 1.x FastMCP API.
+    """
+    extras = _project().get("optional-dependencies", {})
+    for extra in ("mcp", "all"):
+        reqs = [r for r in extras.get(extra, []) if _dist_name(r) == "mcp"]
+        assert reqs, f"`{extra}` extra must depend on mcp"
+        for req in reqs:
+            assert re.search(r">=\s*2", req), f"`{extra}` must require mcp 2.x+: {req}"
+            assert not re.search(r"<\s*2(\D|$)", req), f"`{extra}` still has the mcp<2 hotfix: {req}"
+
+
 def test_all_extra_is_superset_of_named_extras():
     """`all` must actually mean "all the optional features", excluding dev tooling.
 

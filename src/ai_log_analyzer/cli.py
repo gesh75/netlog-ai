@@ -149,7 +149,7 @@ def cmd_mcp(args: argparse.Namespace) -> int:
         from ai_log_analyzer.mcp_server import run_mcp_server
     except ImportError as exc:
         print(f"error: MCP server not available — {exc}", file=sys.stderr)
-        print("Install with: pip install mcp", file=sys.stderr)
+        print("Install with: pip install 'netlog-ai[mcp]'", file=sys.stderr)
         return 2
     try:
         run_mcp_server(transport=args.transport)
