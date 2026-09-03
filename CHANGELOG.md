@@ -6,6 +6,17 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- **MCP server requires SDK 2.x** (#17). `mcp_server/server.py` constructs
+  `MCPServer` from `mcp.server.mcpserver` — FastMCP was removed in 2.0 with no
+  shim. The `mcp` and `all` extras are `mcp>=2,<3` (the #16 `<2` hotfix is gone).
+  `_build_server()` now reports "SDK not installed" vs "incompatible version"
+  separately, and names the installed version via packaging metadata because
+  2.x does not set `mcp.__version__`. Dual 1.x/2.x support was rejected: both
+  this project and mcp 2.0 require Python >=3.10, and a fallback import would
+  hide the next API move the same way #16 was hidden.
+
 ### Fixed
 
 - Keep low-severity config commits visible to the change-window correlator
