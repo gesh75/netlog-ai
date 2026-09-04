@@ -92,6 +92,22 @@ def test_change_window_quiet_without_commits():
     assert cw["count"] == 0
 
 
+def test_change_window_devices_follow_earliest_timestamp_not_input_order():
+    """analyze() may pass newest-first top_k ahead of reserved extras."""
+    events = [
+        _ce(timestamp="2026-08-29T09:56:54", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2026-08-29T09:55:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["detected"] is True
+    assert cw["count"] == 2
+    assert cw["devices"] == ["rt-01", "rt-02"]
+
+
 def test_analyze_exposes_causal_fields():
     events = [
         LogEvent("2026-08-29T10:00:00", "rt-01", "mgd", "info",
@@ -190,6 +206,98 @@ def test_analyze_change_window_survives_severity_cap():
     assert any(n.get("category") == "config" for n in result.timeline)
     # classified_events stays the severity-priority top-300 contract
     assert all(e.category != "config" for e in result.classified_events)
+
+
+def test_analyze_change_window_keeps_earliest_commit_per_device():
+    """Later config noise on another host must not hide the causative commit.
+
+    The newest-50 reserve alone evicts rt-01's 09:55 commit once rt-02
+    emits 50+ later commits, so change_window names the wrong device
+    while blast.epicenter stays on the storm host.
+    """
+    events = [
+        LogEvent("2026-08-29T09:55:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    events.extend(
+        LogEvent(
+            f"2026-08-29T09:56:{i:02d}", "rt-02", "mgd", "info",
+            "commit complete confirmed",
+        )
+        for i in range(55)
+    )
+    events.extend(
+        LogEvent(
+            "2026-08-29T10:00:00", "rt-01", "rpd", "err",
+            f"bgp peer 192.0.2.{i % 200} down",
+        )
+        for i in range(350)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["detected"] is True
+    assert "rt-01" in result.change_window["devices"]
+    assert result.change_window["devices"][0] == "rt-01"
+    assert result.blast["epicenter"] == "rt-01"
+    assert any(
+        "Change window" in b and "rt-01" in b for b in result.executive_summary
+    )
+    assert any(
+        n.get("category") == "config" and n.get("device") == "rt-01"
+        for n in result.timeline
+    )
+    assert all(e.category != "config" for e in result.classified_events)
+
+
+def test_analyze_change_window_names_earliest_host_when_configs_survive_top_k():
+    """No storm: top_k keeps configs newest-first and would name rt-02 first."""
+    events = [
+        LogEvent("2026-08-29T09:55:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    events.extend(
+        LogEvent(
+            f"2026-08-29T09:56:{i:02d}", "rt-02", "mgd", "info",
+            "commit complete confirmed",
+        )
+        for i in range(55)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["detected"] is True
+    assert result.change_window["devices"][0] == "rt-01"
+    assert "rt-02" in result.change_window["devices"]
+    assert any(
+        "Change window" in b and b.find("rt-01") < b.find("rt-02")
+        for b in result.executive_summary
+    )
+
+
+def test_analyze_change_window_pins_first_arrival_on_timestamp_tie():
+    """Same-second commits: the pin must keep the first arrival, not -seq."""
+    events = [
+        LogEvent("2026-08-29T09:55:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed FIRST"),
+        LogEvent("2026-08-29T09:55:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed SECOND"),
+    ]
+    events.extend(
+        LogEvent(
+            f"2026-08-29T09:56:{i:02d}", "rt-02", "mgd", "info",
+            "commit complete confirmed",
+        )
+        for i in range(55)
+    )
+    events.extend(
+        LogEvent(
+            "2026-08-29T10:00:00", "rt-01", "rpd", "err",
+            f"bgp peer 192.0.2.{i % 200} down",
+        )
+        for i in range(350)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-01"
+    samples = " ".join(result.change_window["samples"])
+    assert "FIRST" in samples
+    assert "SECOND" not in samples
 
 
 def test_analyze_late_commit_survives_severity_and_timeline_caps():
