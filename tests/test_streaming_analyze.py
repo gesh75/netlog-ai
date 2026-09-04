@@ -14,7 +14,12 @@ from pathlib import Path
 import pytest
 
 from ai_log_analyzer.adapters.file import parse_file
-from ai_log_analyzer.analyzer import _aggregate_stream, analyze, build_action_items
+from ai_log_analyzer.analyzer import (
+    _CONFIG_RESERVE,
+    _aggregate_stream,
+    analyze,
+    build_action_items,
+)
 from ai_log_analyzer.classifier import LogEvent, classify_events, iter_classify
 from ai_log_analyzer.cli import cmd_analyze
 
@@ -106,7 +111,11 @@ def test_aggregate_stream_config_reserve_is_bounded():
         iter_classify(synth(80)), top_k=300,
     )
     assert cat.get("config") == 80
-    assert len(config_events) == 50
+    hosts = {e.hostname for e in config_events}
+    assert hosts == {"h0", "h1", "h2"}
+    # newest-N plus at most one earliest pin per host that fell out of the heap
+    assert _CONFIG_RESERVE <= len(config_events) <= _CONFIG_RESERVE + 3
+    assert len(config_events) < 80
     assert len(top) <= 80
 
 

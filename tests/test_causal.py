@@ -192,6 +192,41 @@ def test_analyze_change_window_survives_severity_cap():
     assert all(e.category != "config" for e in result.classified_events)
 
 
+def test_analyze_change_window_keeps_earliest_commit_per_device():
+    """Later config noise on another host must not hide the causative commit.
+
+    The newest-50 reserve alone evicts rt-01's 09:55 commit once rt-02
+    emits 50+ later commits, so change_window names the wrong device
+    while blast.epicenter stays on the storm host.
+    """
+    events = [
+        LogEvent("2026-08-29T09:55:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    events.extend(
+        LogEvent(
+            f"2026-08-29T09:56:{i:02d}", "rt-02", "mgd", "info",
+            "commit complete confirmed",
+        )
+        for i in range(55)
+    )
+    events.extend(
+        LogEvent(
+            "2026-08-29T10:00:00", "rt-01", "rpd", "err",
+            f"bgp peer 192.0.2.{i % 200} down",
+        )
+        for i in range(350)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["detected"] is True
+    assert "rt-01" in result.change_window["devices"]
+    assert result.change_window["devices"][0] == "rt-01"
+    assert result.blast["epicenter"] == "rt-01"
+    assert any(
+        "Change window" in b and "rt-01" in b for b in result.executive_summary
+    )
+
+
 def test_analyze_late_commit_survives_severity_and_timeline_caps():
     """A commit after the flap must still set change_window and the timeline.
 
