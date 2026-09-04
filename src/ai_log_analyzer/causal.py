@@ -157,6 +157,11 @@ def change_window(events: Iterable[ClassifiedEvent]) -> dict[str, Any]:
     A hit is a strong hint the outage is change-induced until proven otherwise.
     """
     hits = [e for e in events if e.category in _CONFIG_CATEGORIES]
+    # Order is not guaranteed: analyze() concatenates severity-priority
+    # top_k (newest-first within a severity) ahead of the reserved extras.
+    # Oldest-first so devices[0] is the earliest commit host, not the
+    # noisiest late one.
+    hits.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
     devices: list[str] = []
     seen: set[str] = set()
     samples: list[str] = []

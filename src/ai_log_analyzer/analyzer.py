@@ -556,7 +556,13 @@ def _push_newest(heap: list, entry: tuple, cap: int) -> None:
 def _pin_earliest(slot: dict[str, tuple], entry: tuple, hostname: str) -> None:
     key = hostname or ""
     prev = slot.get(key)
-    if prev is None or entry[:2] < prev[:2]:
+    if prev is None:
+        slot[key] = entry
+        return
+    # entry is (timestamp, -seq, ev). Earliest = smaller timestamp, then
+    # smaller seq (larger -seq) so the first arrival wins a timestamp tie.
+    # Comparing entry[:2] directly would prefer the later arrival.
+    if (entry[0] or "", -entry[1]) < (prev[0] or "", -prev[1]):
         slot[key] = entry
 
 
