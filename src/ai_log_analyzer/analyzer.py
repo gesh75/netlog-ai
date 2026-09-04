@@ -536,9 +536,35 @@ def _executive_summary(
     return bullets, False
 
 
+# Config commits are classified low-severity, so a fabric-wide storm of
+# critical/high/medium events fills the top_k heap and evicts them. The
+# causal console (change_window / timeline) still needs those commits, so
+# we keep a separate bounded reserve. Memory stays O(top_k + reserve).
+_CONFIG_RESERVE = 50
+
+
+def _push_newest(heap: list, entry: tuple, cap: int) -> None:
+    if len(heap) < cap:
+        heapq.heappush(heap, entry)
+    elif entry[:2] > heap[0][:2]:
+        heapq.heapreplace(heap, entry)
+
+
+def _with_reserved_config(
+    top_events: list[ClassifiedEvent],
+    config_events: list[ClassifiedEvent],
+) -> list[ClassifiedEvent]:
+    """Append reserved config commits that the severity-priority cap dropped."""
+    if not config_events:
+        return top_events
+    seen = {id(e) for e in top_events}
+    extra = [e for e in config_events if id(e) not in seen]
+    return top_events + extra if extra else top_events
+
+
 def _aggregate_stream(
     classified: Iterable[ClassifiedEvent], top_k: int = 300,
-) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict, TemplateMiner, StabilityTracker]:
+) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict, TemplateMiner, StabilityTracker, list[ClassifiedEvent]]:
     """Single bounded pass over a classified stream.
 
     Memory is O(top_k + KB rules + devices + template clusters) regardless of
@@ -548,10 +574,14 @@ def _aggregate_stream(
     classify_events()' ordering exactly (severity rank, then timestamp desc,
     then arrival). Events no KB rule matched are additionally mined into
     templates so novel message shapes surface instead of vanishing as noise.
+
+    Config-category events are also collected into a bounded reserve so the
+    change-window correlator still sees commits during a high-severity storm.
     """
     sev_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     cat_counts: dict[str, int] = {}
     buckets: dict[str, list] = {sev: [] for sev in SEV_ORDER}
+    config_heap: list = []
     groups: dict[tuple[str, str], dict] = {}
     by_host: dict[str, dict] = {}
     miner = TemplateMiner()
@@ -565,12 +595,10 @@ def _aggregate_stream(
         tracker.add(e)
         if e.category == "other" and e.message:
             miner.add(e.message, e.hostname)
-        heap = buckets.setdefault(e.severity, [])
         entry = (e.timestamp, -seq, e)
-        if len(heap) < top_k:
-            heapq.heappush(heap, entry)
-        elif entry[:2] > heap[0][:2]:
-            heapq.heapreplace(heap, entry)
+        _push_newest(buckets.setdefault(e.severity, []), entry, top_k)
+        if e.category == "config":
+            _push_newest(config_heap, entry, _CONFIG_RESERVE)
 
     top_events: list[ClassifiedEvent] = []
     for sev in sorted(buckets, key=lambda s: SEV_ORDER.get(s, 5)):
@@ -579,7 +607,10 @@ def _aggregate_stream(
         )
         if len(top_events) >= top_k:
             break
-    return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner, tracker
+    config_events = [
+        e for _, _, e in sorted(config_heap, key=lambda t: t[:2], reverse=True)
+    ]
+    return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner, tracker, config_events
 
 
 def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3) -> AnalysisResult:
@@ -590,9 +621,10 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
     event list. Thread-safe: never mutates global llm state. `use_llm=False`
     is enforced by forcing `llm_top_n=0` and disabling the LLM exec summary.
     """
-    top_events, sev_counts, cat_counts, groups, by_host, miner, tracker = _aggregate_stream(
+    top_events, sev_counts, cat_counts, groups, by_host, miner, tracker, config_events = _aggregate_stream(
         iter_classify(events)
     )
+    causal_events = _with_reserved_config(top_events, config_events)
     # Opt-in cross-run persistence: flags templates never seen in ANY prior
     # run (AI_LOG_ANALYZER_TEMPLATE_STORE) — the classic AIOps early-warning.
     apply_template_store(miner)
@@ -635,7 +667,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
         "total": sdiff.get("total", 0),
         "by_rule": sdiff.get("by_rule", {}),
     }
-    cw = change_window(top_events)
+    cw = change_window(causal_events)
     if cw["detected"]:
         hosts = ", ".join(cw["devices"][:4]) or "unknown"
         summary.append(
@@ -653,7 +685,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
         generated_at=generated_at,
         unknown_patterns=miner.to_dict(top_n=10),
         stability=stab,
-        timeline=build_timeline(top_events),
+        timeline=build_timeline(causal_events),
         blast=blast_radius(action_items, stab),
         change_window=cw,
         sanitize_diff=sdiff,

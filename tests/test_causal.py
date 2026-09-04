@@ -106,5 +106,106 @@ def test_analyze_exposes_causal_fields():
     assert payload["timeline"]
     assert payload["blast"]["epicenter"]
     assert payload["change_window"]["detected"] is True
+    assert payload["change_window"]["count"] == 1
     assert "by_rule" in payload["sanitize_diff"]
     assert any("Change window" in b for b in payload["executive_summary"])
+
+
+def test_timeline_keeps_late_config_under_display_cap():
+    """A commit after 24+ earlier flaps must still appear on the timeline."""
+    events = [
+        _ce(timestamp=f"2026-08-29T10:00:{i:02d}") for i in range(30)
+    ]
+    events.append(_ce(
+        timestamp="2026-08-29T10:01:00", category="config", severity="low",
+        hostname="rt-01", description="Configuration change committed",
+    ))
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" for n in nodes)
+    assert nodes[-1]["device"] == "rt-01"
+    assert nodes[-1]["category"] == "config"
+
+
+def test_timeline_pin_keeps_last_incident_row():
+    """A config-heavy prefix must not evict every flap to pin late commits."""
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+        for i in range(20)
+    ]
+    events.extend(_ce(timestamp=f"2026-08-29T10:00:{20 + i:02d}") for i in range(4))
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:01:{i:02d}",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-02",
+        )
+        for i in range(6)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") != "config" for n in nodes)
+    assert any(n.get("device") == "rt-02" for n in nodes)
+
+
+def _storm_with_commit(commit_ts: str, storm_ts: str) -> list[LogEvent]:
+    events = [
+        LogEvent(commit_ts, "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    events.extend(
+        LogEvent(
+            storm_ts, "spine-01", "rpd", "err",
+            f"bgp peer 192.0.2.{i % 200} down",
+        )
+        for i in range(350)
+    )
+    return events
+
+
+def test_analyze_change_window_survives_severity_cap():
+    """Config commits are low-severity; a 300+ storm must not hide them.
+
+    The 0.6 causal console treats a commit inside the window as
+    change-induced. If analyze() only feeds the severity-priority top_k
+    into change_window/timeline, a fabric-wide BGP flap produces a false
+    negative on the headline signal.
+    """
+    result = analyze(
+        _storm_with_commit("2026-08-29T09:59:00", "2026-08-29T10:00:00"),
+        use_llm=False,
+    )
+    assert result.change_window["detected"] is True
+    assert result.change_window["count"] == 1
+    assert "rt-01" in result.change_window["devices"]
+    assert any("Change window" in b for b in result.executive_summary)
+    assert any(n.get("category") == "config" for n in result.timeline)
+    # classified_events stays the severity-priority top-300 contract
+    assert all(e.category != "config" for e in result.classified_events)
+
+
+def test_analyze_late_commit_survives_severity_and_timeline_caps():
+    """A commit after the flap must still set change_window and the timeline.
+
+    The severity heap keeps newest-timestamp config rows, so change_window
+    already saw this case. The timeline display cap is chronological and
+    would otherwise render 24 earlier BGP rows and hide the commit.
+    """
+    result = analyze(
+        _storm_with_commit("2026-08-29T10:01:00", "2026-08-29T10:00:00"),
+        use_llm=False,
+    )
+    assert result.change_window["detected"] is True
+    assert result.change_window["count"] == 1
+    assert "rt-01" in result.change_window["devices"]
+    assert any("Change window" in b for b in result.executive_summary)
+    assert any(n.get("category") == "config" for n in result.timeline)
+    assert all(e.category != "config" for e in result.classified_events)

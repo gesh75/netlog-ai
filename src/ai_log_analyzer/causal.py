@@ -15,6 +15,51 @@ from ai_log_analyzer.classifier import SEV_ORDER, ClassifiedEvent
 _ACTIONABLE = {"critical", "high", "medium"}
 _CONFIG_CATEGORIES = {"config"}
 _DOWNSTREAM = ("BGP", "OSPF", "LAG", "VPN", "EVPN", "BFD", "MLAG")
+# Display cap is 24. A fabric-wide flap fills that window with high-severity
+# rows and would hide a late config commit — the same signal change_window
+# exists to surface. Pin a handful so the causal console stays honest.
+_TIMELINE_CONFIG_PIN = 4
+
+
+def _select_timeline_rows(
+    events: Iterable[ClassifiedEvent], limit: int,
+) -> list[ClassifiedEvent]:
+    """Chronological incident rows, with config commits pinned into ``limit``.
+
+    The display cap is applied after timestamp sort. Without a pin, a
+    commit that lands after ``limit`` earlier flaps never appears even when
+    the caller reserved it specifically for the causal console.
+    """
+    rows = [
+        e for e in events
+        if e.severity in _ACTIONABLE or e.category == "config"
+    ]
+    rows.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+    if len(rows) <= limit:
+        return rows
+    prefix = rows[:limit]
+    shown = {id(e) for e in prefix}
+    missing = [e for e in rows if e.category == "config" and id(e) not in shown]
+    if not missing:
+        return prefix
+    pin = missing[:_TIMELINE_CONFIG_PIN]
+    incidents = sum(1 for e in prefix if e.category != "config")
+    # Never wipe the last incident row still inside the window just to
+    # make room for extra commits.
+    max_evict = min(len(pin), max(0, incidents - 1))
+    if max_evict == 0:
+        return prefix
+    evicted = 0
+    kept: list[ClassifiedEvent] = []
+    for e in reversed(prefix):
+        if evicted < max_evict and e.category != "config":
+            evicted += 1
+            continue
+        kept.append(e)
+    kept.reverse()
+    kept.extend(pin[:evicted])
+    kept.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+    return kept
 
 
 def build_timeline(events: Iterable[ClassifiedEvent], limit: int = 24) -> list[dict[str, Any]]:
@@ -24,11 +69,7 @@ def build_timeline(events: Iterable[ClassifiedEvent], limit: int = 24) -> list[d
     when a simple heuristic says the previous event likely precipitated it
     (link-down → BGP/OSPF/LAG, BGP → EVPN, OSPF → drops).
     """
-    rows = [
-        e for e in events
-        if e.severity in _ACTIONABLE or (e.category == "config")
-    ]
-    rows.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+    rows = _select_timeline_rows(events, limit)
     nodes: list[dict[str, Any]] = []
     for e in rows[:limit]:
         nodes.append({
