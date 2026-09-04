@@ -24,6 +24,11 @@ loose semantic versioning.
   them during a fabric-wide storm. The timeline display cap now pins a
   bounded set of config events so a late commit cannot vanish behind 24
   earlier flaps.
+- Pin the earliest config event per hostname in the change-window reserve
+  so later CLI-classified noise on another device cannot evict the
+  causative commit. `change_window.devices` is chronological so the
+  earliest commit host is named first, including when configs survive
+  inside the severity top_k.
 
 ## [0.6.0] - 2026-08-29
 

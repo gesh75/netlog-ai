@@ -104,6 +104,7 @@ def test_change_window_devices_follow_earliest_timestamp_not_input_order():
     ]
     cw = change_window(events)
     assert cw["detected"] is True
+    assert cw["count"] == 2
     assert cw["devices"] == ["rt-01", "rt-02"]
 
 
@@ -240,6 +241,11 @@ def test_analyze_change_window_keeps_earliest_commit_per_device():
     assert any(
         "Change window" in b and "rt-01" in b for b in result.executive_summary
     )
+    assert any(
+        n.get("category") == "config" and n.get("device") == "rt-01"
+        for n in result.timeline
+    )
+    assert all(e.category != "config" for e in result.classified_events)
 
 
 def test_analyze_change_window_names_earliest_host_when_configs_survive_top_k():
