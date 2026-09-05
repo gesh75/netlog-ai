@@ -51,11 +51,16 @@ def _select_timeline_rows(
     ]
     incidents = sum(1 for e in prefix if e.category != "config")
     if missing_incidents:
+        # A trailing commit burst hid the later outage. Leftover flaps
+        # from earlier in the window do not satisfy the floor — they are
+        # not the storm that follows the configs.
+        if prefix and prefix[-1].category == "config":
+            incidents = 0
         floor = min(_TIMELINE_INCIDENT_FLOOR, incidents + len(missing_incidents))
         need = max(0, floor - incidents)
         configs_in_prefix = sum(1 for e in prefix if e.category == "config")
         # Keep at least one commit in the window when both signals exist.
-        max_evict = max(0, configs_in_prefix - (1 if configs_in_prefix else 0))
+        max_evict = max(0, configs_in_prefix - 1)
         take = min(need, max_evict, len(missing_incidents))
         if take:
             evicted = 0

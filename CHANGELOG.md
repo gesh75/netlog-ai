@@ -24,6 +24,11 @@ loose semantic versioning.
   them during a fabric-wide storm. The timeline display cap now pins a
   bounded set of config events so a late commit cannot vanish behind 24
   earlier flaps.
+- Floor later incident rows into a config-flooded timeline cap so a
+  24-commit maintenance burst cannot hide the BGP storm that follows.
+  A trailing commit run does not treat leftover earlier flaps as already
+  showing the outage. After flooring, remaining early commits are swapped
+  for true late commits rather than evicting the storm.
 
 ## [0.6.0] - 2026-08-29
 
