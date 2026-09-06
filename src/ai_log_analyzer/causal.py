@@ -18,7 +18,10 @@ _DOWNSTREAM = ("BGP", "OSPF", "LAG", "VPN", "EVPN", "BFD", "MLAG")
 # Display cap is 24. A fabric-wide flap fills that window with high-severity
 # rows and would hide a late config commit — the same signal change_window
 # exists to surface. Pin a handful so the causal console stays honest.
+# The inverse is also true: a commit flood that fills the cap hides every
+# later incident. Floor a few incident rows so the outage stays visible.
 _TIMELINE_CONFIG_PIN = 4
+_TIMELINE_INCIDENT_FLOOR = 8
 
 
 def _select_timeline_rows(
@@ -28,7 +31,8 @@ def _select_timeline_rows(
 
     The display cap is applied after timestamp sort. Without a pin, a
     commit that lands after ``limit`` earlier flaps never appears even when
-    the caller reserved it specifically for the causal console.
+    the caller reserved it specifically for the causal console. Without the
+    inverse floor, ``limit`` earlier commits hide every later incident.
     """
     rows = [
         e for e in events
@@ -38,19 +42,93 @@ def _select_timeline_rows(
     if len(rows) <= limit:
         return rows
     prefix = rows[:limit]
-    shown = {id(e) for e in prefix}
-    missing = [e for e in rows if e.category == "config" and id(e) not in shown]
+    orig_prefix_ids = {id(e) for e in prefix}
+    shown = set(orig_prefix_ids)
+    pulled_incidents = False
+
+    missing_incidents = [
+        e for e in rows if e.category != "config" and id(e) not in shown
+    ]
+    incidents = sum(1 for e in prefix if e.category != "config")
+    if missing_incidents:
+        # A trailing commit burst hid the later outage. Leftover flaps
+        # from earlier in the window do not satisfy the floor — they are
+        # not the storm that follows the configs.
+        trailing_config = bool(prefix and prefix[-1].category == "config")
+        leftover_budget = incidents if trailing_config else 0
+        if trailing_config:
+            incidents = 0
+        floor = min(_TIMELINE_INCIDENT_FLOOR, incidents + len(missing_incidents))
+        need = max(0, floor - incidents)
+        configs_in_prefix = sum(1 for e in prefix if e.category == "config")
+        # Keep at least one commit in the window when both signals exist.
+        config_budget = max(0, configs_in_prefix - 1)
+        # Commit-only eviction cannot free slots when leftover flaps already
+        # occupy the cap (23 flaps + 1 trailing commit → budget 0).
+        take = min(need, config_budget + leftover_budget, len(missing_incidents))
+        if take:
+            evicted_cfg = 0
+            kept: list[ClassifiedEvent] = []
+            cfg_take = min(take, config_budget)
+            for e in prefix:  # drop oldest commits; keep those closest to the storm
+                if evicted_cfg < cfg_take and e.category == "config":
+                    evicted_cfg += 1
+                    continue
+                kept.append(e)
+            evicted = evicted_cfg
+            if evicted < take:
+                still = take - evicted
+                dropped = 0
+                trimmed: list[ClassifiedEvent] = []
+                for e in kept:  # then drop oldest leftover flaps
+                    if dropped < still and e.category != "config":
+                        dropped += 1
+                        continue
+                    trimmed.append(e)
+                kept = trimmed
+                evicted += dropped
+            kept.extend(missing_incidents[:evicted])
+            kept.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+            prefix = kept
+            shown = {id(e) for e in prefix}
+            pulled_incidents = True
+
+    # Only pin commits that never fit the chronological window — not the
+    # early ones we just evicted to surface the outage.
+    missing = [
+        e for e in rows
+        if e.category == "config"
+        and id(e) not in shown
+        and id(e) not in orig_prefix_ids
+    ]
     if not missing:
         return prefix
     pin = missing[:_TIMELINE_CONFIG_PIN]
     incidents = sum(1 for e in prefix if e.category != "config")
+    # After pulling later incidents in, swap remaining early commits for
+    # true late commits — do not evict the outage we just surfaced.
+    if pulled_incidents:
+        configs_in_prefix = sum(1 for e in prefix if e.category == "config")
+        take = min(len(pin), max(0, configs_in_prefix - 1))
+        if take == 0:
+            return prefix
+        evicted = 0
+        kept = []
+        for e in prefix:
+            if evicted < take and e.category == "config":
+                evicted += 1
+                continue
+            kept.append(e)
+        kept.extend(pin[:evicted])
+        kept.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+        return kept
     # Never wipe the last incident row still inside the window just to
     # make room for extra commits.
     max_evict = min(len(pin), max(0, incidents - 1))
     if max_evict == 0:
         return prefix
     evicted = 0
-    kept: list[ClassifiedEvent] = []
+    kept = []
     for e in reversed(prefix):
         if evicted < max_evict and e.category != "config":
             evicted += 1

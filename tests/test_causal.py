@@ -156,6 +156,171 @@ def test_timeline_pin_keeps_last_incident_row():
     assert any(n.get("device") == "rt-02" for n in nodes)
 
 
+def test_timeline_surfaces_incidents_after_config_flood():
+    """24+ earlier commits must not hide the BGP storm that follows.
+
+    PR #37 pinned late config into an incident-heavy prefix. The inverse
+    — a maintenance burst that fills the chronological cap — used to
+    render an all-config timeline while action items still named the
+    outage.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:58:{i:02d}",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+        for i in range(30)
+    ]
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" for n in nodes)
+    assert any(n.get("category") == "routing" and n.get("device") == "spine-01" for n in nodes)
+    assert sum(1 for n in nodes if n.get("category") != "config") >= 8
+
+
+def test_timeline_surfaces_later_storm_despite_early_flaps():
+    """Old flaps + a trailing commit burst must not hide the later storm.
+
+    A count-only floor would treat leftover interface flaps as already
+    showing the outage and keep the chronological commit tail, dropping
+    the routing failure that follows the configs.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(10)
+    ]
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T09:58:{i:02d}",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
+def test_timeline_surfaces_later_storm_despite_flap_heavy_prefix():
+    """23 leftover flaps + one trailing commit must still yield the storm.
+
+    Commit-only eviction has a budget of 0 (keep ≥1 commit), so a
+    trailing-config reset that only drops commits would leave the later
+    BGP outage invisible behind the morning flaps.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(23)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
+def test_timeline_floor_swaps_late_commits_not_the_storm():
+    """After flooring later incidents, pin true late commits by swapping
+    remaining early commits — do not evict the outage just surfaced.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:58:{i:02d}",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+        for i in range(24)
+    ]
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:05:{i:02d}",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-02",
+        )
+        for i in range(6)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert sum(1 for n in nodes if n.get("category") != "config") >= 8
+    assert any(n.get("device") == "rt-01" and n.get("category") == "config" for n in nodes)
+    assert any(n.get("device") == "rt-02" and n.get("category") == "config" for n in nodes)
+
+
 def _storm_with_commit(commit_ts: str, storm_ts: str) -> list[LogEvent]:
     events = [
         LogEvent(commit_ts, "rt-01", "mgd", "info",
@@ -208,4 +373,33 @@ def test_analyze_late_commit_survives_severity_and_timeline_caps():
     assert "rt-01" in result.change_window["devices"]
     assert any("Change window" in b for b in result.executive_summary)
     assert any(n.get("category") == "config" for n in result.timeline)
+    assert all(e.category != "config" for e in result.classified_events)
+
+
+def test_analyze_timeline_keeps_storm_after_config_flood():
+    """A 24+ commit burst before a BGP storm must still render the outage.
+
+    change_window correctly fires on the commits. The timeline used to
+    show only those commits because they sort first and fill the cap.
+    """
+    events = [
+        LogEvent(
+            f"2026-08-29T09:58:{i:02d}", "rt-01", "mgd", "info",
+            "commit complete confirmed",
+        )
+        for i in range(30)
+    ]
+    events.extend(
+        LogEvent(
+            "2026-08-29T10:00:00", "spine-01", "rpd", "err",
+            f"bgp peer 192.0.2.{i % 200} down",
+        )
+        for i in range(350)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["detected"] is True
+    assert any(n.get("category") == "config" for n in result.timeline)
+    assert any(n.get("category") == "routing" for n in result.timeline)
+    assert any("BGP" in (n.get("title") or "") for n in result.timeline)
+    assert sum(1 for n in result.timeline if n.get("category") != "config") >= 8
     assert all(e.category != "config" for e in result.classified_events)
