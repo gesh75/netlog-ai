@@ -27,8 +27,10 @@ loose semantic versioning.
 - Floor later incident rows into a config-flooded timeline cap so a
   24-commit maintenance burst cannot hide the BGP storm that follows.
   A trailing commit run does not treat leftover earlier flaps as already
-  showing the outage. After flooring, remaining early commits are swapped
-  for true late commits rather than evicting the storm.
+  showing the outage; those leftover flaps can also be evicted when they
+  occupy the cap and leave no commit slots to spare. After flooring,
+  remaining early commits are swapped for true late commits rather than
+  evicting the storm.
 
 ## [0.6.0] - 2026-08-29
 

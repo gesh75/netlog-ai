@@ -236,6 +236,50 @@ def test_timeline_surfaces_later_storm_despite_early_flaps():
     ) >= 8
 
 
+def test_timeline_surfaces_later_storm_despite_flap_heavy_prefix():
+    """23 leftover flaps + one trailing commit must still yield the storm.
+
+    Commit-only eviction has a budget of 0 (keep ≥1 commit), so a
+    trailing-config reset that only drops commits would leave the later
+    BGP outage invisible behind the morning flaps.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(23)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
 def test_timeline_floor_swaps_late_commits_not_the_storm():
     """After flooring later incidents, pin true late commits by swapping
     remaining early commits — do not evict the outage just surfaced.

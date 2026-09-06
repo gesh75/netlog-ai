@@ -54,23 +54,40 @@ def _select_timeline_rows(
         # A trailing commit burst hid the later outage. Leftover flaps
         # from earlier in the window do not satisfy the floor — they are
         # not the storm that follows the configs.
-        if prefix and prefix[-1].category == "config":
+        trailing_config = bool(prefix and prefix[-1].category == "config")
+        leftover_budget = incidents if trailing_config else 0
+        if trailing_config:
             incidents = 0
         floor = min(_TIMELINE_INCIDENT_FLOOR, incidents + len(missing_incidents))
         need = max(0, floor - incidents)
         configs_in_prefix = sum(1 for e in prefix if e.category == "config")
         # Keep at least one commit in the window when both signals exist.
-        max_evict = max(0, configs_in_prefix - 1)
-        take = min(need, max_evict, len(missing_incidents))
+        config_budget = max(0, configs_in_prefix - 1)
+        # Commit-only eviction cannot free slots when leftover flaps already
+        # occupy the cap (23 flaps + 1 trailing commit → budget 0).
+        take = min(need, config_budget + leftover_budget, len(missing_incidents))
         if take:
-            evicted = 0
+            evicted_cfg = 0
             kept: list[ClassifiedEvent] = []
+            cfg_take = min(take, config_budget)
             for e in prefix:  # drop oldest commits; keep those closest to the storm
-                if evicted < take and e.category == "config":
-                    evicted += 1
+                if evicted_cfg < cfg_take and e.category == "config":
+                    evicted_cfg += 1
                     continue
                 kept.append(e)
-            kept.extend(missing_incidents[:take])
+            evicted = evicted_cfg
+            if evicted < take:
+                still = take - evicted
+                dropped = 0
+                trimmed: list[ClassifiedEvent] = []
+                for e in kept:  # then drop oldest leftover flaps
+                    if dropped < still and e.category != "config":
+                        dropped += 1
+                        continue
+                    trimmed.append(e)
+                kept = trimmed
+                evicted += dropped
+            kept.extend(missing_incidents[:evicted])
             kept.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
             prefix = kept
             shown = {id(e) for e in prefix}
