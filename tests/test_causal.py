@@ -280,6 +280,50 @@ def test_timeline_surfaces_later_storm_despite_flap_heavy_prefix():
     ) >= 8
 
 
+def test_timeline_surfaces_later_storm_when_commit_overflows_flap_cap():
+    """24 leftover flaps + a commit after the cap must still yield the storm.
+
+    trailing_config only resets the floor when a commit sits inside the
+    prefix. Morning flaps that fill the cap leave that flag false, so the
+    later commit is a pin candidate and the BGP storm stays hidden.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(24)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
 def test_timeline_floor_swaps_late_commits_not_the_storm():
     """After flooring later incidents, pin true late commits by swapping
     remaining early commits — do not evict the outage just surfaced.

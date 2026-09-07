@@ -45,18 +45,23 @@ def _select_timeline_rows(
     orig_prefix_ids = {id(e) for e in prefix}
     shown = set(orig_prefix_ids)
     pulled_incidents = False
+    pulled_ids: set[int] = set()
 
     missing_incidents = [
         e for e in rows if e.category != "config" and id(e) not in shown
     ]
     incidents = sum(1 for e in prefix if e.category != "config")
     if missing_incidents:
-        # A trailing commit burst hid the later outage. Leftover flaps
-        # from earlier in the window do not satisfy the floor — they are
-        # not the storm that follows the configs.
-        trailing_config = bool(prefix and prefix[-1].category == "config")
-        leftover_budget = incidents if trailing_config else 0
-        if trailing_config:
+        # Leftover earlier flaps do not satisfy the floor when a commit
+        # precedes the later storm — whether that commit sits at the end
+        # of the prefix or overflowed past a flap-filled cap.
+        first_later_ts = missing_incidents[0].timestamp or ""
+        config_before_later = any(
+            e.category == "config" and (e.timestamp or "") <= first_later_ts
+            for e in rows
+        )
+        leftover_budget = incidents if config_before_later else 0
+        if config_before_later:
             incidents = 0
         floor = min(_TIMELINE_INCIDENT_FLOOR, incidents + len(missing_incidents))
         need = max(0, floor - incidents)
@@ -87,7 +92,9 @@ def _select_timeline_rows(
                     trimmed.append(e)
                 kept = trimmed
                 evicted += dropped
-            kept.extend(missing_incidents[:evicted])
+            pulled = missing_incidents[:evicted]
+            kept.extend(pulled)
+            pulled_ids = {id(e) for e in pulled}
             kept.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
             prefix = kept
             shown = {id(e) for e in prefix}
@@ -106,10 +113,13 @@ def _select_timeline_rows(
     pin = missing[:_TIMELINE_CONFIG_PIN]
     incidents = sum(1 for e in prefix if e.category != "config")
     # After pulling later incidents in, swap remaining early commits for
-    # true late commits — do not evict the outage we just surfaced.
+    # true late commits — do not evict the outage we just surfaced. If
+    # the prefix had no commit (it overflowed past leftover flaps), evict
+    # those leftover flaps instead so the late commit still appears.
     if pulled_incidents:
         configs_in_prefix = sum(1 for e in prefix if e.category == "config")
-        take = min(len(pin), max(0, configs_in_prefix - 1))
+        spare = max(0, configs_in_prefix - 1) if configs_in_prefix else len(pin)
+        take = min(len(pin), spare)
         if take == 0:
             return prefix
         evicted = 0
@@ -119,6 +129,21 @@ def _select_timeline_rows(
                 evicted += 1
                 continue
             kept.append(e)
+        if evicted < take:
+            still = take - evicted
+            dropped = 0
+            trimmed = []
+            for e in kept:
+                if (
+                    dropped < still
+                    and e.category != "config"
+                    and id(e) not in pulled_ids
+                ):
+                    dropped += 1
+                    continue
+                trimmed.append(e)
+            kept = trimmed
+            evicted += dropped
         kept.extend(pin[:evicted])
         kept.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
         return kept
