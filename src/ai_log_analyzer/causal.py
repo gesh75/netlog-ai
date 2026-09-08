@@ -53,15 +53,12 @@ def _select_timeline_rows(
     incidents = sum(1 for e in prefix if e.category != "config")
     if missing_incidents:
         # Leftover earlier flaps do not satisfy the floor when a commit
-        # precedes the later storm — whether that commit sits at the end
-        # of the prefix or overflowed past a flap-filled cap.
-        first_later_ts = missing_incidents[0].timestamp or ""
-        config_before_later = any(
-            e.category == "config" and (e.timestamp or "") <= first_later_ts
-            for e in rows
-        )
-        leftover_budget = incidents if config_before_later else 0
-        if config_before_later:
+        # exists in the window — whether it precedes the later storm,
+        # sat at the end of the prefix, overflowed past a flap-filled
+        # cap, or arrived after the storm (a late pin).
+        config_in_window = any(e.category == "config" for e in rows)
+        leftover_budget = incidents if config_in_window else 0
+        if config_in_window:
             incidents = 0
         floor = min(_TIMELINE_INCIDENT_FLOOR, incidents + len(missing_incidents))
         need = max(0, floor - incidents)
