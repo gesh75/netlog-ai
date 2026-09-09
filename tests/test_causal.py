@@ -368,6 +368,145 @@ def test_timeline_surfaces_later_storm_when_late_commit_follows_storm():
     ) >= 8
 
 
+def test_timeline_surfaces_later_storm_when_leftover_flaps_overflow_cap():
+    """32 leftover flaps + a later storm must still yield the storm.
+
+    Resetting the leftover count still pulled chronological overflow
+    first. Eight leftover flaps past the cap filled the floor, so the
+    BGP storm stayed hidden (0 routing) even with a commit in the window.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
+def test_timeline_surfaces_later_storm_despite_intermediate_leftover_category():
+    """Overflow leftover + a mid-window hardware burst must not eat the floor.
+
+    A category filter that accepts any non-leftover missing row would pull
+    the hardware cluster first and leave the later BGP storm hidden.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T09:30:{i:02d}",
+            category="hardware",
+            description="FPC / linecard error",
+            hostname="leaf-02",
+        )
+        for i in range(10)
+    )
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
+def test_timeline_surfaces_later_storm_with_rfc3164_leftover_overflow():
+    """Syslog-stamped leftover overflow must still yield the later storm.
+
+    fromisoformat fails on RFC3164/Junos stamps; a minute-prefix fallback
+    treated every 1s flap as a new cluster and pulled a single leftover row.
+    """
+    events = [
+        _ce(
+            timestamp=f"Aug 29 09:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="Aug 29 09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"Aug 29 10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("t", "").startswith("Aug 29 10:00") and n.get("device") == "spine-01"
+    ) >= 8
+
+
 def test_timeline_floor_swaps_late_commits_not_the_storm():
     """After flooring later incidents, pin true late commits by swapping
     remaining early commits — do not evict the outage just surfaced.

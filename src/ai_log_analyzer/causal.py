@@ -6,6 +6,7 @@ surfaces. No I/O, no LLM.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Iterable
 
 from ai_log_analyzer.classifier import SEV_ORDER, ClassifiedEvent
@@ -22,6 +23,101 @@ _DOWNSTREAM = ("BGP", "OSPF", "LAG", "VPN", "EVPN", "BFD", "MLAG")
 # later incident. Floor a few incident rows so the outage stays visible.
 _TIMELINE_CONFIG_PIN = 4
 _TIMELINE_INCIDENT_FLOOR = 8
+# Leftover overflow and a later storm are separate clusters when they
+# sit at least this far apart. Morning flaps are seconds apart; the
+# leftover tests place the BGP storm an hour later.
+_LEFTOVER_CLUSTER_GAP_S = 60.0
+_RFC3164_MONTHS = {
+    name: idx
+    for idx, name in enumerate(
+        ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+        start=1,
+    )
+}
+
+
+def _as_naive(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+
+def _parse_event_ts(ts: str) -> datetime | None:
+    """Parse ISO/RFC5424, FRR, and RFC3164/Junos stamps. None if unknown."""
+    if not ts:
+        return None
+    stamp = ts.strip()
+    iso = stamp.replace("Z", "+00:00")
+    try:
+        return _as_naive(datetime.fromisoformat(iso))
+    except ValueError:
+        pass
+    collapsed = " ".join(stamp.split())
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(collapsed, fmt)
+        except ValueError:
+            continue
+    parts = collapsed.split()
+    if len(parts) == 3 and parts[0] in _RFC3164_MONTHS:
+        try:
+            day = int(parts[1])
+            hour, minute, sec = (int(p) for p in parts[2].split(":"))
+            return datetime(1900, _RFC3164_MONTHS[parts[0]], day, hour, minute, sec)
+        except ValueError:
+            return None
+    return None
+
+
+def _event_gap_seconds(prev: ClassifiedEvent, nxt: ClassifiedEvent) -> float:
+    ta = _parse_event_ts(prev.timestamp or "")
+    tb = _parse_event_ts(nxt.timestamp or "")
+    if ta is None or tb is None:
+        # Unknown stamps stay in the current cluster; the caller falls
+        # back to the newest missing rows when no gap can be found.
+        return 0.0
+    return abs((tb - ta).total_seconds())
+
+
+def _last_gap_cluster(events: list[ClassifiedEvent]) -> list[ClassifiedEvent]:
+    if not events:
+        return events
+    clusters: list[list[ClassifiedEvent]] = [[events[0]]]
+    for prev, event in zip(events, events[1:]):
+        if _event_gap_seconds(prev, event) >= _LEFTOVER_CLUSTER_GAP_S:
+            clusters.append([event])
+        else:
+            clusters[-1].append(event)
+    return clusters[-1]
+
+
+def _later_storm_incidents(
+    prefix: list[ClassifiedEvent],
+    missing: list[ClassifiedEvent],
+) -> list[ClassifiedEvent]:
+    """Skip leftover overflow so the floor pulls the later outage.
+
+    Resetting the leftover *count* is not enough when leftover flaps
+    overflow the chronological cap: ``missing`` then starts with more
+    morning flaps (or an intermediate leftover category), and a first-N
+    pull never reaches the BGP storm. Drop the leftover-contiguous head
+    and take the last time-gap cluster. If stamps cannot be clustered,
+    take the newest floor-sized slice.
+    """
+    leftover = [e for e in prefix if e.category != "config"]
+    if not leftover or not missing:
+        return missing
+    idx = 0
+    prev = leftover[-1]
+    while (
+        idx < len(missing)
+        and _event_gap_seconds(prev, missing[idx]) < _LEFTOVER_CLUSTER_GAP_S
+    ):
+        prev = missing[idx]
+        idx += 1
+    later = missing[idx:]
+    if not later:
+        return missing[-min(_TIMELINE_INCIDENT_FLOOR, len(missing)):]
+    return _last_gap_cluster(later)
 
 
 def _select_timeline_rows(
@@ -60,6 +156,8 @@ def _select_timeline_rows(
         leftover_budget = incidents if config_in_window else 0
         if config_in_window:
             incidents = 0
+        if leftover_budget:
+            missing_incidents = _later_storm_incidents(prefix, missing_incidents)
         floor = min(_TIMELINE_INCIDENT_FLOOR, incidents + len(missing_incidents))
         need = max(0, floor - incidents)
         configs_in_prefix = sum(1 for e in prefix if e.category == "config")

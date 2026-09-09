@@ -28,11 +28,13 @@ loose semantic versioning.
   24-commit maintenance burst cannot hide the BGP storm that follows.
   Leftover earlier flaps do not count as already showing the outage when
   a commit exists in the window — including when that commit overflowed
-  past a flap-filled cap or arrived after the storm. Those leftover
-  flaps can also be evicted when they occupy the cap and leave no
-  commit slots to spare. After flooring, remaining early commits (or
-  leftover flaps, when no commit sat in the prefix) are swapped for
-  true late commits rather than evicting the storm.
+  past a flap-filled cap or arrived after the storm, and including when
+  leftover flaps themselves overflow the cap (the floor must pull the
+  later storm, not more morning flaps). Those leftover flaps can also
+  be evicted when they occupy the cap and leave no commit slots to spare.
+  After flooring, remaining early commits (or leftover flaps, when no
+  commit sat in the prefix) are swapped for true late commits rather
+  than evicting the storm.
 
 ## [0.6.0] - 2026-08-29
 
