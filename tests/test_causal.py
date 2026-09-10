@@ -507,6 +507,111 @@ def test_timeline_surfaces_later_storm_with_rfc3164_leftover_overflow():
     ) >= 8
 
 
+def test_timeline_surfaces_later_storm_despite_trailing_leftover_flaps():
+    """A leftover-category burst after the storm must not steal the floor.
+
+    Last-cluster selection treated afternoon interface flaps as the
+    outage, so the 10:00 BGP storm stayed hidden (0 routing) even when
+    the trailing leftover cluster was the same size as the storm.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T11:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-03",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
+def test_timeline_surfaces_later_storm_despite_larger_intermediate_hardware():
+    """A larger mid-window hardware burst must not eat the floor.
+
+    Largest-cluster selection would pull 25 hardware rows and hide the
+    later 20-event BGP storm. Last non-leftover cluster keeps the storm.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T09:30:{i:02d}",
+            category="hardware",
+            description="FPC / linecard error",
+            hostname="leaf-02",
+        )
+        for i in range(25)
+    )
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
 def test_timeline_floor_swaps_late_commits_not_the_storm():
     """After flooring later incidents, pin true late commits by swapping
     remaining early commits — do not evict the outage just surfaced.

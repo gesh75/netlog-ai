@@ -30,7 +30,8 @@ loose semantic versioning.
   a commit exists in the window — including when that commit overflowed
   past a flap-filled cap or arrived after the storm, and including when
   leftover flaps themselves overflow the cap (the floor must pull the
-  later storm, not more morning flaps). Those leftover flaps can also
+  later storm, not more morning flaps or a later leftover-category
+  burst of the same signature). Those leftover flaps can also
   be evicted when they occupy the cap and leave no commit slots to spare.
   After flooring, remaining early commits (or leftover flaps, when no
   commit sat in the prefix) are swapped for true late commits rather

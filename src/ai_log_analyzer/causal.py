@@ -78,16 +78,16 @@ def _event_gap_seconds(prev: ClassifiedEvent, nxt: ClassifiedEvent) -> float:
     return abs((tb - ta).total_seconds())
 
 
-def _last_gap_cluster(events: list[ClassifiedEvent]) -> list[ClassifiedEvent]:
+def _gap_clusters(events: list[ClassifiedEvent]) -> list[list[ClassifiedEvent]]:
     if not events:
-        return events
+        return []
     clusters: list[list[ClassifiedEvent]] = [[events[0]]]
     for prev, event in zip(events, events[1:]):
         if _event_gap_seconds(prev, event) >= _LEFTOVER_CLUSTER_GAP_S:
             clusters.append([event])
         else:
             clusters[-1].append(event)
-    return clusters[-1]
+    return clusters
 
 
 def _later_storm_incidents(
@@ -99,13 +99,17 @@ def _later_storm_incidents(
     Resetting the leftover *count* is not enough when leftover flaps
     overflow the chronological cap: ``missing`` then starts with more
     morning flaps (or an intermediate leftover category), and a first-N
-    pull never reaches the BGP storm. Drop the leftover-contiguous head
-    and take the last time-gap cluster. If stamps cannot be clustered,
-    take the newest floor-sized slice.
+    pull never reaches the BGP storm. Drop the leftover-contiguous head,
+    drop later clusters that still share a leftover category (afternoon
+    flaps of the same signature), and take the last remaining cluster.
+    If every later cluster is leftover-category (same-signature storm)
+    or stamps cannot be clustered, fall back to the last cluster / the
+    newest floor-sized slice.
     """
     leftover = [e for e in prefix if e.category != "config"]
     if not leftover or not missing:
         return missing
+    leftover_cats = {e.category for e in leftover}
     idx = 0
     prev = leftover[-1]
     while (
@@ -117,7 +121,11 @@ def _later_storm_incidents(
     later = missing[idx:]
     if not later:
         return missing[-min(_TIMELINE_INCIDENT_FLOOR, len(missing)):]
-    return _last_gap_cluster(later)
+    clusters = _gap_clusters(later)
+    preferred = [c for c in clusters if c[0].category not in leftover_cats]
+    if not preferred:
+        preferred = clusters
+    return preferred[-1]
 
 
 def _select_timeline_rows(
