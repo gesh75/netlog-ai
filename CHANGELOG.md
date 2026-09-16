@@ -32,9 +32,11 @@ loose semantic versioning.
   leftover flaps themselves overflow the cap (the floor must pull the
   later storm, not more morning flaps or a later leftover-category
   burst of the same signature). A leftover-contiguous skip only
-  consumes leftover-category overflow — a storm that starts within
-  60s of leftover flaps (flaps → commit → immediate BGP) is not
-  swallowed. Those leftover flaps can also
+  consumes leftover-category overflow — including leftover flaps that
+  resume after a commit or time gap immediately before the storm —
+  so a leftover-headed burst cannot swallow the outage. A storm that
+  starts within 60s of leftover flaps (flaps → commit → immediate
+  BGP) is not swallowed. Those leftover flaps can also
   be evicted when they occupy the cap and leave no commit slots to spare.
   After flooring, remaining early commits (or leftover flaps, when no
   commit sat in the prefix) are swapped for true late commits rather

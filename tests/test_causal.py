@@ -614,6 +614,60 @@ def test_timeline_surfaces_later_storm_when_leftover_flaps_abut_the_storm():
     ) >= 8
 
 
+def test_timeline_surfaces_later_storm_when_leftover_resumes_before_storm():
+    """Leftover flaps that resume after a commit gap must not swallow the storm.
+
+    The leftover-contiguous skip required a <60s gap from the last leftover
+    in the prefix. A trailing commit opened that gap, so leftover flaps
+    that resumed immediately before the BGP storm headed the later cluster
+    and filled the floor (0 routing).
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-02",
+        )
+        for i in range(8)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(10, 30)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
 def test_timeline_surfaces_later_storm_despite_larger_intermediate_hardware():
     """A larger mid-window hardware burst must not eat the floor.
 

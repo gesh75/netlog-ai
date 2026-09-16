@@ -99,12 +99,11 @@ def _later_storm_incidents(
     Resetting the leftover *count* is not enough when leftover flaps
     overflow the chronological cap: ``missing`` then starts with more
     morning flaps (or an intermediate leftover category), and a first-N
-    pull never reaches the BGP storm. Drop the leftover-contiguous
-    head (same leftover category and inside the cluster gap — not a
-    later storm that merely starts soon after the leftover flaps),
-    drop later clusters that still share a leftover category
-    (afternoon flaps of the same signature), and take the last
-    remaining cluster.
+    pull never reaches the BGP storm. Drop leftover-category overflow
+    even across a commit or time gap (not a later storm that merely
+    starts soon after leftover flaps), drop later clusters that still
+    share a leftover category (afternoon flaps of the same signature),
+    and take the last remaining cluster.
     If every later cluster is leftover-category (same-signature storm)
     or stamps cannot be clustered, fall back to the last cluster / the
     newest floor-sized slice.
@@ -114,20 +113,14 @@ def _later_storm_incidents(
         return missing
     leftover_cats = {e.category for e in leftover}
     idx = 0
-    prev = leftover[-1]
-    # Only leftover-category overflow is contiguous with the prefix.
-    # A later storm that starts within the gap (typical: flaps → commit
-    # → immediate BGP) must not be swallowed just because it is close.
-    while idx < len(missing):
-        event = missing[idx]
-        if (
-            event.category in leftover_cats
-            and _event_gap_seconds(prev, event) < _LEFTOVER_CLUSTER_GAP_S
-        ):
-            prev = event
-            idx += 1
-            continue
-        break
+    # Leftover-category overflow is leftover whether it abuts the prefix
+    # or resumes after a commit / time gap. Requiring a <60s gap from
+    # leftover[-1] left a leftover-headed burst that sat just before the
+    # storm (typical: flaps → commit → more flaps → BGP) to swallow the
+    # outage. Still do not skip a non-leftover storm that starts close
+    # to leftover flaps.
+    while idx < len(missing) and missing[idx].category in leftover_cats:
+        idx += 1
     later = missing[idx:]
     if not later:
         return missing[-min(_TIMELINE_INCIDENT_FLOOR, len(missing)):]
