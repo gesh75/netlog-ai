@@ -131,6 +131,24 @@ def _later_storm_incidents(
     return preferred[-1]
 
 
+def _earliest_config_id(events: Iterable[ClassifiedEvent]) -> int | None:
+    """Object id of the earliest config row, if any.
+
+    The change-window reserve pins this commit so a later noisy host cannot
+    steal ``devices[0]``. The timeline floor evicts oldest commits to make
+    room for a later storm — without protecting this row, that eviction
+    hides the same causative commit the reserve just recovered.
+    """
+    chosen: ClassifiedEvent | None = None
+    for event in events:
+        if event.category != "config":
+            continue
+        key = (event.timestamp or "", event.hostname or "")
+        if chosen is None or key < (chosen.timestamp or "", chosen.hostname or ""):
+            chosen = event
+    return id(chosen) if chosen is not None else None
+
+
 def _select_timeline_rows(
     events: Iterable[ClassifiedEvent], limit: int,
 ) -> list[ClassifiedEvent]:
@@ -148,6 +166,7 @@ def _select_timeline_rows(
     rows.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
     if len(rows) <= limit:
         return rows
+    protect_id = _earliest_config_id(rows)
     prefix = rows[:limit]
     orig_prefix_ids = {id(e) for e in prefix}
     shown = set(orig_prefix_ids)
@@ -182,7 +201,11 @@ def _select_timeline_rows(
             kept: list[ClassifiedEvent] = []
             cfg_take = min(take, config_budget)
             for e in prefix:  # drop oldest commits; keep those closest to the storm
-                if evicted_cfg < cfg_take and e.category == "config":
+                if (
+                    evicted_cfg < cfg_take
+                    and e.category == "config"
+                    and id(e) != protect_id
+                ):
                     evicted_cfg += 1
                     continue
                 kept.append(e)
@@ -231,7 +254,7 @@ def _select_timeline_rows(
         evicted = 0
         kept = []
         for e in prefix:
-            if evicted < take and e.category == "config":
+            if evicted < take and e.category == "config" and id(e) != protect_id:
                 evicted += 1
                 continue
             kept.append(e)

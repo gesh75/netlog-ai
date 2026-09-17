@@ -850,6 +850,10 @@ def test_analyze_change_window_keeps_earliest_commit_per_device():
         n.get("category") == "config" and n.get("device") == "rt-01"
         for n in result.timeline
     )
+    # After #39 the timeline floor must still surface the storm; the
+    # earliest-per-host reserve must not refill the cap with rt-02 commits.
+    assert any(n.get("category") == "routing" for n in result.timeline)
+    assert sum(1 for n in result.timeline if n.get("category") != "config") >= 8
     assert all(e.category != "config" for e in result.classified_events)
 
 
