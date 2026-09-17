@@ -14,7 +14,12 @@ from pathlib import Path
 import pytest
 
 from ai_log_analyzer.adapters.file import parse_file
-from ai_log_analyzer.analyzer import _aggregate_stream, analyze, build_action_items
+from ai_log_analyzer.analyzer import (
+    _CONFIG_RESERVE,
+    _aggregate_stream,
+    analyze,
+    build_action_items,
+)
 from ai_log_analyzer.classifier import LogEvent, classify_events, iter_classify
 from ai_log_analyzer.cli import cmd_analyze
 
@@ -106,8 +111,40 @@ def test_aggregate_stream_config_reserve_is_bounded():
         iter_classify(synth(80)), top_k=300,
     )
     assert cat.get("config") == 80
-    assert len(config_events) == 50
+    hosts = {e.hostname for e in config_events}
+    assert hosts == {"h0", "h1", "h2"}
+    # newest-N plus at most one earliest pin per host that fell out of the heap
+    assert _CONFIG_RESERVE <= len(config_events) <= _CONFIG_RESERVE + 3
+    assert len(config_events) < 80
     assert len(top) <= 80
+
+
+@pytest.mark.unit
+def test_aggregate_stream_pins_first_arrival_on_tied_timestamp():
+    """Same-timestamp config on one host must keep the first arrival.
+
+    Comparing (timestamp, -seq) would keep the later line and drop the
+    causative commit once a newest-50 heap of later hosts fills up.
+    """
+    events = [
+        LogEvent("2026-08-29T09:55:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+        LogEvent("2026-08-29T09:55:00", "rt-01", "mgd", "info",
+                 "mgd: cli_command show version"),
+    ]
+    events.extend(
+        LogEvent(
+            f"2026-08-29T09:56:{i:02d}", "rt-02", "mgd", "info",
+            "commit complete confirmed",
+        )
+        for i in range(55)
+    )
+    _top, _sev, _cat, _groups, _by_host, _miner, _tracker, config_events = (
+        _aggregate_stream(iter_classify(events), top_k=300)
+    )
+    rt01 = [e for e in config_events if e.hostname == "rt-01"]
+    assert len(rt01) == 1
+    assert "commit complete confirmed" in rt01[0].message
 
 
 # ── web size guard + generator path ─────────────────────────────────────────

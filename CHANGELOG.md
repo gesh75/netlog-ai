@@ -24,6 +24,13 @@ loose semantic versioning.
   them during a fabric-wide storm. The timeline display cap now pins a
   bounded set of config events so a late commit cannot vanish behind 24
   earlier flaps.
+- Pin the earliest config event per hostname in the change-window reserve
+  so later CLI-classified noise on another device cannot evict the
+  causative commit. `change_window.devices` is chronological so the
+  earliest commit host is named first, including when configs survive
+  inside the severity top_k. The timeline floor that evicts oldest
+  commits to surface a later storm keeps that earliest commit so the
+  noisy host cannot steal the timeline either.
 - Floor later incident rows into a config-flooded timeline cap so a
   24-commit maintenance burst cannot hide the BGP storm that follows.
   Leftover earlier flaps do not count as already showing the outage when

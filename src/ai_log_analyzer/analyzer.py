@@ -539,7 +539,10 @@ def _executive_summary(
 # Config commits are classified low-severity, so a fabric-wide storm of
 # critical/high/medium events fills the top_k heap and evicts them. The
 # causal console (change_window / timeline) still needs those commits, so
-# we keep a separate bounded reserve. Memory stays O(top_k + reserve).
+# we keep a separate reserve. A newest-N heap alone is not enough: 50 later
+# commits on another host evict the causative commit and the console names
+# the wrong device. Pin the earliest config per hostname (O(devices), the
+# same bound as by_host) and keep the newest-N for late commits.
 _CONFIG_RESERVE = 50
 
 
@@ -548,6 +551,31 @@ def _push_newest(heap: list, entry: tuple, cap: int) -> None:
         heapq.heappush(heap, entry)
     elif entry[:2] > heap[0][:2]:
         heapq.heapreplace(heap, entry)
+
+
+def _pin_earliest(slot: dict[str, tuple], entry: tuple, hostname: str) -> None:
+    key = hostname or ""
+    prev = slot.get(key)
+    if prev is None:
+        slot[key] = entry
+        return
+    # entry is (timestamp, -seq, ev). Earliest = smaller timestamp, then
+    # smaller seq (larger -seq) so the first arrival wins a timestamp tie.
+    # Comparing entry[:2] directly would prefer the later arrival.
+    if (entry[0] or "", -entry[1]) < (prev[0] or "", -prev[1]):
+        slot[key] = entry
+
+
+def _merge_config_reserve(
+    newest: list, earliest_by_host: dict[str, tuple],
+) -> list[ClassifiedEvent]:
+    reserved: dict[int, ClassifiedEvent] = {}
+    for _, _, ev in earliest_by_host.values():
+        reserved[id(ev)] = ev
+    for _, _, ev in newest:
+        reserved[id(ev)] = ev
+    # Oldest first so change_window.devices names the earliest commit host.
+    return sorted(reserved.values(), key=lambda ev: (ev.timestamp or "", ev.hostname or ""))
 
 
 def _with_reserved_config(
@@ -575,13 +603,15 @@ def _aggregate_stream(
     then arrival). Events no KB rule matched are additionally mined into
     templates so novel message shapes surface instead of vanishing as noise.
 
-    Config-category events are also collected into a bounded reserve so the
-    change-window correlator still sees commits during a high-severity storm.
+    Config-category events are reserved as earliest-per-host plus newest-N so
+    the change-window correlator still sees the causative commit during a
+    high-severity storm, even when another host emits later config noise.
     """
     sev_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     cat_counts: dict[str, int] = {}
     buckets: dict[str, list] = {sev: [] for sev in SEV_ORDER}
     config_heap: list = []
+    first_config: dict[str, tuple] = {}
     groups: dict[tuple[str, str], dict] = {}
     by_host: dict[str, dict] = {}
     miner = TemplateMiner()
@@ -599,6 +629,7 @@ def _aggregate_stream(
         _push_newest(buckets.setdefault(e.severity, []), entry, top_k)
         if e.category == "config":
             _push_newest(config_heap, entry, _CONFIG_RESERVE)
+            _pin_earliest(first_config, entry, e.hostname)
 
     top_events: list[ClassifiedEvent] = []
     for sev in sorted(buckets, key=lambda s: SEV_ORDER.get(s, 5)):
@@ -607,9 +638,7 @@ def _aggregate_stream(
         )
         if len(top_events) >= top_k:
             break
-    config_events = [
-        e for _, _, e in sorted(config_heap, key=lambda t: t[:2], reverse=True)
-    ]
+    config_events = _merge_config_reserve(config_heap, first_config)
     return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner, tracker, config_events
 
 
