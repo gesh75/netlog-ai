@@ -19,8 +19,9 @@ _DOWNSTREAM = ("BGP", "OSPF", "LAG", "VPN", "EVPN", "BFD", "MLAG")
 # Display cap is 24. A fabric-wide flap fills that window with high-severity
 # rows and would hide a late config commit — the same signal change_window
 # exists to surface. Pin a handful so the causal console stays honest.
-# The inverse is also true: a commit flood that fills the cap hides every
-# later incident. Floor a few incident rows so the outage stays visible.
+# The inverse is also true: a commit flood — or a leftover flap flood
+# with no commit at all — that fills the cap hides every later incident.
+# Floor a few incident rows so the outage stays visible.
 _TIMELINE_CONFIG_PIN = 4
 _TIMELINE_INCIDENT_FLOOR = 8
 # Leftover overflow and a later storm are separate clusters when they
@@ -178,16 +179,15 @@ def _select_timeline_rows(
     ]
     incidents = sum(1 for e in prefix if e.category != "config")
     if missing_incidents:
-        # Leftover earlier flaps do not satisfy the floor when a commit
-        # exists in the window — whether it precedes the later storm,
-        # sat at the end of the prefix, overflowed past a flap-filled
-        # cap, or arrived after the storm (a late pin).
-        config_in_window = any(e.category == "config" for e in rows)
-        leftover_budget = incidents if config_in_window else 0
-        if config_in_window:
-            incidents = 0
-        if leftover_budget:
-            missing_incidents = _later_storm_incidents(prefix, missing_incidents)
+        # Leftover earlier flaps do not satisfy the floor when a later
+        # storm exists — whether a commit is in the window or not.
+        # Gating the reset on config_in_window hid a two-phase outage
+        # with no change window (morning flaps filling the cap, then
+        # afternoon BGP on another device): leftover_budget stayed 0,
+        # need stayed 0, and the storm never entered the timeline.
+        leftover_budget = incidents
+        incidents = 0
+        missing_incidents = _later_storm_incidents(prefix, missing_incidents)
         floor = min(_TIMELINE_INCIDENT_FLOOR, incidents + len(missing_incidents))
         need = max(0, floor - incidents)
         configs_in_prefix = sum(1 for e in prefix if e.category == "config")
