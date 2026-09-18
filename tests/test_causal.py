@@ -384,6 +384,43 @@ def test_timeline_surfaces_later_storm_when_late_commit_follows_storm():
     ) >= 8
 
 
+def test_timeline_surfaces_later_storm_without_config():
+    """24 leftover flaps and no commit must still yield the later storm.
+
+    PRs #37–#39 only reset leftover flaps when a config commit existed.
+    A two-phase outage with no change window — morning interface flaps
+    filling the display cap, then an afternoon BGP collapse on another
+    device — kept the chronological prefix (0 routing) and pointed the
+    causal console at the leftover host.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(24)
+    ]
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-02",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert not any(n.get("category") == "config" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-02"
+    ) >= 8
+
+
 def test_timeline_surfaces_later_storm_when_leftover_flaps_overflow_cap():
     """32 leftover flaps + a later storm must still yield the storm.
 
@@ -926,6 +963,36 @@ def test_analyze_late_commit_survives_severity_and_timeline_caps():
     assert any("Change window" in b for b in result.executive_summary)
     assert any(n.get("category") == "config" for n in result.timeline)
     assert all(e.category != "config" for e in result.classified_events)
+
+
+def test_analyze_timeline_keeps_storm_after_flap_flood_without_config():
+    """A 24+ flap burst before a BGP storm must still render the outage.
+
+    No commit in the window. The timeline used to keep the chronological
+    leftover prefix because the floor only reset when config existed.
+    """
+    events = [
+        LogEvent(
+            f"2026-08-29T09:00:{i:02d}", "leaf-01", "Ebra", "err",
+            "%LINK-3-UPDOWN: Interface Ethernet1, changed state to down",
+        )
+        for i in range(24)
+    ]
+    events.extend(
+        LogEvent(
+            f"2026-08-29T10:00:{i:02d}", "spine-02", "rpd", "err",
+            f"bgp peer 192.0.2.{i % 200} down",
+        )
+        for i in range(20)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["detected"] is False
+    assert any(n.get("category") == "routing" for n in result.timeline)
+    assert any("BGP" in (n.get("title") or "") for n in result.timeline)
+    assert sum(
+        1 for n in result.timeline
+        if n.get("category") == "routing" and n.get("device") == "spine-02"
+    ) >= 8
 
 
 def test_analyze_timeline_keeps_storm_after_config_flood():
