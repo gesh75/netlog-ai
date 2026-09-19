@@ -6,7 +6,7 @@ surfaces. No I/O, no LLM.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from ai_log_analyzer.classifier import SEV_ORDER, ClassifiedEvent
@@ -41,8 +41,33 @@ def _as_naive(dt: datetime) -> datetime:
     return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
 
 
+def _parse_epoch(stamp: str) -> datetime | None:
+    """Unix seconds / ms / µs / ns, as Loki and some Splunk _time values emit."""
+    try:
+        n: float = float(stamp) if "." in stamp else int(stamp)
+    except ValueError:
+        return None
+    abs_n = abs(n)
+    if abs_n >= 1e18:
+        n /= 1e9
+    elif abs_n >= 1e15:
+        n /= 1e6
+    elif abs_n >= 1e12:
+        n /= 1e3
+    elif abs_n < 1e9:
+        return None
+    try:
+        return _as_naive(datetime.fromtimestamp(n, tz=timezone.utc))
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
 def _parse_event_ts(ts: str) -> datetime | None:
-    """Parse ISO/RFC5424, FRR, and RFC3164/Junos stamps. None if unknown."""
+    """Parse ISO/RFC5424, FRR, epoch, and RFC3164/Junos stamps. None if unknown.
+
+    RFC3164 has no year — year 1900 is a sentinel so callers can re-stamp
+    from a sibling event that does carry a year (ISO / Loki epoch).
+    """
     if not ts:
         return None
     stamp = ts.strip()
@@ -51,6 +76,9 @@ def _parse_event_ts(ts: str) -> datetime | None:
         return _as_naive(datetime.fromisoformat(iso))
     except ValueError:
         pass
+    epoch = _parse_epoch(stamp)
+    if epoch is not None:
+        return epoch
     collapsed = " ".join(stamp.split())
     for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
         try:
@@ -66,6 +94,34 @@ def _parse_event_ts(ts: str) -> datetime | None:
         except ValueError:
             return None
     return None
+
+
+def _reference_year(events: Iterable[ClassifiedEvent]) -> int:
+    """Year to apply to RFC3164 stamps, taken from a dated sibling event."""
+    for event in events:
+        parsed = _parse_event_ts(event.timestamp or "")
+        if parsed is not None and parsed.year != 1900:
+            return parsed.year
+    return datetime.now().year
+
+
+def event_time(event: ClassifiedEvent, year: int | None = None) -> datetime | None:
+    """Best-effort naive datetime for ``event``, or None if the stamp is unknown."""
+    parsed = _parse_event_ts(event.timestamp or "")
+    if parsed is None:
+        return None
+    if parsed.year != 1900:
+        return parsed
+    stamp_year = datetime.now().year if year is None else year
+    try:
+        return parsed.replace(year=stamp_year)
+    except ValueError:
+        return parsed.replace(year=stamp_year, day=28)
+
+
+def _event_sort_key(event: ClassifiedEvent, year: int) -> tuple[datetime, str]:
+    """Chronological key. Unparseable stamps sort last so they cannot steal earliest."""
+    return (event_time(event, year) or datetime.max, event.hostname or "")
 
 
 def _event_gap_seconds(prev: ClassifiedEvent, nxt: ClassifiedEvent) -> float:
@@ -131,7 +187,9 @@ def _later_storm_incidents(
     return preferred[-1]
 
 
-def _earliest_config_id(events: Iterable[ClassifiedEvent]) -> int | None:
+def _earliest_config_id(
+    events: Iterable[ClassifiedEvent], year: int | None = None,
+) -> int | None:
     """Object id of the earliest config row, if any.
 
     The change-window reserve pins this commit so a later noisy host cannot
@@ -139,13 +197,17 @@ def _earliest_config_id(events: Iterable[ClassifiedEvent]) -> int | None:
     room for a later storm — without protecting this row, that eviction
     hides the same causative commit the reserve just recovered.
     """
+    rows = list(events)
+    stamp_year = _reference_year(rows) if year is None else year
     chosen: ClassifiedEvent | None = None
-    for event in events:
+    chosen_key: tuple[datetime, str] | None = None
+    for event in rows:
         if event.category != "config":
             continue
-        key = (event.timestamp or "", event.hostname or "")
-        if chosen is None or key < (chosen.timestamp or "", chosen.hostname or ""):
+        key = _event_sort_key(event, stamp_year)
+        if chosen_key is None or key < chosen_key:
             chosen = event
+            chosen_key = key
     return id(chosen) if chosen is not None else None
 
 
@@ -163,10 +225,11 @@ def _select_timeline_rows(
         e for e in events
         if e.severity in _ACTIONABLE or e.category == "config"
     ]
-    rows.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+    stamp_year = _reference_year(rows)
+    rows.sort(key=lambda e: _event_sort_key(e, stamp_year))
     if len(rows) <= limit:
         return rows
-    protect_id = _earliest_config_id(rows)
+    protect_id = _earliest_config_id(rows, stamp_year)
     prefix = rows[:limit]
     orig_prefix_ids = {id(e) for e in prefix}
     shown = set(orig_prefix_ids)
@@ -224,7 +287,7 @@ def _select_timeline_rows(
             pulled = missing_incidents[:evicted]
             kept.extend(pulled)
             pulled_ids = {id(e) for e in pulled}
-            kept.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+            kept.sort(key=lambda e: _event_sort_key(e, stamp_year))
             prefix = kept
             shown = {id(e) for e in prefix}
             pulled_incidents = True
@@ -274,7 +337,7 @@ def _select_timeline_rows(
             kept = trimmed
             evicted += dropped
         kept.extend(pin[:evicted])
-        kept.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+        kept.sort(key=lambda e: _event_sort_key(e, stamp_year))
         return kept
     # Never wipe the last incident row still inside the window just to
     # make room for extra commits.
@@ -290,7 +353,7 @@ def _select_timeline_rows(
         kept.append(e)
     kept.reverse()
     kept.extend(pin[:evicted])
-    kept.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+    kept.sort(key=lambda e: _event_sort_key(e, stamp_year))
     return kept
 
 
@@ -392,8 +455,10 @@ def change_window(events: Iterable[ClassifiedEvent]) -> dict[str, Any]:
     # Order is not guaranteed: analyze() concatenates severity-priority
     # top_k (newest-first within a severity) ahead of the reserved extras.
     # Oldest-first so devices[0] is the earliest commit host, not the
-    # noisiest late one.
-    hits.sort(key=lambda e: (e.timestamp or "", e.hostname or ""))
+    # noisiest late one. Must parse stamps — FRR/ISO vs RFC3164 vs Loki
+    # epoch do not sort lexicographically.
+    stamp_year = _reference_year(hits)
+    hits.sort(key=lambda e: _event_sort_key(e, stamp_year))
     devices: list[str] = []
     seen: set[str] = set()
     samples: list[str] = []
