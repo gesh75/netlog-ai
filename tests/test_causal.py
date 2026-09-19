@@ -1,6 +1,8 @@
 """Causal console: timeline, blast radius, change-window correlator."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from ai_log_analyzer.analyzer import ActionItem, analyze
@@ -105,6 +107,60 @@ def test_change_window_devices_follow_earliest_timestamp_not_input_order():
     assert cw["detected"] is True
     assert cw["count"] == 2
     assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_rfc3164_commit_before_later_iso_noise():
+    """CLI ``--frr`` (ISO) + ``--file`` (Junos RFC3164) must not invert order.
+
+    Lexicographic sort puts ``2026-08-29T09:56:00`` before ``Aug 29 09:55:00``
+    because ``'2' < 'A'``, so the later FRR host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="2026-08-29T09:56:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Aug 29 09:55:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_iso_commit_before_later_loki_epoch():
+    """Loki stores nanosecond unix timestamps; those sort before ISO as strings."""
+    late = datetime(2026, 8, 29, 9, 56, 0, tzinfo=timezone.utc)
+    events = [
+        _ce(timestamp=str(int(late.timestamp() * 1e9)), category="config",
+            severity="low", hostname="rt-02",
+            description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2026-08-29T09:55:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_analyze_change_window_mixed_rfc3164_and_iso_names_earliest_host():
+    """Streaming reserve + change_window must agree on mixed vendor stamps."""
+    events = [
+        LogEvent("Aug 29 09:55:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    events.extend(
+        LogEvent(
+            f"2026-08-29T09:56:{i:02d}", "rt-02", "mgd", "info",
+            "commit complete confirmed",
+        )
+        for i in range(55)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-01"
+    assert "rt-02" in result.change_window["devices"]
 
 
 def test_analyze_exposes_causal_fields():

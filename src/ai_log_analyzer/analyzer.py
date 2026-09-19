@@ -10,7 +10,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ai_log_analyzer import kb, llm
-from ai_log_analyzer.causal import blast_radius, build_timeline, change_window
+from ai_log_analyzer.causal import (
+    _event_sort_key,
+    _reference_year,
+    blast_radius,
+    build_timeline,
+    change_window,
+    event_time,
+)
 from ai_log_analyzer.classifier import (
     SEV_ORDER,
     ClassifiedEvent,
@@ -559,10 +566,10 @@ def _pin_earliest(slot: dict[str, tuple], entry: tuple, hostname: str) -> None:
     if prev is None:
         slot[key] = entry
         return
-    # entry is (timestamp, -seq, ev). Earliest = smaller timestamp, then
+    # entry is (parsed_dt, -seq, ev). Earliest = smaller datetime, then
     # smaller seq (larger -seq) so the first arrival wins a timestamp tie.
     # Comparing entry[:2] directly would prefer the later arrival.
-    if (entry[0] or "", -entry[1]) < (prev[0] or "", -prev[1]):
+    if (entry[0], -entry[1]) < (prev[0], -prev[1]):
         slot[key] = entry
 
 
@@ -575,7 +582,8 @@ def _merge_config_reserve(
     for _, _, ev in newest:
         reserved[id(ev)] = ev
     # Oldest first so change_window.devices names the earliest commit host.
-    return sorted(reserved.values(), key=lambda ev: (ev.timestamp or "", ev.hostname or ""))
+    year = _reference_year(reserved.values())
+    return sorted(reserved.values(), key=lambda ev: _event_sort_key(ev, year))
 
 
 def _with_reserved_config(
@@ -625,11 +633,14 @@ def _aggregate_stream(
         tracker.add(e)
         if e.category == "other" and e.message:
             miner.add(e.message, e.hostname)
-        entry = (e.timestamp, -seq, e)
-        _push_newest(buckets.setdefault(e.severity, []), entry, top_k)
+        parsed = event_time(e)
+        # Unparseable stamps must not occupy newest-N slots or win the
+        # earliest-per-host pin (mixed FRR/ISO/RFC3164/Loki streams).
+        newest = (parsed or datetime.min, -seq, e)
+        _push_newest(buckets.setdefault(e.severity, []), newest, top_k)
         if e.category == "config":
-            _push_newest(config_heap, entry, _CONFIG_RESERVE)
-            _pin_earliest(first_config, entry, e.hostname)
+            _push_newest(config_heap, newest, _CONFIG_RESERVE)
+            _pin_earliest(first_config, (parsed or datetime.max, -seq, e), e.hostname)
 
     top_events: list[ClassifiedEvent] = []
     for sev in sorted(buckets, key=lambda s: SEV_ORDER.get(s, 5)):
