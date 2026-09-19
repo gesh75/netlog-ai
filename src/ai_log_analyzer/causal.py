@@ -37,6 +37,9 @@ _RFC3164_MONTHS = {
         start=1,
     )
 }
+# Leap year so 29 Feb RFC3164 parses. Never a real ingest year; restamped
+# from a sibling ISO/epoch event (or datetime.now().year).
+_RFC3164_YEARLESS = 4
 
 
 def _as_naive(dt: datetime) -> datetime:
@@ -67,8 +70,9 @@ def _parse_epoch(stamp: str) -> datetime | None:
 def _parse_event_ts(ts: str) -> datetime | None:
     """Parse ISO/RFC5424, FRR, epoch, and RFC3164/Junos stamps. None if unknown.
 
-    RFC3164 has no year — year 1900 is a sentinel so callers can re-stamp
-    from a sibling event that does carry a year (ISO / Loki epoch).
+    RFC3164 has no year — ``_RFC3164_YEARLESS`` is a sentinel so callers
+    can re-stamp from a sibling event that does carry a year (ISO / Loki
+    epoch). The sentinel is a leap year so 29 Feb still parses.
     """
     if not ts:
         return None
@@ -92,7 +96,9 @@ def _parse_event_ts(ts: str) -> datetime | None:
         try:
             day = int(parts[1])
             hour, minute, sec = (int(p) for p in parts[2].split(":"))
-            return datetime(1900, _RFC3164_MONTHS[parts[0]], day, hour, minute, sec)
+            return datetime(
+                _RFC3164_YEARLESS, _RFC3164_MONTHS[parts[0]], day, hour, minute, sec,
+            )
         except ValueError:
             return None
     return None
@@ -102,7 +108,7 @@ def _reference_year(events: Iterable[ClassifiedEvent]) -> int:
     """Year to apply to RFC3164 stamps, taken from a dated sibling event."""
     for event in events:
         parsed = _parse_event_ts(event.timestamp or "")
-        if parsed is not None and parsed.year != 1900:
+        if parsed is not None and parsed.year != _RFC3164_YEARLESS:
             return parsed.year
     return datetime.now().year
 
@@ -112,7 +118,7 @@ def event_time(event: ClassifiedEvent, year: int | None = None) -> datetime | No
     parsed = _parse_event_ts(event.timestamp or "")
     if parsed is None:
         return None
-    if parsed.year != 1900:
+    if parsed.year != _RFC3164_YEARLESS:
         return parsed
     stamp_year = datetime.now().year if year is None else year
     try:
@@ -126,9 +132,11 @@ def _event_sort_key(event: ClassifiedEvent, year: int) -> tuple[datetime, str]:
     return (event_time(event, year) or datetime.max, event.hostname or "")
 
 
-def _event_gap_seconds(prev: ClassifiedEvent, nxt: ClassifiedEvent) -> float:
-    ta = _parse_event_ts(prev.timestamp or "")
-    tb = _parse_event_ts(nxt.timestamp or "")
+def _event_gap_seconds(
+    prev: ClassifiedEvent, nxt: ClassifiedEvent, year: int | None = None,
+) -> float:
+    ta = event_time(prev, year)
+    tb = event_time(nxt, year)
     if ta is None or tb is None:
         # Unknown stamps stay in the current cluster; the caller falls
         # back to the newest missing rows when no gap can be found.
@@ -136,12 +144,15 @@ def _event_gap_seconds(prev: ClassifiedEvent, nxt: ClassifiedEvent) -> float:
     return abs((tb - ta).total_seconds())
 
 
-def _gap_clusters(events: list[ClassifiedEvent]) -> list[list[ClassifiedEvent]]:
+def _gap_clusters(
+    events: list[ClassifiedEvent], year: int | None = None,
+) -> list[list[ClassifiedEvent]]:
     if not events:
         return []
+    stamp_year = _reference_year(events) if year is None else year
     clusters: list[list[ClassifiedEvent]] = [[events[0]]]
     for prev, event in zip(events, events[1:]):
-        if _event_gap_seconds(prev, event) >= _LEFTOVER_CLUSTER_GAP_S:
+        if _event_gap_seconds(prev, event, stamp_year) >= _LEFTOVER_CLUSTER_GAP_S:
             clusters.append([event])
         else:
             clusters[-1].append(event)
@@ -151,6 +162,7 @@ def _gap_clusters(events: list[ClassifiedEvent]) -> list[list[ClassifiedEvent]]:
 def _later_storm_incidents(
     prefix: list[ClassifiedEvent],
     missing: list[ClassifiedEvent],
+    year: int | None = None,
 ) -> list[ClassifiedEvent]:
     """Skip leftover overflow so the floor pulls the later outage.
 
@@ -169,6 +181,7 @@ def _later_storm_incidents(
     leftover = [e for e in prefix if e.category != "config"]
     if not leftover or not missing:
         return missing
+    stamp_year = _reference_year([*prefix, *missing]) if year is None else year
     leftover_cats = {e.category for e in leftover}
     idx = 0
     # Leftover-category overflow is leftover whether it abuts the prefix
@@ -182,7 +195,7 @@ def _later_storm_incidents(
     later = missing[idx:]
     if not later:
         return missing[-min(_TIMELINE_INCIDENT_FLOOR, len(missing)):]
-    clusters = _gap_clusters(later)
+    clusters = _gap_clusters(later, stamp_year)
     preferred = [c for c in clusters if c[0].category not in leftover_cats]
     if not preferred:
         preferred = clusters
@@ -251,7 +264,9 @@ def _select_timeline_rows(
         # need stayed 0, and the storm never entered the timeline.
         leftover_budget = incidents
         incidents = 0
-        missing_incidents = _later_storm_incidents(prefix, missing_incidents)
+        missing_incidents = _later_storm_incidents(
+            prefix, missing_incidents, stamp_year,
+        )
         floor = min(_TIMELINE_INCIDENT_FLOOR, incidents + len(missing_incidents))
         need = max(0, floor - incidents)
         configs_in_prefix = sum(1 for e in prefix if e.category == "config")

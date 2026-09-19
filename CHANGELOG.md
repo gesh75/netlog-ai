@@ -35,7 +35,9 @@ loose semantic versioning.
   not the raw timestamp string. Mixed `--frr` ISO, Junos RFC3164, and
   Loki nanosecond-epoch stamps do not sort lexicographically, so a later
   FRR or Loki host was named as `devices[0]`. RFC3164 year is taken from
-  a sibling dated event.
+  a sibling dated event. Leftover-cluster gaps use the same restamped
+  time so a mixed-format storm is not split into one-event clusters.
+  The yearless RFC3164 sentinel is a leap year so 29 Feb still parses.
 - Floor later incident rows into a config-flooded timeline cap so a
   24-commit maintenance burst cannot hide the BGP storm that follows.
   Leftover earlier flaps do not count as already showing the outage when
