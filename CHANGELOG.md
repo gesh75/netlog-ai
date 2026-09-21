@@ -38,7 +38,9 @@ loose semantic versioning.
   past a flap-filled cap or arrived after the storm, and including when
   leftover flaps themselves overflow the cap (the floor must pull the
   later storm, not more morning flaps or a later leftover-category
-  burst of the same signature). A leftover-contiguous skip only
+  burst of the same signature). The same floor now runs when there is
+  no config commit at all — a 24-flap morning prefix must not hide an
+  afternoon BGP storm on another device. A leftover-contiguous skip only
   consumes leftover-category overflow — including leftover flaps that
   resume after a commit or time gap immediately before the storm —
   so a leftover-headed burst cannot swallow the outage. A storm that
