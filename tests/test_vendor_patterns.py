@@ -6,7 +6,6 @@ import pytest
 
 from ai_log_analyzer.classifier import LogEvent, classify_events
 
-
 pytestmark = pytest.mark.unit
 
 

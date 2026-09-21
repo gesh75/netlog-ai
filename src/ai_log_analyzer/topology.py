@@ -151,13 +151,13 @@ class Topology:
 # Site portion accepts dashes so multi-token site names like `peer-a-fw-01`,
 # `dc-east-fw-01`, or `demo-east-fw-01` parse correctly. Lazy match so the
 # func/num at the end always win the suffix.
-_HOST_RE = re.compile(r"^(?P<site>[a-z0-9][a-z0-9-]*?)-(?P<func>fw|rt|sw|edr|acs)-(?P<num>\d+[a-z]?)$", re.I)
+_HOST_RE = re.compile(r"^(?P<site>[a-z0-9][a-z0-9-]*?)-(?P<func>fw|rt|sw|edr|acs)-(?P<num>\d+[a-z]?)$", re.IGNORECASE)
 _INTERFACE_DESC_RE = re.compile(
     r'(?:description\s+|description:\s+|description\s+")'
-    r'([^"\n;]+?)["\n;]', re.I
+    r'([^"\n;]+?)["\n;]', re.IGNORECASE
 )
-_NEIGHBOR_BGP_JUNOS = re.compile(r"neighbor\s+(\S+)\s*\{[^}]*?peer-as\s+(\d+)", re.S)
-_NEIGHBOR_BGP_EOS = re.compile(r"neighbor\s+(\S+)\s+remote-as\s+(\d+)", re.I)
+_NEIGHBOR_BGP_JUNOS = re.compile(r"neighbor\s+(\S+)\s*\{[^}]*?peer-as\s+(\d+)", re.DOTALL)
+_NEIGHBOR_BGP_EOS = re.compile(r"neighbor\s+(\S+)\s+remote-as\s+(\d+)", re.IGNORECASE)
 
 
 def _detect_role_from_hostname(hostname: str) -> tuple[str, str]:
@@ -414,8 +414,8 @@ def _ospf_iface_detail(facts, subnet: str) -> tuple[str, int | None, int | None,
 
 
 def _shared_subnet(
-    a: "topology_infer.DeviceFacts | None",
-    b: "topology_infer.DeviceFacts | None",
+    a: topology_infer.DeviceFacts | None,
+    b: topology_infer.DeviceFacts | None,
 ) -> str:
     """Return the /28-/31 subnet shared by both devices, or '' if none."""
     if a is None or b is None:
@@ -441,8 +441,8 @@ def _shared_subnet(
 
 
 def _bgp_neighbor_ips(
-    a: "topology_infer.DeviceFacts | None",
-    b: "topology_infer.DeviceFacts | None",
+    a: topology_infer.DeviceFacts | None,
+    b: topology_infer.DeviceFacts | None,
 ) -> tuple[str, str]:
     """Return (a_peer_ip_to_b, b_peer_ip_to_a) — i.e. the BGP neighbor IPs as
     they appear in each side's config, pointing at the other.
@@ -470,8 +470,8 @@ def _bgp_neighbor_ips(
 
 
 def _peering_asn_pair(
-    a: "topology_infer.DeviceFacts | None",
-    b: "topology_infer.DeviceFacts | None",
+    a: topology_infer.DeviceFacts | None,
+    b: topology_infer.DeviceFacts | None,
 ) -> tuple[int | None, int | None]:
     """Return (a.local_asn, b.local_asn) when there is a BGP peering between them.
 

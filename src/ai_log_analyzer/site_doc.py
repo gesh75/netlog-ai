@@ -30,7 +30,6 @@ from datetime import datetime, timezone
 
 from ai_log_analyzer import compliance, llm, site_diagram, topology, topology_infer
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Software lifecycle / EOL — known Junos + EOS release dates and EOL deadlines
 # ─────────────────────────────────────────────────────────────────────────────
@@ -273,34 +272,34 @@ def _extend_unique(target: list, values: list) -> None:
 
 
 # Pre-compiled regexes used in extract_profile (hot path — one device/call)
-_RE_VERSION_JUNOS = re.compile(r"^\s*version\s+([\w.\-]+);?", re.M)
-_RE_VERSION_EOS = re.compile(r"EOS-(\d[\d.M\-]+)", re.I)
-_RE_VERSION_FRR = re.compile(r"frr\s+version\s+([\w.]+)", re.I)
-_RE_MODEL = re.compile(r"\((QFX\d+\w*|EX\d+\w*|MX\d+\w*|SRX\d+\w*|DCS-\S+|7050\S+|7280\S+)", re.I)
+_RE_VERSION_JUNOS = re.compile(r"^\s*version\s+([\w.\-]+);?", re.MULTILINE)
+_RE_VERSION_EOS = re.compile(r"EOS-(\d[\d.M\-]+)", re.IGNORECASE)
+_RE_VERSION_FRR = re.compile(r"frr\s+version\s+([\w.]+)", re.IGNORECASE)
+_RE_MODEL = re.compile(r"\((QFX\d+\w*|EX\d+\w*|MX\d+\w*|SRX\d+\w*|DCS-\S+|7050\S+|7280\S+)", re.IGNORECASE)
 _RE_LOOPBACK_JUNOS = re.compile(
-    r"lo0\s+\{[^}]*?address\s+(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})", re.S,
+    r"lo0\s+\{[^}]*?address\s+(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})", re.DOTALL,
 )
 _RE_LOOPBACK_EOS = re.compile(
     r"interface\s+(?:Loopback|lo)\d+\s*\n\s*ip\s+address\s+(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})",
-    re.I,
+    re.IGNORECASE,
 )
-_RE_LOCAL_ASN = re.compile(r"(?:autonomous-system|router\s+bgp|local-as)\s+(\d+)", re.I)
-_RE_BGP_JUNOS = re.compile(r"neighbor\s+(\S+)\s*\{[^}]*?peer-as\s+(\d+)", re.S)
+_RE_LOCAL_ASN = re.compile(r"(?:autonomous-system|router\s+bgp|local-as)\s+(\d+)", re.IGNORECASE)
+_RE_BGP_JUNOS = re.compile(r"neighbor\s+(\S+)\s*\{[^}]*?peer-as\s+(\d+)", re.DOTALL)
 _RE_BGP_EOS = re.compile(r"neighbor\s+(\S+)\s+remote-as\s+(\d+)")
-_RE_OSPF_AREA = re.compile(r"area\s+(\d+(?:\.\d+\.\d+\.\d+)?)", re.I)
+_RE_OSPF_AREA = re.compile(r"area\s+(\d+(?:\.\d+\.\d+\.\d+)?)", re.IGNORECASE)
 # Anchor IS-IS detection to a config statement (avoid false positives in
 # interface descriptions or comments that mention "isis").
 _RE_ISIS = re.compile(
     r"^\s*(?:set\s+protocols\s+isis\b|protocols\s+\{\s*isis\b|router\s+isis\b)",
-    re.I | re.M,
+    re.IGNORECASE | re.MULTILINE,
 )
-_RE_STATIC_ROUTE = re.compile(r"\bip\s+route\b|\broute\s+0\.0\.0\.0", re.I)
-_RE_EVPN = re.compile(r"\bevpn\b", re.I)
-_RE_VXLAN_VNI = re.compile(r"\bvni\s+\d+\b", re.I)
+_RE_STATIC_ROUTE = re.compile(r"\bip\s+route\b|\broute\s+0\.0\.0\.0", re.IGNORECASE)
+_RE_EVPN = re.compile(r"\bevpn\b", re.IGNORECASE)
+_RE_VXLAN_VNI = re.compile(r"\bvni\s+\d+\b", re.IGNORECASE)
 _RE_SEC_ZONE = re.compile(r"security-zone\s+(\S+)")
 _RE_SEC_POLICY = re.compile(r"\bpolicy\s+\S+\s*\{")
-_RE_SNMP_V3 = re.compile(r"snmp\s+v3|usm\s+user|snmp-server\s+user", re.I)
-_RE_SNMP_V2C = re.compile(r"snmp-server\s+community", re.I)
+_RE_SNMP_V3 = re.compile(r"snmp\s+v3|usm\s+user|snmp-server\s+user", re.IGNORECASE)
+_RE_SNMP_V2C = re.compile(r"snmp-server\s+community", re.IGNORECASE)
 _RE_NTP = re.compile(r"(?:ntp\s+server|set\s+system\s+ntp\s+server)\s+(\S+)")
 _RE_SYSLOG = re.compile(r"(?:syslog\s+host|logging\s+host)\s+(\S+)")
 _RE_RADIUS = re.compile(r"radius-server\s+(?:host\s+)?(\S+)")

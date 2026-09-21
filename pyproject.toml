@@ -87,14 +87,8 @@ line-length = 110
 target-version = "py310"
 
 [tool.ruff.lint]
-# Pin the rule set explicitly. This was previously omitted, which meant the repo
-# inherited whatever ruff's *default* selection happened to be — and `dev` allows
-# `ruff>=0.5`, so the effective lint config changed under us on every release.
-# ruff 0.16.0 broadened those defaults and turned a clean tree into 240 findings
-# (FURB/I/UP/BLE/RUF/PLW/SIM/...) with no code change. These four are ruff's
-# historical defaults and the set this codebase was actually written against.
-# Adopting the wider set is a worthwhile follow-up, but it's a code change, not a
-# lint-config change — keep it out of a CI hotfix.
-select = ["E4", "E7", "E9", "F"]
+# Pinned and widened rule set. Historical defaults (E4, E7, E9, F) plus safe cosmetic rules
+# (FURB167 regex flags, I isort, UP pyupgrade, RET501 return-none, PLR1711 useless-return).
+select = ["E4", "E7", "E9", "F", "FURB167", "I", "UP", "RET501", "PLR1711"]
 # E701/E702: compact one-line guards (`if x: return y`) are the established style here
 ignore = ["E701", "E702"]

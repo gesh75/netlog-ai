@@ -16,6 +16,8 @@ from __future__ import annotations
 # ── Version (single source of truth = pyproject.toml metadata) ───────────────
 from importlib.metadata import (
     PackageNotFoundError as _PkgNFE,
+)
+from importlib.metadata import (
     version as _pkg_version,
 )
 
@@ -78,16 +80,16 @@ del _load_env_files  # keep the public namespace clean
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
-from ai_log_analyzer.classifier import (  # noqa: E402
-    ClassifiedEvent,
-    LogEvent,
-    classify_events,
-)
 from ai_log_analyzer.analyzer import (  # noqa: E402
     AnalysisResult,
     analyze,
     build_action_items,
     health_score,
+)
+from ai_log_analyzer.classifier import (  # noqa: E402
+    ClassifiedEvent,
+    LogEvent,
+    classify_events,
 )
 
 __all__: list[str] = [

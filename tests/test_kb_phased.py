@@ -3,7 +3,6 @@ import pytest
 
 from ai_log_analyzer import kb
 
-
 PHASE_NAMES = {"Diagnose", "Mitigate", "Remediate", "Verify", "Optimize"}
 
 

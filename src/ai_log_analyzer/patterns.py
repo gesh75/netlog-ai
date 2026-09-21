@@ -37,15 +37,15 @@ logger = logging.getLogger(__name__)
 # Every mask becomes a fixed token so it can't split template shapes.
 _MASKS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?\b"), "<ip>"),
-    (re.compile(r"\b(?:[0-9a-f]{2}[:.-]){5}[0-9a-f]{2}\b", re.I), "<mac>"),
-    (re.compile(r"\b(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}\b", re.I), "<mac>"),
-    (re.compile(r"\b[0-9a-f]{2}(?::[0-9a-f]{2}){3,}\b", re.I), "<hex>"),
-    (re.compile(r"\b0x[0-9a-f]+\b", re.I), "<hex>"),
+    (re.compile(r"\b(?:[0-9a-f]{2}[:.-]){5}[0-9a-f]{2}\b", re.IGNORECASE), "<mac>"),
+    (re.compile(r"\b(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}\b", re.IGNORECASE), "<mac>"),
+    (re.compile(r"\b[0-9a-f]{2}(?::[0-9a-f]{2}){3,}\b", re.IGNORECASE), "<hex>"),
+    (re.compile(r"\b0x[0-9a-f]+\b", re.IGNORECASE), "<hex>"),
     # interface names: ge-0/0/1.0, xe-1/2/3, et-0/0/0, Ethernet49/1, eth1, ae0.100
-    (re.compile(r"\b(?:[gxem]t?e|et|ae|irb|lo|vlan|fxp|em|mge)-?\d+(?:[/.:]\d+)*\b", re.I), "<if>"),
-    (re.compile(r"\b(?:hundredgige|fortygige|twentyfivegige|tengige|gigabitethernet|fastethernet|ethernet|port-channel|tunnel|loopback|management)\d+(?:[/.:]\d+)*\b", re.I), "<if>"),
+    (re.compile(r"\b(?:[gxem]t?e|et|ae|irb|lo|vlan|fxp|em|mge)-?\d+(?:[/.:]\d+)*\b", re.IGNORECASE), "<if>"),
+    (re.compile(r"\b(?:hundredgige|fortygige|twentyfivegige|tengige|gigabitethernet|fastethernet|ethernet|port-channel|tunnel|loopback|management)\d+(?:[/.:]\d+)*\b", re.IGNORECASE), "<if>"),
     # ISO / syslog timestamps embedded mid-message
-    (re.compile(r"\b\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:z|[+-]\d{2}:?\d{2})?\b", re.I), "<ts>"),
+    (re.compile(r"\b\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:z|[+-]\d{2}:?\d{2})?\b", re.IGNORECASE), "<ts>"),
     (re.compile(r"\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b"), "<ts>"),
     # any remaining integers / decimals (counters, PIDs, ports, durations)
     (re.compile(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])"), "<n>"),

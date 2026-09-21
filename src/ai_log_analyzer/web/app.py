@@ -21,24 +21,34 @@ try:
 except ImportError:
     pass
 
-import itertools  # noqa: E402
-from functools import wraps  # noqa: E402
+import itertools
+from functools import wraps
 
-from flask import Flask, abort, jsonify, request, send_from_directory  # noqa: E402
-from flask_cors import CORS  # noqa: E402
+from flask import Flask, abort, jsonify, request, send_from_directory
+from flask_cors import CORS
 
-from ai_log_analyzer import __version__, llm, webhooks  # noqa: E402
-from ai_log_analyzer.adapters import frr, network_tool  # noqa: E402
-from ai_log_analyzer.adapters.file import parse_lines  # noqa: E402
-from ai_log_analyzer.analyzer import analyze, analyze_site, optimize_config  # noqa: E402
-from ai_log_analyzer.classifier import LogEvent  # noqa: E402
-from ai_log_analyzer import (compliance as comp_engine, copilot, diff as diff_mod,  # noqa: E402
-                              postmortem, reports, runbook, site_doc,
-                              site_optimize, topology as topo_mod)
-from ai_log_analyzer.sources import SourceConfig, SourceError, registry  # noqa: E402
-from ai_log_analyzer.sources.manager import manager as source_manager  # noqa: E402
-from ai_log_analyzer.correlate import correlate_from_manager  # noqa: E402
-from ai_log_analyzer.device_triage import triage_from_manager  # noqa: E402
+from ai_log_analyzer import (
+    __version__,
+    copilot,
+    llm,
+    postmortem,
+    reports,
+    runbook,
+    site_doc,
+    site_optimize,
+    webhooks,
+)
+from ai_log_analyzer import compliance as comp_engine
+from ai_log_analyzer import diff as diff_mod
+from ai_log_analyzer import topology as topo_mod
+from ai_log_analyzer.adapters import frr, network_tool
+from ai_log_analyzer.adapters.file import parse_lines
+from ai_log_analyzer.analyzer import analyze, analyze_site, optimize_config
+from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.correlate import correlate_from_manager
+from ai_log_analyzer.device_triage import triage_from_manager
+from ai_log_analyzer.sources import SourceConfig, SourceError, registry
+from ai_log_analyzer.sources.manager import manager as source_manager
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -708,7 +718,9 @@ def create_app() -> Flask:
             if not p or not p.exists():
                 return jsonify({"error": f"Path not found: {path}"}), 404
             from ai_log_analyzer.adapters.file import (
-                parse_file, parse_directory, count_directory_files,
+                count_directory_files,
+                parse_directory,
+                parse_file,
             )
             if p.is_dir():
                 # Directory scan. Walk recursively for *.log files (overridable
@@ -914,6 +926,7 @@ def create_app() -> Flask:
         def stream():
             import json as _json
             import time as _time
+
             from ai_log_analyzer.classifier import iter_classify
             cursor = getattr(src, "_total_ingested", 0)  # start at "now"
             yield "event: hello\ndata: {}\n\n"
@@ -1091,7 +1104,7 @@ def create_app() -> Flask:
     # Auto-load env-configured sources on app boot (idempotent).
     try:
         source_manager.load_from_env()
-    except Exception:  # noqa: BLE001
+    except Exception:
         # Never let a misconfigured source crash the app.
         pass
 

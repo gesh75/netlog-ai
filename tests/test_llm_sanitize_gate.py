@@ -10,7 +10,6 @@ import pytest
 
 from ai_log_analyzer import analyzer, llm
 
-
 pytestmark = pytest.mark.unit
 
 SECRET_LINE = "login attempt snmp-server community SuperSecret123 ro rejected"
@@ -21,7 +20,6 @@ def test_deep_analyze_sanitizes_sample_messages(monkeypatch):
 
     def fake_query(system_prompt, user_prompt, max_tokens=0, **kwargs):
         captured["prompt"] = user_prompt
-        return None  # fall back to KB — we only care what went out
 
     monkeypatch.setattr(llm, "query", fake_query)
     analyzer.deep_analyze(
@@ -42,7 +40,6 @@ def test_deep_analyze_sanitizes_description(monkeypatch):
 
     def fake_query(system_prompt, user_prompt, max_tokens=0, **kwargs):
         captured["prompt"] = user_prompt
-        return None
 
     monkeypatch.setattr(llm, "query", fake_query)
     # Severity-promoted events with no KB match carry a raw message snippet

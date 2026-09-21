@@ -10,7 +10,6 @@ import pytest
 from ai_log_analyzer.sources import SourceConfig
 from ai_log_analyzer.sources.syslog import SyslogListenerSource
 
-
 pytestmark = pytest.mark.unit
 
 

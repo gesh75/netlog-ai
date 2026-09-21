@@ -5,7 +5,6 @@ and Docker images boot with demo content; env vars override for custom data.
 """
 from __future__ import annotations
 
-
 import re
 
 import pytest

@@ -24,31 +24,31 @@ from dataclasses import dataclass, field
 _JUNOS_IF_ADDR = re.compile(
     r"set\s+interfaces\s+(?P<iface>\S+)\s+unit\s+\d+\s+family\s+inet\s+address\s+"
     r"(?P<ip>\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})",
-    re.I,
+    re.IGNORECASE,
 )
 # Junos hierarchical: `address 10.1.1.1/30;` inside `family inet { }`
-_JUNOS_IF_HIER = re.compile(r"address\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})\s*;", re.I)
+_JUNOS_IF_HIER = re.compile(r"address\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})\s*;", re.IGNORECASE)
 
 # EOS style: `ip address 10.1.1.1/30`
-_EOS_IF_ADDR = re.compile(r"^\s*ip\s+address\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})", re.M)
+_EOS_IF_ADDR = re.compile(r"^\s*ip\s+address\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})", re.MULTILINE)
 
 # BGP neighbor IPs (vendor-agnostic; matches both Junos and EOS forms)
 _BGP_NEIGHBOR = re.compile(
     r"(?:neighbor|peer)\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3})(?:\s+remote-as|\s+peer-as|\s+;|\s*\{)",
-    re.I,
+    re.IGNORECASE,
 )
 
 # MLAG peer-address (EOS)
-_MLAG_PEER = re.compile(r"\bpeer-address\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3})", re.I)
+_MLAG_PEER = re.compile(r"\bpeer-address\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3})", re.IGNORECASE)
 
 # Local BGP AS — `router bgp 65001` (EOS / FRR) or `routing-options autonomous-system 65001` (Junos)
-_LOCAL_AS_BGP = re.compile(r"\brouter\s+bgp\s+(?P<asn>\d+)", re.I)
-_LOCAL_AS_JUNOS = re.compile(r"\bautonomous-system\s+(?P<asn>\d+)", re.I)
+_LOCAL_AS_BGP = re.compile(r"\brouter\s+bgp\s+(?P<asn>\d+)", re.IGNORECASE)
+_LOCAL_AS_JUNOS = re.compile(r"\bautonomous-system\s+(?P<asn>\d+)", re.IGNORECASE)
 
 # BGP neighbor with remote-as captured — needed to label per-peer ASN
 _BGP_NEIGHBOR_FULL = re.compile(
     r"(?:neighbor|peer)\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s+(?:remote-as|peer-as)\s+(?P<asn>\d+)",
-    re.I,
+    re.IGNORECASE,
 )
 
 # BGP address-family blocks — captures the AF name as it appears in the config.
@@ -57,40 +57,40 @@ _BGP_AF_BLOCK = re.compile(
     # Accept both two-word (Junos/FRR: `ipv4 unicast`, `l2vpn evpn`) and
     # single-word (EOS: `evpn`, `ipv4`) forms. Stop at end of line.
     r"\baddress-family\s+(?P<af>(?:ipv4|ipv6|l2vpn|vpnv4|vpnv6|evpn)(?:\s+(?:unicast|multicast|evpn|labeled-unicast))?)\b",
-    re.I,
+    re.IGNORECASE,
 )
 # Junos: `protocols evpn` block + `family evpn signaling`
-_JUNOS_EVPN = re.compile(r"\bprotocols\s+evpn\b|\bfamily\s+evpn\s+signaling\b", re.I)
+_JUNOS_EVPN = re.compile(r"\bprotocols\s+evpn\b|\bfamily\s+evpn\s+signaling\b", re.IGNORECASE)
 
 # OSPF: process-level router-id and area/timer details on interfaces
-_OSPF_ROUTER_ID_FRR = re.compile(r"\brouter\s+ospf\b[\s\S]*?\bospf\s+router-id\s+(?P<rid>\d+\.\d+\.\d+\.\d+)", re.I)
-_OSPF_ROUTER_ID_EOS = re.compile(r"\brouter\s+ospf\b[\s\S]*?\brouter-id\s+(?P<rid>\d+\.\d+\.\d+\.\d+)", re.I)
-_OSPF_ROUTER_ID_JUN = re.compile(r"\brouter-id\s+(?P<rid>\d+\.\d+\.\d+\.\d+)\s*;", re.I)
+_OSPF_ROUTER_ID_FRR = re.compile(r"\brouter\s+ospf\b[\s\S]*?\bospf\s+router-id\s+(?P<rid>\d+\.\d+\.\d+\.\d+)", re.IGNORECASE)
+_OSPF_ROUTER_ID_EOS = re.compile(r"\brouter\s+ospf\b[\s\S]*?\brouter-id\s+(?P<rid>\d+\.\d+\.\d+\.\d+)", re.IGNORECASE)
+_OSPF_ROUTER_ID_JUN = re.compile(r"\brouter-id\s+(?P<rid>\d+\.\d+\.\d+\.\d+)\s*;", re.IGNORECASE)
 # Interface OSPF: area + hello/dead/cost. FRR style — one tag per line in interface block.
 _OSPF_IFACE_BLOCK_FRR = re.compile(
     r"^interface\s+(?P<iface>\S+)\s*\n(?P<body>(?:\s+\S[^\n]*\n)+)",
-    re.M,
+    re.MULTILINE,
 )
-_OSPF_IF_AREA = re.compile(r"\bip\s+ospf\s+area\s+(?P<area>\S+)", re.I)
-_OSPF_IF_HELLO = re.compile(r"\bip\s+ospf\s+hello-interval\s+(?P<v>\d+)", re.I)
-_OSPF_IF_DEAD = re.compile(r"\bip\s+ospf\s+dead-interval\s+(?P<v>\d+)", re.I)
-_OSPF_IF_COST = re.compile(r"\bip\s+ospf\s+cost\s+(?P<v>\d+)", re.I)
-_OSPF_IF_NETWORK = re.compile(r"\bip\s+ospf\s+network\s+(?P<nt>\S+)", re.I)
+_OSPF_IF_AREA = re.compile(r"\bip\s+ospf\s+area\s+(?P<area>\S+)", re.IGNORECASE)
+_OSPF_IF_HELLO = re.compile(r"\bip\s+ospf\s+hello-interval\s+(?P<v>\d+)", re.IGNORECASE)
+_OSPF_IF_DEAD = re.compile(r"\bip\s+ospf\s+dead-interval\s+(?P<v>\d+)", re.IGNORECASE)
+_OSPF_IF_COST = re.compile(r"\bip\s+ospf\s+cost\s+(?P<v>\d+)", re.IGNORECASE)
+_OSPF_IF_NETWORK = re.compile(r"\bip\s+ospf\s+network\s+(?P<nt>\S+)", re.IGNORECASE)
 # Junos: `protocols ospf area 0.0.0.0 interface ge-0/0/0`
 _OSPF_JUN_AREA_IFACE = re.compile(
     r"\barea\s+(?P<area>\d+\.\d+\.\d+\.\d+|\d+)[\s\S]*?\binterface\s+(?P<iface>[\w/\.\-]+)",
-    re.I,
+    re.IGNORECASE,
 )
 
 # VXLAN: source-interface and VNI lists
 # EOS: `vxlan source-interface Loopback1`; `vxlan vni 10010 vrf VRF1`; `vxlan vlan 10 vni 10010`
-_VXLAN_SOURCE_EOS = re.compile(r"\bvxlan\s+source-interface\s+(?P<src>\S+)", re.I)
-_VXLAN_VNI_EOS = re.compile(r"\bvxlan\s+(?:vlan\s+\d+\s+vni|vni)\s+(?P<vni>\d+)(?:\s+vrf\s+(?P<vrf>\S+))?", re.I)
+_VXLAN_SOURCE_EOS = re.compile(r"\bvxlan\s+source-interface\s+(?P<src>\S+)", re.IGNORECASE)
+_VXLAN_VNI_EOS = re.compile(r"\bvxlan\s+(?:vlan\s+\d+\s+vni|vni)\s+(?P<vni>\d+)(?:\s+vrf\s+(?P<vrf>\S+))?", re.IGNORECASE)
 # FRR: `vni 10010` inside `interface vxlan10010` blocks
-_VXLAN_VNI_FRR = re.compile(r"\bvni\s+(?P<vni>\d+)\b", re.I)
+_VXLAN_VNI_FRR = re.compile(r"\bvni\s+(?P<vni>\d+)\b", re.IGNORECASE)
 # Junos: `set vlans X vxlan vni Y`; `set routing-instances X vtep-source-interface loN`
-_VXLAN_VNI_JUN = re.compile(r"\bvxlan\s+vni\s+(?P<vni>\d+)", re.I)
-_VTEP_SOURCE_JUN = re.compile(r"\bvtep-source-interface\s+(?P<src>\S+)", re.I)
+_VXLAN_VNI_JUN = re.compile(r"\bvxlan\s+vni\s+(?P<vni>\d+)", re.IGNORECASE)
+_VTEP_SOURCE_JUN = re.compile(r"\bvtep-source-interface\s+(?P<src>\S+)", re.IGNORECASE)
 
 # Interface address + name — needed for L1/L3 edge endpoint labelling.
 # EOS/FRR/IOS style: `interface eth0\n  ip address 10.1.1.1/30`
@@ -98,50 +98,50 @@ _VTEP_SOURCE_JUN = re.compile(r"\bvtep-source-interface\s+(?P<src>\S+)", re.I)
 # the blank line / next top-level stanza — \s+ would eat newlines and run to EOF.
 _IFACE_BLOCK_EOS = re.compile(
     r"^interface\s+(?P<iface>\S+)[ \t]*\n(?P<body>(?:[ \t]+\S[^\n]*\n)+)",
-    re.M,
+    re.MULTILINE,
 )
-_IFACE_DESC_LINE = re.compile(r"^[ \t]+description\s+(?P<d>.+?)\s*$", re.I | re.M)
+_IFACE_DESC_LINE = re.compile(r"^[ \t]+description\s+(?P<d>.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 # Nokia SRL: ``interface ethernet-1/1 { ... subinterface 0 { ipv4 { address 10.0.1.3/31 { } } } }``
 # Indented up to ~4 levels, address is on its own line with optional trailing brace.
 _IFACE_BLOCK_SRL = re.compile(
     r"interface\s+(?P<iface>(?:ethernet-\d+(?:/\d+)+|system\d+|lo\d*|mgmt\d+))\s*\{(?P<body>.*?)^\s*\}\s*$",
-    re.M | re.S,
+    re.MULTILINE | re.DOTALL,
 )
-_SRL_IFACE_ADDR = re.compile(r"address\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})", re.I)
-_SRL_IFACE_DESC = re.compile(r"description\s+\"?(?P<d>[^\"\n;{}]+)\"?", re.I)
+_SRL_IFACE_ADDR = re.compile(r"address\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})", re.IGNORECASE)
+_SRL_IFACE_DESC = re.compile(r"description\s+\"?(?P<d>[^\"\n;{}]+)\"?", re.IGNORECASE)
 # FRR: `vrf NAME\n vni 50001\nexit-vrf` — captures L3 VNIs tied to a tenant VRF.
 _FRR_VRF_VNI = re.compile(
     r"^vrf\s+(?P<vrf>\S+)\s*\n(?P<body>(?:\s+[^\n]*\n)+?)exit-vrf",
-    re.M,
+    re.MULTILINE,
 )
-_FRR_ADVERTISE_ALL_VNI = re.compile(r"\badvertise-all-vni\b", re.I)
+_FRR_ADVERTISE_ALL_VNI = re.compile(r"\badvertise-all-vni\b", re.IGNORECASE)
 # Junos: `set interfaces ge-0/0/0 unit 0 family inet address 10.1.1.1/30`
 _JUNOS_IF_SET = re.compile(
     r"set\s+interfaces\s+(?P<iface>\S+)(?:\s+unit\s+\d+)?\s+family\s+inet\s+address\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})",
-    re.I,
+    re.IGNORECASE,
 )
 _JUNOS_IF_DESC = re.compile(
     r"set\s+interfaces\s+(?P<iface>\S+)\s+(?:unit\s+\d+\s+)?description\s+\"?(?P<d>[^\"\n;]+)\"?",
-    re.I,
+    re.IGNORECASE,
 )
 
 # VRF list (best-effort, multi-vendor)
-_VRF_EOS = re.compile(r"\bvrf\s+definition\s+(?P<v>\S+)", re.I)
-_VRF_FRR = re.compile(r"\bvrf\s+(?P<v>\S+)\b", re.I)
-_VRF_JUNOS = re.compile(r"\brouting-instances\s+(?P<v>\S+)\s+\{", re.I)
+_VRF_EOS = re.compile(r"\bvrf\s+definition\s+(?P<v>\S+)", re.IGNORECASE)
+_VRF_FRR = re.compile(r"\bvrf\s+(?P<v>\S+)\b", re.IGNORECASE)
+_VRF_JUNOS = re.compile(r"\brouting-instances\s+(?P<v>\S+)\s+\{", re.IGNORECASE)
 
 # Interface description — captures the description text
-_DESCRIPTION = re.compile(r'description\s+["\']?([^"\';\n]+?)["\']?\s*[;\n]', re.I)
+_DESCRIPTION = re.compile(r'description\s+["\']?([^"\';\n]+?)["\']?\s*[;\n]', re.IGNORECASE)
 
 # Link speed (per-interface). Vendor styles:
 #   EOS/IOS:   ``speed 100g`` / ``speed 10000``                 (bare line in iface block)
 #   SRL:       ``port-speed 100G``                              (under ``ethernet { }``)
 #   Junos:     ``set interfaces et-0/0/0 gigether-options speed 100g``
 # We normalize to a short string like "100G", "10G", "1G", "40G", "25G".
-_SPEED_KW = re.compile(r"(?:port-)?speed\s+(?P<v>\d+)\s*([GgMm])?", re.I)
+_SPEED_KW = re.compile(r"(?:port-)?speed\s+(?P<v>\d+)\s*([GgMm])?", re.IGNORECASE)
 _JUNOS_SPEED_SET = re.compile(
     r"set\s+interfaces\s+\S+\s+(?:unit\s+\d+\s+)?(?:gigether-options|ether-options)\s+speed\s+(?P<v>\d+)\s*([GgMm])?",
-    re.I,
+    re.IGNORECASE,
 )
 
 def _norm_speed(num: str, unit: str | None) -> str:
@@ -289,7 +289,7 @@ def extract_facts(hostname: str, platform: str, config_text: str) -> DeviceFacts
         if _is_real_ip(m.group("ip"))
     ))
     descs = [m.group(1).strip() for m in _DESCRIPTION.finditer(config_text)]
-    has_cluster = bool(re.search(r"chassis\s+cluster", config_text, re.I))
+    has_cluster = bool(re.search(r"chassis\s+cluster", config_text, re.IGNORECASE))
 
     local_asn: int | None = None
     m_bgp = _LOCAL_AS_BGP.search(config_text)
@@ -676,12 +676,12 @@ def _ip_owned_by(query_ip: str, owned_ips_cidr: list[str]) -> bool:
 def _is_ha_pair(name_a: str, name_b: str) -> bool:
     """Heuristic for HA naming: fw-01a/fw-01b, fw-01/fw-02 (sequential), fw-20a/fw-20b."""
     # Pattern A: same base + a/b suffix (e.g. fw-01a, fw-01b)
-    base_re = re.compile(r"^(.+?-(?:fw|rt|sw)-\d+)([ab])$", re.I)
+    base_re = re.compile(r"^(.+?-(?:fw|rt|sw)-\d+)([ab])$", re.IGNORECASE)
     ma, mb = base_re.match(name_a), base_re.match(name_b)
     if ma and mb and ma.group(1) == mb.group(1) and ma.group(2) != mb.group(2):
         return True
     # Pattern B: sequential numbers within same role (fw-01/fw-02, rt-01/rt-02)
-    seq_re = re.compile(r"^(.+?-(?:fw|rt|sw)-)(\d+)$", re.I)
+    seq_re = re.compile(r"^(.+?-(?:fw|rt|sw)-)(\d+)$", re.IGNORECASE)
     sa, sb = seq_re.match(name_a), seq_re.match(name_b)
     if sa and sb and sa.group(1) == sb.group(1):
         try:

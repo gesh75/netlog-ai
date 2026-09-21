@@ -20,7 +20,6 @@ from collections import Counter
 
 from ai_log_analyzer import compliance, llm, site_diagram, site_doc
 
-
 # Roles considered ISP-gateways (firewalls or WAN routers)
 _GATEWAY_ROLES: frozenset[str] = frozenset({"firewall", "router", "gateway"})
 _GATEWAY_HOSTNAME_TOKENS: frozenset[str] = frozenset({"fw", "rt", "gw"})
@@ -68,7 +67,7 @@ _RE_BFD = re.compile(
     r"neighbor\s+\S+[\s\S]{0,100}?\bbfd\b|"
     r"bfd\s+(?:interval|liveness-detection|all-interfaces)\b"
     r")",
-    re.I | re.M,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 

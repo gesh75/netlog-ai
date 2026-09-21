@@ -18,8 +18,7 @@ from pathlib import Path
 
 # netlog-ai sanitizer is a sibling package
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from ai_log_analyzer.sanitize import sanitize_report  # noqa: E402
-
+from ai_log_analyzer.sanitize import sanitize_report
 
 SITE_ID = "dcn-lab"
 SITE_NAME = "DCN-LAB"
