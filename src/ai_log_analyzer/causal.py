@@ -43,7 +43,15 @@ _RFC3164_YEARLESS = 4
 
 
 def _as_naive(dt: datetime) -> datetime:
-    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+    """Compare instants, not wall clocks. Aware stamps become UTC naive.
+
+    Stripping ``tzinfo`` without converting left ``10:00+05:00`` (05:00 UTC)
+    later than ``09:55Z``, so a later offset host stole ``devices[0]``.
+    Timezone-less ISO / RFC3164 stay wall-clock naive.
+    """
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _parse_epoch(stamp: str) -> datetime | None:

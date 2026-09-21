@@ -145,6 +145,25 @@ def test_change_window_names_iso_commit_before_later_loki_epoch():
     assert cw["devices"] == ["rt-01", "rt-02"]
 
 
+def test_change_window_names_offset_iso_before_later_zulu():
+    """Aware ISO must compare as UTC instants, not stripped wall clocks.
+
+    ``10:00+05:00`` is 05:00 UTC. Stripping tzinfo left it at 10:00 naive,
+    after ``09:55Z``, so the later Z host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="2026-08-29T09:55:00Z", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2026-08-29T10:00:00+05:00", category="config",
+            severity="low", hostname="rt-01",
+            description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+
+
 def test_change_window_names_rfc3164_feb29_before_later_iso():
     """29 Feb RFC3164 must parse. Year 1900 is not a leap year, so the
     yearless sentinel has to be one (then restamped from the ISO sibling).
