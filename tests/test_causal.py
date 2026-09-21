@@ -1,6 +1,8 @@
 """Causal console: timeline, blast radius, change-window correlator."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from ai_log_analyzer.analyzer import ActionItem, analyze
@@ -105,6 +107,95 @@ def test_change_window_devices_follow_earliest_timestamp_not_input_order():
     assert cw["detected"] is True
     assert cw["count"] == 2
     assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_rfc3164_commit_before_later_iso_noise():
+    """CLI ``--frr`` (ISO) + ``--file`` (Junos RFC3164) must not invert order.
+
+    Lexicographic sort puts ``2026-08-29T09:56:00`` before ``Aug 29 09:55:00``
+    because ``'2' < 'A'``, so the later FRR host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="2026-08-29T09:56:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Aug 29 09:55:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_iso_commit_before_later_loki_epoch():
+    """Loki stores nanosecond unix timestamps; those sort before ISO as strings."""
+    late = datetime(2026, 8, 29, 9, 56, 0, tzinfo=timezone.utc)
+    events = [
+        _ce(timestamp=str(int(late.timestamp() * 1e9)), category="config",
+            severity="low", hostname="rt-02",
+            description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2026-08-29T09:55:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_offset_iso_before_later_zulu():
+    """Aware ISO must compare as UTC instants, not stripped wall clocks.
+
+    ``10:00+05:00`` is 05:00 UTC. Stripping tzinfo left it at 10:00 naive,
+    after ``09:55Z``, so the later Z host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="2026-08-29T09:55:00Z", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2026-08-29T10:00:00+05:00", category="config",
+            severity="low", hostname="rt-01",
+            description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_rfc3164_feb29_before_later_iso():
+    """29 Feb RFC3164 must parse. Year 1900 is not a leap year, so the
+    yearless sentinel has to be one (then restamped from the ISO sibling).
+    """
+    events = [
+        _ce(timestamp="2024-02-29T09:56:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Feb 29 09:55:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_analyze_change_window_mixed_rfc3164_and_iso_names_earliest_host():
+    """Streaming reserve + change_window must agree on mixed vendor stamps."""
+    events = [
+        LogEvent("Aug 29 09:55:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    events.extend(
+        LogEvent(
+            f"2026-08-29T09:56:{i:02d}", "rt-02", "mgd", "info",
+            "commit complete confirmed",
+        )
+        for i in range(55)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-01"
+    assert "rt-02" in result.change_window["devices"]
 
 
 def test_analyze_exposes_causal_fields():
@@ -507,6 +598,55 @@ def test_timeline_surfaces_later_storm_despite_intermediate_leftover_category():
         )
         for i in range(20)
     )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
+def test_timeline_surfaces_mixed_rfc3164_iso_storm_as_one_cluster():
+    """A mixed-format BGP storm must stay one leftover cluster.
+
+    Sorting restamps RFC3164 from a sibling year, but leftover-cluster
+    gaps used raw ``_parse_event_ts`` (yearless sentinel vs ISO). Adjacent
+    mixed-format rows then looked ~126 years apart, so ``preferred[-1]``
+    kept a single event and the floor showed 0–1 routing rows.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    for i in range(20):
+        ts = (
+            f"Aug 29 10:00:{i:02d}" if i % 2 == 0
+            else f"2026-08-29T10:00:{i:02d}"
+        )
+        events.append(
+            _ce(
+                timestamp=ts,
+                category="routing",
+                severity="high",
+                description="BGP peer down / connect failure",
+                hostname="spine-01",
+            )
+        )
     nodes = build_timeline(events, limit=24)
     assert len(nodes) == 24
     assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
