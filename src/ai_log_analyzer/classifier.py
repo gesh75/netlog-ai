@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import Iterable, Iterator
 
 import regex
 

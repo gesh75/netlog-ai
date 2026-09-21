@@ -7,7 +7,6 @@ import pytest
 
 from ai_log_analyzer import llm, site_optimize
 
-
 JUNOS_FW = """
 version 19.2R3.5;
 chassis cluster {

@@ -50,7 +50,6 @@ import os
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +72,7 @@ _DEFAULT_DB_PATH = Path(
 # Cached engine — tfsm_fire's engine is thread-safe and holds a SQLite connection
 # per thread, so a module-level singleton is the cheapest path.
 _engine = None
-_engine_db_path: Optional[Path] = None
+_engine_db_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -85,7 +84,7 @@ class ParseResult:
     `records` is a list of dicts, one per parsed row. Empty list means no template matched.
     """
 
-    template: Optional[str]
+    template: str | None
     score: float
     records: list[dict]
     candidates: list[tuple[str, float, int]]  # all non-zero (template, score, record_count)
@@ -104,7 +103,7 @@ def is_available() -> bool:
         return False
 
 
-def _ensure_db(db_path: Path = _DEFAULT_DB_PATH, timeout: float = 30.0) -> Optional[Path]:
+def _ensure_db(db_path: Path = _DEFAULT_DB_PATH, timeout: float = 30.0) -> Path | None:
     """Ensure the template DB exists locally; download from upstream if missing.
 
     Returns the path on success, or None if download failed.
@@ -161,7 +160,7 @@ def _get_engine(db_path: Path = _DEFAULT_DB_PATH):
 
 def auto_parse(
     output: str,
-    filter_hint: Optional[str] = None,
+    filter_hint: str | None = None,
     min_score: float = 0.0,
 ) -> ParseResult:
     """Try every TextFSM template and return the best match.

@@ -6,9 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from ai_log_analyzer import (compliance, diff as diff_mod, postmortem,
-                              reports, runbook, topology)
-
+from ai_log_analyzer import compliance, postmortem, reports, runbook, topology
+from ai_log_analyzer import diff as diff_mod
 
 JUNOS_CFG = """
 system {

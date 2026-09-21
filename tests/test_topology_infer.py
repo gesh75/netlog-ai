@@ -5,7 +5,6 @@ import pytest
 
 from ai_log_analyzer import topology_infer
 
-
 JUNOS_FW = """
 chassis cluster {
     cluster-id 1;

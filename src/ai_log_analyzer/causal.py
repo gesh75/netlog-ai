@@ -6,8 +6,9 @@ surfaces. No I/O, no LLM.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any
 
 from ai_log_analyzer.classifier import SEV_ORDER, ClassifiedEvent
 

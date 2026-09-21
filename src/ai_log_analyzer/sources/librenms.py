@@ -8,8 +8,8 @@ Reference: https://docs.librenms.org/API/Logs/
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
 
 import requests
 
@@ -39,7 +39,7 @@ class LibreNMSSource:
         self.session.headers["Accept"] = "application/json"
 
     @classmethod
-    def from_config(cls, config: SourceConfig) -> "LibreNMSSource":
+    def from_config(cls, config: SourceConfig) -> LibreNMSSource:
         return cls(config)
 
     def healthcheck(self) -> bool:

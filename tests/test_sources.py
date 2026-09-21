@@ -24,7 +24,6 @@ from ai_log_analyzer.sources import (
 from ai_log_analyzer.sources.base import build_auth
 from ai_log_analyzer.sources.manager import SourceManager
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Protocol + registry
 # ──────────────────────────────────────────────────────────────────────────────
@@ -39,7 +38,7 @@ class _StubSource:
         self._closed = False
 
     @classmethod
-    def from_config(cls, config: SourceConfig) -> "_StubSource":
+    def from_config(cls, config: SourceConfig) -> _StubSource:
         return cls(config)
 
     def healthcheck(self) -> bool:

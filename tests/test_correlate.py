@@ -6,7 +6,6 @@ import pytest
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.correlate import correlate_sources
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _bgp_down_event(hostname: str) -> LogEvent:

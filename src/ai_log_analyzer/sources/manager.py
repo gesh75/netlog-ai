@@ -53,7 +53,7 @@ class SourceManager:
         if src is not None:
             try:
                 src.close()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("error closing source %s", source_id)
             return True
         return False
@@ -66,7 +66,7 @@ class SourceManager:
         for s in sources:
             try:
                 s.close()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("error during shutdown of %s", s.name)
 
     # ── inspection ───────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ class SourceManager:
             try:
                 self.add(cfg)
                 added.append(src_id)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.warning("failed to add env-configured source %s: %s", src_id, exc)
         return added
 

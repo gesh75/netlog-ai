@@ -276,7 +276,7 @@ def _build_server():
                 limit=limit,
                 min_severity=min_severity,
             )
-        except Exception as exc:  # noqa: BLE001 - never crash the MCP session
+        except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
     # ── per-device triage ────────────────────────────────────────────────────
@@ -297,7 +297,7 @@ def _build_server():
                 hostname, source_ids,
                 since_seconds=since_seconds, limit=limit,
             )
-        except Exception as exc:  # noqa: BLE001 - never crash the MCP session
+        except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
     # ── site bundle helpers ──────────────────────────────────────────────────
@@ -361,7 +361,7 @@ def _build_server():
         try:
             result = _analyze_site(safe_id, devices)
             return {"ok": True, "device_count": len(devices), "result": result}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return {"ok": False, "error": f"analyze_site failed: {exc}"}
 
     return mcp
@@ -375,7 +375,7 @@ def run(transport: str = "stdio") -> None:
     """
     try:
         source_manager.load_from_env()
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("failed to load env-configured sources")
 
     server = _build_server()

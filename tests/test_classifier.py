@@ -1,7 +1,7 @@
 """Unit tests for the regex-based classifier."""
 import pytest
 
-from ai_log_analyzer.classifier import LogEvent, classify_events, SEV_ORDER
+from ai_log_analyzer.classifier import SEV_ORDER, LogEvent, classify_events
 
 
 @pytest.mark.unit

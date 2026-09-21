@@ -11,11 +11,11 @@ Design goals:
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from ai_log_analyzer.classifier import LogEvent
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Exceptions

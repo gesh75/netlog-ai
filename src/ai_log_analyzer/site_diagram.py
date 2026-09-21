@@ -18,7 +18,6 @@ import subprocess
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # VLAN / Subnet classification
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,21 +154,21 @@ class AdvpnTunnel:
 # Junos VLAN block:  vlan-name vlan10 { vlan-id 10; l3-interface irb.10; }
 _JUNOS_VLAN_BLOCK = re.compile(
     r"(?P<name>\S+)\s*\{\s*[^{}]*?vlan-id\s+(?P<id>\d{1,4})\s*;[^{}]*?\}",
-    re.S,
+    re.DOTALL,
 )
 # Junos VLAN list-style: `set vlans vlan10 vlan-id 10`
-_JUNOS_VLAN_SET = re.compile(r"set\s+vlans\s+(\S+)\s+vlan-id\s+(\d{1,4})", re.I)
+_JUNOS_VLAN_SET = re.compile(r"set\s+vlans\s+(\S+)\s+vlan-id\s+(\d{1,4})", re.IGNORECASE)
 # EOS: vlan 10\n   name MGMT
-_EOS_VLAN_BLOCK = re.compile(r"^\s*vlan\s+(\d{1,4})\s*\n(?:\s+name\s+(\S+))?", re.M)
+_EOS_VLAN_BLOCK = re.compile(r"^\s*vlan\s+(\d{1,4})\s*\n(?:\s+name\s+(\S+))?", re.MULTILINE)
 # IRB / SVI subnet bindings: `irb.10 unit 10 family inet address 10.1.1.1/24` → vlan 10
 _JUNOS_IRB_SUBNET = re.compile(
     r"irb\s*\{[^}]*?unit\s+(\d{1,4})[^}]*?address\s+(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})",
-    re.S,
+    re.DOTALL,
 )
 # EOS interface Vlan10 / ip address 10.1.1.1/24
 _EOS_VLAN_SUBNET = re.compile(
     r"interface\s+Vlan(\d{1,4})\s*\n(?:\s+\S[^\n]*\n)*?\s+ip\s+address\s+(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})",
-    re.M,
+    re.MULTILINE,
 )
 
 # Public IP detection — anything outside RFC1918 / link-local / loopback
@@ -373,7 +372,7 @@ def extract_isp_profiles(config_text: str, platform: str,
     for prof in profiles.values():
         for ifc in prof.interfaces:
             pattern = rf"(?:deactivate\s+interfaces\s+{re.escape(ifc)}|interfaces\s+{re.escape(ifc)}[\s\S]{{0,200}}disable)"
-            if re.search(pattern, config_text, re.I):
+            if re.search(pattern, config_text, re.IGNORECASE):
                 prof.status = "shutdown"
                 break
 
@@ -383,7 +382,7 @@ def extract_isp_profiles(config_text: str, platform: str,
             continue
         m = re.search(
             rf"description[^;]*{re.escape(kw)}[^;]*[\s\S]{{0,500}}?peer-as\s+(\d+)",
-            config_text, re.I,
+            config_text, re.IGNORECASE,
         )
         if m:
             profiles[friendly].asn = m.group(1)
