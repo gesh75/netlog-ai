@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 import requests
 
@@ -48,7 +48,7 @@ class LokiSource:
             self.session.auth = basic
 
     @classmethod
-    def from_config(cls, config: SourceConfig) -> "LokiSource":
+    def from_config(cls, config: SourceConfig) -> LokiSource:
         return cls(config)
 
     def healthcheck(self) -> bool:

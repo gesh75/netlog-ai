@@ -194,8 +194,8 @@ def correlate_from_manager(
     ``"skipped": {source_id: error_str}`` key.
     """
     # Deferred import avoids an import cycle at module load time.
-    from ai_log_analyzer.sources.manager import manager as source_manager
     from ai_log_analyzer.sources.base import SourceError
+    from ai_log_analyzer.sources.manager import manager as source_manager
 
     # None => all registered sources; an explicit empty list => no sources.
     ids: list[str] = (

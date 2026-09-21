@@ -12,14 +12,13 @@ generation requires either `weasyprint` or `wkhtmltopdf` installed.
 from __future__ import annotations
 
 import csv
-import io
 import html
+import io
 import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Markdown

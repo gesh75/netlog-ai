@@ -16,7 +16,6 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
-from typing import Optional
 
 import requests
 
@@ -107,7 +106,7 @@ def run_command(hostname: str, command: str, timeout: float = 30.0) -> CommandRe
     )
 
 
-def fetch_running_config(hostname: str, platform: str = "frr", timeout: float = 30.0) -> Optional[str]:
+def fetch_running_config(hostname: str, platform: str = "frr", timeout: float = 30.0) -> str | None:
     """Fetch the running-config for a device.
 
     Strategy:
@@ -131,7 +130,7 @@ def fetch_running_config(hostname: str, platform: str = "frr", timeout: float = 
     return None
 
 
-def _docker_running_config(container: str, timeout: float = 30.0) -> Optional[str]:
+def _docker_running_config(container: str, timeout: float = 30.0) -> str | None:
     """Pull FRR running-config directly from the container — no SSH needed.
 
     Uses subprocess.run with a list argument (no shell), so the container
@@ -158,7 +157,7 @@ def _docker_running_config(container: str, timeout: float = 30.0) -> Optional[st
     return out or None
 
 
-def parse_output(result: CommandResult, filter_hint: Optional[str] = None,
+def parse_output(result: CommandResult, filter_hint: str | None = None,
                  min_score: float = 40.0) -> list[dict]:
     """Parse a CommandResult into structured records via tfsm_fire auto-detection.
 

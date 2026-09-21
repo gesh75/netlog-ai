@@ -6,7 +6,6 @@ import pytest
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.device_triage import normalize_pattern, triage_device
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _make_event(

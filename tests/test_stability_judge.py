@@ -10,7 +10,6 @@ from ai_log_analyzer import judge
 from ai_log_analyzer.classifier import LogEvent, iter_classify
 from ai_log_analyzer.stability import StabilityTracker
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -191,8 +190,9 @@ def test_judge_llm_sanitizes_saved_log_samples(monkeypatch):
 # ── eval CLI ─────────────────────────────────────────────────────────────────
 
 def test_cli_eval_kb_self_test(capsys):
-    from ai_log_analyzer.cli import main
     import sys as _sys
+
+    from ai_log_analyzer.cli import main
     argv = _sys.argv
     _sys.argv = ["ai-log-analyzer", "eval", "--json"]
     try:
@@ -206,8 +206,9 @@ def test_cli_eval_kb_self_test(capsys):
 
 
 def test_cli_eval_min_score_gate(tmp_path, capsys):
-    from ai_log_analyzer.cli import main
     import sys as _sys
+
+    from ai_log_analyzer.cli import main
     bad_result = {"action_items": [
         {"description": "x", "severity": "high", "devices": [],
          "deep_analysis": EMPTY_PLAYBOOK},

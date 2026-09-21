@@ -17,7 +17,6 @@ import re
 import socket
 import time
 from collections.abc import Callable
-from typing import Optional
 
 import requests
 
@@ -124,7 +123,7 @@ def set_enabled(enabled: bool) -> bool:
     return _state["enabled"]
 
 
-def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> Optional[str]:
+def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | None:
     """Run an LLM query honoring the configured provider. Returns text or None on full failure.
 
     Fallback chain when primary provider fails:
@@ -163,7 +162,7 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> Option
 
 # ── Ollama native API ────────────────────────────────────────────────────────
 
-def _query_ollama(system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+def _query_ollama(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
     """Ollama native /api/chat — supports `think:false` for thinking models (qwen3 etc.)."""
     url = f"{str(_state['ollama_url']).rstrip('/')}/api/chat"
     payload = {
@@ -198,7 +197,7 @@ def _query_ollama(system_prompt: str, user_prompt: str, max_tokens: int) -> Opti
 
 # ── Anthropic Claude ─────────────────────────────────────────────────────────
 
-def _query_claude(system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+def _query_claude(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
     api_key = str(_state["anthropic_api_key"])
     if not api_key:
         _record_error("claude", "ANTHROPIC_API_KEY not configured")
@@ -246,7 +245,7 @@ def _query_claude(system_prompt: str, user_prompt: str, max_tokens: int) -> Opti
 
 # ── xAI Grok (OpenAI-compatible) ─────────────────────────────────────────────
 
-def _query_grok(system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+def _query_grok(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
     """xAI Grok via /v1/chat/completions. Sanitize-first is the caller's job."""
     api_key = str(_state["xai_api_key"])
     if not api_key:
@@ -292,7 +291,7 @@ def _query_grok(system_prompt: str, user_prompt: str, max_tokens: int) -> Option
 
 # ── Docker Model Runner (TCP + Unix socket) ──────────────────────────────────
 
-def _query_docker_runner(system_prompt: str, user_prompt: str, max_tokens: int) -> Optional[str]:
+def _query_docker_runner(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
     payload = {
         "model": _state["local_model"],
         "messages": [
@@ -328,7 +327,7 @@ def _query_docker_runner(system_prompt: str, user_prompt: str, max_tokens: int) 
     return None
 
 
-def _query_unix_socket(sock_path: str, api_path: str, payload: dict) -> Optional[str]:
+def _query_unix_socket(sock_path: str, api_path: str, payload: dict) -> str | None:
     body = json.dumps(payload).encode()
     req = (
         f"POST {api_path} HTTP/1.1\r\n"
@@ -364,7 +363,7 @@ def _query_unix_socket(sock_path: str, api_path: str, payload: dict) -> Optional
         return None
 
 
-def _extract_openai_text(data: dict) -> Optional[str]:
+def _extract_openai_text(data: dict) -> str | None:
     choices = data.get("choices")
     if not choices or not isinstance(choices, list):
         return None
@@ -437,7 +436,7 @@ def _list_available_providers() -> list[dict]:
 
 
 # Registry — declared after the functions are defined
-_PROVIDERS: dict[str, Callable[[str, str, int], Optional[str]]] = {
+_PROVIDERS: dict[str, Callable[[str, str, int], str | None]] = {
     "ollama": _query_ollama,
     "local":  _query_docker_runner,
     "claude": _query_claude,

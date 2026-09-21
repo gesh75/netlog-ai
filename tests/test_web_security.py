@@ -252,7 +252,8 @@ def test_frr_source_rejects_flag_like_and_non_string_names(client, monkeypatch):
 @pytest.mark.unit
 def test_optimize_does_not_docker_exec_non_lab_hostname(client, monkeypatch):
     """ /api/optimize FRR fallback must not docker-exec an arbitrary hostname. """
-    from ai_log_analyzer.adapters import frr, network_tool as nt
+    from ai_log_analyzer.adapters import frr
+    from ai_log_analyzer.adapters import network_tool as nt
 
     monkeypatch.setattr(nt, "is_available", lambda timeout=1.0: False)
     monkeypatch.setattr(nt, "DOCKER_EXEC_FALLBACK", True)
@@ -276,7 +277,8 @@ def test_optimize_does_not_docker_exec_non_lab_hostname(client, monkeypatch):
 @pytest.mark.unit
 def test_run_does_not_docker_exec_non_lab_hostname(client, monkeypatch):
     """ /api/run docker-exec fallback must stay inside the lab inventory. """
-    from ai_log_analyzer.adapters import frr, network_tool as nt
+    from ai_log_analyzer.adapters import frr
+    from ai_log_analyzer.adapters import network_tool as nt
 
     monkeypatch.setattr(nt, "is_available", lambda timeout=1.0: False)
     monkeypatch.setattr(frr, "is_lab_container", lambda _name: False)

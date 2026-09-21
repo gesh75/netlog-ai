@@ -136,7 +136,7 @@ def check_device(config_text: str, platform: str, hostname: str,
 
         # Check `if_present` gating — skip rule entirely if gate doesn't match
         gates = rule.get("if_present", [])
-        if gates and not any(re.search(g, config_text, re.M | re.I) for g in gates):
+        if gates and not any(re.search(g, config_text, re.MULTILINE | re.IGNORECASE) for g in gates):
             continue
 
         passed, reason = _evaluate_rule(config_text, rule)
@@ -152,20 +152,20 @@ def check_device(config_text: str, platform: str, hostname: str,
 def _evaluate_rule(text: str, rule: dict[str, Any]) -> tuple[bool, str]:
     # 1. fail_if_present: if any of these patterns hit → fail
     for pat in rule.get("fail_if_present", []):
-        if re.search(pat, text, re.M | re.I):
+        if re.search(pat, text, re.MULTILINE | re.IGNORECASE):
             return False, f"Forbidden pattern matched: {pat[:60]}"
 
     # 2. count_match_min: count occurrences, fail if below threshold
     if "count_match_min" in rule:
         pat, threshold = rule["count_match_min"]
-        count = len(re.findall(pat, text, re.M | re.I))
+        count = len(re.findall(pat, text, re.MULTILINE | re.IGNORECASE))
         if count < threshold:
             return False, f"Only {count} match(es) of '{pat[:40]}'; need ≥{threshold}"
 
     # 3. must_match_any: at least one of these must match
     any_pats = rule.get("must_match_any", [])
     if any_pats:
-        if not any(re.search(p, text, re.M | re.I) for p in any_pats):
+        if not any(re.search(p, text, re.MULTILINE | re.IGNORECASE) for p in any_pats):
             return False, "None of the required patterns matched"
 
     return True, "ok"

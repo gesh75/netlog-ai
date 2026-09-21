@@ -39,7 +39,6 @@ def test_analyze_site_never_sends_raw_secrets_to_llm(monkeypatch):
     def fake_query(system_prompt, user_prompt, max_tokens=4096, **kw):
         captured["system"] = system_prompt
         captured["user"] = user_prompt
-        return None  # LLM failure path is fine — we only need the prompt
 
     monkeypatch.setattr(analyzer_mod.llm, "query", fake_query)
     monkeypatch.setattr(analyzer_mod.llm, "get_state", lambda: {"enabled": True})

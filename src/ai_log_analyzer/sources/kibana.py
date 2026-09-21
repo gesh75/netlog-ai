@@ -10,7 +10,7 @@ events / 24h across 50 devices on a single host.
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 
 import requests
 
@@ -61,7 +61,7 @@ class KibanaSource:
 
     # ── classmethod factory used by the registry ─────────────────────────────
     @classmethod
-    def from_config(cls, config: SourceConfig) -> "KibanaSource":
+    def from_config(cls, config: SourceConfig) -> KibanaSource:
         return cls(config)
 
     # ── LogSource interface ──────────────────────────────────────────────────

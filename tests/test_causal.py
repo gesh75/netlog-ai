@@ -7,7 +7,6 @@ from ai_log_analyzer.analyzer import ActionItem, analyze
 from ai_log_analyzer.causal import blast_radius, build_timeline, change_window
 from ai_log_analyzer.classifier import ClassifiedEvent, LogEvent
 
-
 pytestmark = pytest.mark.unit
 
 

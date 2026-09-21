@@ -8,7 +8,6 @@ import pytest
 
 from demo import tfsm_demo
 
-
 pytestmark = pytest.mark.unit
 
 

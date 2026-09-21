@@ -15,18 +15,17 @@ Custom connectors register themselves with `registry.register(kind, factory)`.
 """
 from __future__ import annotations
 
+# Trigger self-registration of all built-in connectors. Import order matters
+# only for which alias wins when there are duplicates — currently none.
+from ai_log_analyzer.sources import kibana, librenms, loki, splunk, syslog  # noqa: F401,E402
 from ai_log_analyzer.sources.base import (  # noqa: F401
     LogSource,
+    SourceAuthError,
     SourceConfig,
     SourceError,
     SourceTimeoutError,
-    SourceAuthError,
     registry,
 )
-
-# Trigger self-registration of all built-in connectors. Import order matters
-# only for which alias wins when there are duplicates — currently none.
-from ai_log_analyzer.sources import kibana, splunk, loki, syslog, librenms  # noqa: F401,E402
 
 __all__ = [
     "LogSource",

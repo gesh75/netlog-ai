@@ -7,7 +7,6 @@ from ai_log_analyzer.adapters.file import parse_lines
 from ai_log_analyzer.analyzer import analyze
 from ai_log_analyzer.demo import generate_demo_lines
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -40,6 +39,7 @@ def test_storyline_lights_up_every_surface():
 
 def test_demo_cli_smoke(capsys):
     import sys as _sys
+
     from ai_log_analyzer.cli import main
     argv = _sys.argv
     _sys.argv = ["ai-log-analyzer", "demo"]
