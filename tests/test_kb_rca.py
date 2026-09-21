@@ -5,7 +5,6 @@ import pytest
 
 from ai_log_analyzer import kb
 
-
 _PHASE_NAMES = {"Diagnose", "Mitigate", "Remediate", "Verify", "Optimize"}
 _RCA_KEYS = {"root_cause", "risk", "resolution_steps", "cli_junos", "cli_eos", "timeline"}
 

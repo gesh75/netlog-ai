@@ -8,7 +8,6 @@ import pytest
 
 from ai_log_analyzer.patterns import TemplateMiner, mask_message
 
-
 pytestmark = pytest.mark.unit
 
 

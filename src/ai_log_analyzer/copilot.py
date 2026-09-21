@@ -8,7 +8,6 @@ from __future__ import annotations
 from ai_log_analyzer import llm
 from ai_log_analyzer.sanitize import sanitize
 
-
 _COPILOT_SYSTEM_PROMPT = """You are a senior network engineer and SRE acting as the on-shift expert. The user provides a network configuration (one or more devices) and asks a question. Answer concisely, citing specific config lines as evidence when possible. If the question can be answered with a CLI verification command, include that command at the end.
 
 Style:

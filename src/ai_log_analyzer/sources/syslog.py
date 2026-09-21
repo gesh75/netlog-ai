@@ -15,7 +15,7 @@ import logging
 import socket
 import threading
 from collections import deque
-from typing import Iterable
+from collections.abc import Iterable
 
 from ai_log_analyzer.adapters.file import parse_lines
 from ai_log_analyzer.classifier import LogEvent
@@ -51,7 +51,7 @@ class SyslogListenerSource:
         self._start_listener()
 
     @classmethod
-    def from_config(cls, config: SourceConfig) -> "SyslogListenerSource":
+    def from_config(cls, config: SourceConfig) -> SyslogListenerSource:
         return cls(config)
 
     # ── LogSource interface ──────────────────────────────────────────────────
@@ -130,7 +130,7 @@ class SyslogListenerSource:
         while not self._stop.is_set():
             try:
                 data, _addr = self._sock.recvfrom(65535)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
@@ -141,7 +141,7 @@ class SyslogListenerSource:
         while not self._stop.is_set():
             try:
                 conn, _ = self._sock.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
@@ -159,7 +159,7 @@ class SyslogListenerSource:
                             self._ingest(line)
                     if buf:
                         self._ingest(buf)
-                except socket.timeout:
+                except TimeoutError:
                     pass
 
     def _ingest(self, raw: bytes) -> None:

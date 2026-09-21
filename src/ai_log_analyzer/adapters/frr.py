@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-from typing import Iterable
+from collections.abc import Iterable
 
 from ai_log_analyzer.classifier import LogEvent
 
@@ -26,11 +26,11 @@ _FRR_LINE_RE = re.compile(
 
 # Severity hints embedded in FRR messages
 _SEV_HINTS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\b(emerg|crit|panic|fatal)\b", re.I), "crit"),
-    (re.compile(r"\b(error|err|fail(ed)?|down|denied)\b", re.I), "err"),
-    (re.compile(r"\b(warn|warning|degrade)\b", re.I), "warning"),
-    (re.compile(r"\b(notice|change)\b", re.I), "notice"),
-    (re.compile(r"\b(up|established|connect succeeded)\b", re.I), "info"),
+    (re.compile(r"\b(emerg|crit|panic|fatal)\b", re.IGNORECASE), "crit"),
+    (re.compile(r"\b(error|err|fail(ed)?|down|denied)\b", re.IGNORECASE), "err"),
+    (re.compile(r"\b(warn|warning|degrade)\b", re.IGNORECASE), "warning"),
+    (re.compile(r"\b(notice|change)\b", re.IGNORECASE), "notice"),
+    (re.compile(r"\b(up|established|connect succeeded)\b", re.IGNORECASE), "info"),
 ]
 
 

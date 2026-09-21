@@ -9,7 +9,6 @@ import pytest
 from ai_log_analyzer import reports, runbook
 from ai_log_analyzer import topology as topo_mod
 
-
 pytestmark = pytest.mark.unit
 
 

@@ -13,7 +13,7 @@ override via `extra["search"]`.
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 
 import requests
 
@@ -48,7 +48,7 @@ class SplunkSource:
             self.session.auth = basic
 
     @classmethod
-    def from_config(cls, config: SourceConfig) -> "SplunkSource":
+    def from_config(cls, config: SourceConfig) -> SplunkSource:
         return cls(config)
 
     def healthcheck(self) -> bool:

@@ -6,7 +6,6 @@ import pytest
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.memory import IncidentStore
 
-
 pytestmark = pytest.mark.unit
 
 

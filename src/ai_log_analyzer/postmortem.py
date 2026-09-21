@@ -80,7 +80,7 @@ def fingerprint_finding(finding: dict) -> str | None:
     # Look for a config-y line (starts with set/no/router/interface/protocols)
     for line in ev.splitlines():
         line = line.strip()
-        if re.match(r"^(set|no|router|interface|protocols|service|ip\s+|snmp|ssh|ntp|aaa)", line, re.I):
+        if re.match(r"^(set|no|router|interface|protocols|service|ip\s+|snmp|ssh|ntp|aaa)", line, re.IGNORECASE):
             return line[:120]
 
     # Look for an IPv4 / interface name

@@ -4,11 +4,13 @@ from __future__ import annotations
 import heapq
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 from ai_log_analyzer import kb, llm
+from ai_log_analyzer.causal import blast_radius, build_timeline, change_window
 from ai_log_analyzer.classifier import (
     SEV_ORDER,
     ClassifiedEvent,
@@ -18,8 +20,6 @@ from ai_log_analyzer.classifier import (
 from ai_log_analyzer.patterns import TemplateMiner, apply_template_store
 from ai_log_analyzer.sanitize import sanitize, sanitize_report
 from ai_log_analyzer.stability import StabilityTracker
-from ai_log_analyzer.causal import blast_radius, build_timeline, change_window
-
 
 # Recovery events are classified as medium because they're useful in the
 # timeline view, but they should NEVER produce action items / runbooks —

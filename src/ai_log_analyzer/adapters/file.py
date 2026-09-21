@@ -4,9 +4,9 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+from collections.abc import Iterable
 from itertools import islice
 from pathlib import Path
-from typing import Iterable
 
 from ai_log_analyzer.classifier import LogEvent
 
