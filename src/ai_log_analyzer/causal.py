@@ -29,6 +29,12 @@ _TIMELINE_INCIDENT_FLOOR = 8
 # sit at least this far apart. Morning flaps are seconds apart; the
 # leftover tests place the BGP storm an hour later.
 _LEFTOVER_CLUSTER_GAP_S = 60.0
+# Morning leftover and the afternoon outage can share a category
+# (BGP flaps → later BGP collapse). Category-only skip then treats the
+# real storm as leftover overflow. These are the leftover categories
+# where a later same-category burst on the timeline is still the storm.
+_SAME_CATEGORY_STORM = frozenset({"routing"})
+_STORM_SEVERITY = frozenset({"critical", "high"})
 _RFC3164_MONTHS = {
     name: idx
     for idx, name in enumerate(
@@ -182,6 +188,9 @@ def _later_storm_incidents(
     starts soon after leftover flaps), drop later clusters that still
     share a leftover category (afternoon flaps of the same signature),
     and take the last remaining cluster.
+    If leftover itself is a storm category (routing), a later
+    high/critical cluster of that category is the outage — do not skip
+    it as overflow or let trailing other-category / recovery rows win.
     If every later cluster is leftover-category (same-signature storm)
     or stamps cannot be clustered, fall back to the last cluster / the
     newest floor-sized slice.
@@ -191,6 +200,23 @@ def _later_storm_incidents(
         return missing
     stamp_year = _reference_year([*prefix, *missing]) if year is None else year
     leftover_cats = {e.category for e in leftover}
+    storm_cats = leftover_cats & _SAME_CATEGORY_STORM
+    if storm_cats:
+        # Morning routing leftover + afternoon routing on another host
+        # (or the same host after a gap) is the outage, not overflow.
+        # Category-only skip + last-non-leftover-cluster then either
+        # emptied ``later`` (recovery / more routing stole the fallback
+        # slice) or preferred a trailing other-category burst.
+        same = [
+            c for c in _gap_clusters(missing, stamp_year)
+            if c[0].category in storm_cats
+        ]
+        stormish = [
+            c for c in same
+            if any(e.severity in _STORM_SEVERITY for e in c)
+        ]
+        if stormish:
+            return stormish[-1]
     idx = 0
     # Leftover-category overflow is leftover whether it abuts the prefix
     # or resumes after a commit / time gap. Requiring a <60s gap from
