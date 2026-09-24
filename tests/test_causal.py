@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ai_log_analyzer.analyzer import ActionItem, analyze
-from ai_log_analyzer.causal import blast_radius, build_timeline, change_window
+from ai_log_analyzer.causal import blast_radius, build_timeline, change_window, event_time
 from ai_log_analyzer.classifier import ClassifiedEvent, LogEvent
 
 pytestmark = pytest.mark.unit
@@ -214,6 +214,47 @@ def test_change_window_names_yearless_dec31_before_later_jan():
     assert cw["devices"] == ["rt-01", "rt-02"]
     nodes = build_timeline(events)
     assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_yearless_dec31_before_jan_at_year_midpoint(monkeypatch):
+    """Independent restamp-vs-now inverts Dec/Jan around 2 July.
+
+    Both stamps pick the same calendar year when each is nearest to
+    mid-year ``now()``, so ``Jan 1`` sorts first. Pin the first yearless
+    stamp to now, then restamp the other against that sibling.
+    """
+    monkeypatch.setattr(
+        "ai_log_analyzer.causal._now",
+        lambda: datetime(2026, 7, 2, 12, 0, 0),
+    )
+    jan_first = [
+        _ce(timestamp="Jan  1 00:10:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    dec_first = [jan_first[1], jan_first[0]]
+    for events in (jan_first, dec_first):
+        cw = change_window(events)
+        assert cw["devices"] == ["rt-01", "rt-02"]
+        nodes = build_timeline(events)
+        assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_event_time_int_year_is_literal_calendar_year():
+    """An int year must not be treated as 1 January for nearest-instant restamp.
+
+    ``Aug 29`` nearest to ``2026-01-01`` is ``2025-08-29``, which would
+    invert a mixed August RFC3164 + later 2026 ISO commit.
+    """
+    ev = _ce(timestamp="Aug 29 09:55:00", category="config", severity="low",
+             hostname="rt-01", description="Configuration change committed")
+    assert event_time(ev, 2026) == datetime(2026, 8, 29, 9, 55, 0)
+    assert event_time(ev, datetime(2026, 8, 29, 9, 56, 0)) == datetime(
+        2026, 8, 29, 9, 55, 0,
+    )
 
 
 def test_analyze_change_window_year_end_rfc3164_names_earliest_host():
