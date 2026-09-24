@@ -39,7 +39,10 @@ loose semantic versioning.
   time so a mixed-format storm is not split into one-event clusters.
   The yearless RFC3164 sentinel is a leap year so 29 Feb still parses.
   Aware ISO offsets convert to UTC before comparison so ``10:00+05:00``
-  cannot sort after ``09:55Z``.
+  cannot sort after ``09:55Z``. RFC3164 restamp picks the nearest year
+  to the dated sibling (or now) so a ``Dec 31`` Junos commit is not
+  assigned January's calendar year and cannot lose ``devices[0]`` to a
+  later January host.
 - Floor later incident rows into a config-flooded timeline cap so a
   24-commit maintenance burst cannot hide the BGP storm that follows.
   Leftover earlier flaps do not count as already showing the outage when

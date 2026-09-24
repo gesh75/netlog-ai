@@ -180,6 +180,55 @@ def test_change_window_names_rfc3164_feb29_before_later_iso():
     assert cw["devices"] == ["rt-01", "rt-02"]
 
 
+def test_change_window_names_rfc3164_dec31_before_later_jan_iso():
+    """Year-end Junos RFC3164 must not inherit January's calendar year.
+
+    A single sibling year restamped ``Dec 31`` as ``2025-12-31``, after
+    ``2025-01-01``, so the later January host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="2025-01-01T00:10:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_yearless_dec31_before_later_jan():
+    """RFC3164-only Dec/Jan pair must stay chronological without an ISO sibling."""
+    events = [
+        _ce(timestamp="Jan  1 00:10:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_analyze_change_window_year_end_rfc3164_names_earliest_host():
+    """Streaming reserve + change_window must agree across Dec/Jan."""
+    events = [
+        LogEvent("Dec 31 23:50:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+        LogEvent("2025-01-01T00:10:00", "rt-02", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-01"
+    assert "rt-02" in result.change_window["devices"]
+
+
 def test_analyze_change_window_mixed_rfc3164_and_iso_names_earliest_host():
     """Streaming reserve + change_window must agree on mixed vendor stamps."""
     events = [

@@ -112,36 +112,72 @@ def _parse_event_ts(ts: str) -> datetime | None:
     return None
 
 
-def _reference_year(events: Iterable[ClassifiedEvent]) -> int:
-    """Year to apply to RFC3164 stamps, taken from a dated sibling event."""
+def _reference_dt(events: Iterable[ClassifiedEvent]) -> datetime:
+    """Anchor for RFC3164 year inference: first dated sibling, else now()."""
     for event in events:
         parsed = _parse_event_ts(event.timestamp or "")
         if parsed is not None and parsed.year != _RFC3164_YEARLESS:
-            return parsed.year
-    return datetime.now().year
+            return parsed
+    return datetime.now()
 
 
-def event_time(event: ClassifiedEvent, year: int | None = None) -> datetime | None:
-    """Best-effort naive datetime for ``event``, or None if the stamp is unknown."""
+def _anchor_dt(events: Iterable[ClassifiedEvent], ref: datetime | int | None) -> datetime:
+    """Normalize a restamp anchor to a datetime."""
+    if isinstance(ref, datetime):
+        return ref
+    if isinstance(ref, int):
+        return datetime(ref, 1, 1)
+    return _reference_dt(events)
+
+
+def _restamp_yearless(parsed: datetime, ref: datetime) -> datetime:
+    """Assign a calendar year so the RFC3164 stamp is nearest to ``ref``.
+
+    A single global year (the first dated sibling's year, or ``now().year``)
+    put ``Dec 31`` after ``Jan 1`` of that year, so a year-end Junos commit
+    lost ``devices[0]`` to a January sibling. Try ``ref.year-1`` / ``ref.year``
+    / ``ref.year+1`` and pick the closest instant.
+    """
+    best: datetime | None = None
+    best_delta: float | None = None
+    for year in (ref.year - 1, ref.year, ref.year + 1):
+        try:
+            candidate = parsed.replace(year=year)
+        except ValueError:
+            candidate = parsed.replace(year=year, day=28)
+        delta = abs((candidate - ref).total_seconds())
+        if best is None or delta < best_delta:
+            best = candidate
+            best_delta = delta
+    assert best is not None
+    return best
+
+
+def event_time(event: ClassifiedEvent, year: datetime | int | None = None) -> datetime | None:
+    """Best-effort naive datetime for ``event``, or None if the stamp is unknown.
+
+    ``year`` may be a reference datetime (preferred) or a calendar year.
+    RFC3164 stamps pick the nearest year to that anchor so Dec/Jan
+    rollovers stay in chronological order.
+    """
     parsed = _parse_event_ts(event.timestamp or "")
     if parsed is None:
         return None
     if parsed.year != _RFC3164_YEARLESS:
         return parsed
-    stamp_year = datetime.now().year if year is None else year
-    try:
-        return parsed.replace(year=stamp_year)
-    except ValueError:
-        return parsed.replace(year=stamp_year, day=28)
+    ref = year if isinstance(year, datetime) else (
+        datetime(year, 1, 1) if isinstance(year, int) else datetime.now()
+    )
+    return _restamp_yearless(parsed, ref)
 
 
-def _event_sort_key(event: ClassifiedEvent, year: int) -> tuple[datetime, str]:
+def _event_sort_key(event: ClassifiedEvent, year: datetime | int) -> tuple[datetime, str]:
     """Chronological key. Unparseable stamps sort last so they cannot steal earliest."""
     return (event_time(event, year) or datetime.max, event.hostname or "")
 
 
 def _event_gap_seconds(
-    prev: ClassifiedEvent, nxt: ClassifiedEvent, year: int | None = None,
+    prev: ClassifiedEvent, nxt: ClassifiedEvent, year: datetime | int | None = None,
 ) -> float:
     ta = event_time(prev, year)
     tb = event_time(nxt, year)
@@ -153,14 +189,14 @@ def _event_gap_seconds(
 
 
 def _gap_clusters(
-    events: list[ClassifiedEvent], year: int | None = None,
+    events: list[ClassifiedEvent], year: datetime | int | None = None,
 ) -> list[list[ClassifiedEvent]]:
     if not events:
         return []
-    stamp_year = _reference_year(events) if year is None else year
+    stamp_ref = _anchor_dt(events, year)
     clusters: list[list[ClassifiedEvent]] = [[events[0]]]
     for prev, event in zip(events, events[1:]):
-        if _event_gap_seconds(prev, event, stamp_year) >= _LEFTOVER_CLUSTER_GAP_S:
+        if _event_gap_seconds(prev, event, stamp_ref) >= _LEFTOVER_CLUSTER_GAP_S:
             clusters.append([event])
         else:
             clusters[-1].append(event)
@@ -170,7 +206,7 @@ def _gap_clusters(
 def _later_storm_incidents(
     prefix: list[ClassifiedEvent],
     missing: list[ClassifiedEvent],
-    year: int | None = None,
+    year: datetime | int | None = None,
 ) -> list[ClassifiedEvent]:
     """Skip leftover overflow so the floor pulls the later outage.
 
@@ -189,7 +225,7 @@ def _later_storm_incidents(
     leftover = [e for e in prefix if e.category != "config"]
     if not leftover or not missing:
         return missing
-    stamp_year = _reference_year([*prefix, *missing]) if year is None else year
+    stamp_ref = _anchor_dt([*prefix, *missing], year)
     leftover_cats = {e.category for e in leftover}
     idx = 0
     # Leftover-category overflow is leftover whether it abuts the prefix
@@ -203,7 +239,7 @@ def _later_storm_incidents(
     later = missing[idx:]
     if not later:
         return missing[-min(_TIMELINE_INCIDENT_FLOOR, len(missing)):]
-    clusters = _gap_clusters(later, stamp_year)
+    clusters = _gap_clusters(later, stamp_ref)
     preferred = [c for c in clusters if c[0].category not in leftover_cats]
     if not preferred:
         preferred = clusters
@@ -211,7 +247,7 @@ def _later_storm_incidents(
 
 
 def _earliest_config_id(
-    events: Iterable[ClassifiedEvent], year: int | None = None,
+    events: Iterable[ClassifiedEvent], year: datetime | int | None = None,
 ) -> int | None:
     """Object id of the earliest config row, if any.
 
@@ -221,13 +257,13 @@ def _earliest_config_id(
     hides the same causative commit the reserve just recovered.
     """
     rows = list(events)
-    stamp_year = _reference_year(rows) if year is None else year
+    stamp_ref = _anchor_dt(rows, year)
     chosen: ClassifiedEvent | None = None
     chosen_key: tuple[datetime, str] | None = None
     for event in rows:
         if event.category != "config":
             continue
-        key = _event_sort_key(event, stamp_year)
+        key = _event_sort_key(event, stamp_ref)
         if chosen_key is None or key < chosen_key:
             chosen = event
             chosen_key = key
@@ -248,11 +284,11 @@ def _select_timeline_rows(
         e for e in events
         if e.severity in _ACTIONABLE or e.category == "config"
     ]
-    stamp_year = _reference_year(rows)
-    rows.sort(key=lambda e: _event_sort_key(e, stamp_year))
+    stamp_ref = _reference_dt(rows)
+    rows.sort(key=lambda e: _event_sort_key(e, stamp_ref))
     if len(rows) <= limit:
         return rows
-    protect_id = _earliest_config_id(rows, stamp_year)
+    protect_id = _earliest_config_id(rows, stamp_ref)
     prefix = rows[:limit]
     orig_prefix_ids = {id(e) for e in prefix}
     shown = set(orig_prefix_ids)
@@ -273,7 +309,7 @@ def _select_timeline_rows(
         leftover_budget = incidents
         incidents = 0
         missing_incidents = _later_storm_incidents(
-            prefix, missing_incidents, stamp_year,
+            prefix, missing_incidents, stamp_ref,
         )
         floor = min(_TIMELINE_INCIDENT_FLOOR, incidents + len(missing_incidents))
         need = max(0, floor - incidents)
@@ -311,7 +347,7 @@ def _select_timeline_rows(
             pulled = missing_incidents[:evicted]
             kept.extend(pulled)
             pulled_ids = {id(e) for e in pulled}
-            kept.sort(key=lambda e: _event_sort_key(e, stamp_year))
+            kept.sort(key=lambda e: _event_sort_key(e, stamp_ref))
             prefix = kept
             shown = {id(e) for e in prefix}
             pulled_incidents = True
@@ -361,7 +397,7 @@ def _select_timeline_rows(
             kept = trimmed
             evicted += dropped
         kept.extend(pin[:evicted])
-        kept.sort(key=lambda e: _event_sort_key(e, stamp_year))
+        kept.sort(key=lambda e: _event_sort_key(e, stamp_ref))
         return kept
     # Never wipe the last incident row still inside the window just to
     # make room for extra commits.
@@ -377,7 +413,7 @@ def _select_timeline_rows(
         kept.append(e)
     kept.reverse()
     kept.extend(pin[:evicted])
-    kept.sort(key=lambda e: _event_sort_key(e, stamp_year))
+    kept.sort(key=lambda e: _event_sort_key(e, stamp_ref))
     return kept
 
 
@@ -481,8 +517,8 @@ def change_window(events: Iterable[ClassifiedEvent]) -> dict[str, Any]:
     # Oldest-first so devices[0] is the earliest commit host, not the
     # noisiest late one. Must parse stamps — FRR/ISO vs RFC3164 vs Loki
     # epoch do not sort lexicographically.
-    stamp_year = _reference_year(hits)
-    hits.sort(key=lambda e: _event_sort_key(e, stamp_year))
+    stamp_ref = _reference_dt(hits)
+    hits.sort(key=lambda e: _event_sort_key(e, stamp_ref))
     devices: list[str] = []
     seen: set[str] = set()
     samples: list[str] = []
