@@ -42,10 +42,12 @@ loose semantic versioning.
   cannot sort after ``09:55Z``. RFC3164 restamp picks the nearest year
   to the dated sibling so a ``Dec 31`` Junos commit is not assigned
   January's calendar year and cannot lose ``devices[0]`` to a later
-  January host. Yearless-only Dec/Jan pairs pin the first RFC3164 stamp
-  to ``now()`` and restamp the rest against that sibling, so mid-year
-  ``now()`` cannot assign both the same calendar year. An int year
-  passed to ``event_time`` stays a literal calendar year.
+  January host. Wrap only at a year boundary (Nov/Dec next to Jan/Feb)
+  so a June ISO sibling keeps December in the same year. Yearless-only
+  Dec/Jan pairs pin the first RFC3164 stamp to ``now()`` and restamp
+  the rest against that sibling, so mid-year ``now()`` cannot assign
+  both the same calendar year. An int year passed to ``event_time``
+  stays a literal calendar year.
 - Floor later incident rows into a config-flooded timeline cap so a
   24-commit maintenance burst cannot hide the BGP storm that follows.
   Leftover earlier flaps do not count as already showing the outage when
