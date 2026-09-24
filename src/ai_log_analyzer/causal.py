@@ -112,21 +112,40 @@ def _parse_event_ts(ts: str) -> datetime | None:
     return None
 
 
-def _reference_dt(events: Iterable[ClassifiedEvent]) -> datetime:
-    """Anchor for RFC3164 year inference: first dated sibling, else now()."""
-    for event in events:
-        parsed = _parse_event_ts(event.timestamp or "")
-        if parsed is not None and parsed.year != _RFC3164_YEARLESS:
-            return parsed
+def _now() -> datetime:
+    """Clock seam so year-inference tests can freeze ``datetime.now()``."""
     return datetime.now()
 
 
-def _anchor_dt(events: Iterable[ClassifiedEvent], ref: datetime | int | None) -> datetime:
-    """Normalize a restamp anchor to a datetime."""
-    if isinstance(ref, datetime):
+def _reference_dt(events: Iterable[ClassifiedEvent]) -> datetime:
+    """Anchor for RFC3164 year inference.
+
+    Prefer the first dated sibling. With only yearless stamps, pin the
+    first RFC3164 stamp to ``now()`` and use that instant so the rest of
+    the set restamps relative to a sibling — not independently against
+    ``now()``. Independent restamp around 2 July assigned ``Dec 31`` and
+    ``Jan 1`` the same calendar year and inverted ``devices[0]``.
+    """
+    first_yearless: datetime | None = None
+    for event in events:
+        parsed = _parse_event_ts(event.timestamp or "")
+        if parsed is None:
+            continue
+        if parsed.year != _RFC3164_YEARLESS:
+            return parsed
+        if first_yearless is None:
+            first_yearless = parsed
+    if first_yearless is not None:
+        return _restamp_yearless(first_yearless, _now())
+    return _now()
+
+
+def _anchor_dt(
+    events: Iterable[ClassifiedEvent], ref: datetime | int | None,
+) -> datetime | int:
+    """Pass through an explicit restamp anchor; otherwise derive one."""
+    if isinstance(ref, (datetime, int)):
         return ref
-    if isinstance(ref, int):
-        return datetime(ref, 1, 1)
     return _reference_dt(events)
 
 
@@ -156,19 +175,24 @@ def _restamp_yearless(parsed: datetime, ref: datetime) -> datetime:
 def event_time(event: ClassifiedEvent, year: datetime | int | None = None) -> datetime | None:
     """Best-effort naive datetime for ``event``, or None if the stamp is unknown.
 
-    ``year`` may be a reference datetime (preferred) or a calendar year.
-    RFC3164 stamps pick the nearest year to that anchor so Dec/Jan
-    rollovers stay in chronological order.
+    A datetime ``year`` is a nearest-instant anchor so Dec/Jan rollovers
+    stay chronological. An int ``year`` is a literal calendar year
+    (``Aug 29`` + ``2026`` stays ``2026-08-29``, not the year nearest
+    1 January). ``None`` restamps against ``now()``.
     """
     parsed = _parse_event_ts(event.timestamp or "")
     if parsed is None:
         return None
     if parsed.year != _RFC3164_YEARLESS:
         return parsed
-    ref = year if isinstance(year, datetime) else (
-        datetime(year, 1, 1) if isinstance(year, int) else datetime.now()
-    )
-    return _restamp_yearless(parsed, ref)
+    if isinstance(year, datetime):
+        return _restamp_yearless(parsed, year)
+    if isinstance(year, int):
+        try:
+            return parsed.replace(year=year)
+        except ValueError:
+            return parsed.replace(year=year, day=28)
+    return _restamp_yearless(parsed, _now())
 
 
 def _event_sort_key(event: ClassifiedEvent, year: datetime | int) -> tuple[datetime, str]:
