@@ -40,6 +40,10 @@ _RFC3164_MONTHS = {
 # Leap year so 29 Feb RFC3164 parses. Never a real ingest year; restamped
 # from a sibling ISO/epoch event (or datetime.now().year).
 _RFC3164_YEARLESS = 4
+# Year-boundary months for RFC3164 wrap. A dated June sibling must keep
+# December in the same calendar year; only Nov/Dec next to Jan/Feb wrap.
+_YEARLESS_EARLY = frozenset({1, 2})
+_YEARLESS_LATE = frozenset({11, 12})
 
 
 def _as_naive(dt: datetime) -> datetime:
@@ -149,21 +153,37 @@ def _anchor_dt(
     return _reference_dt(events)
 
 
-def _restamp_yearless(parsed: datetime, ref: datetime) -> datetime:
-    """Assign a calendar year so the RFC3164 stamp is nearest to ``ref``.
+def _is_rollover_pair(parsed: datetime, ref: datetime) -> bool:
+    """True when a yearless stamp and its anchor sit on opposite sides of 1 Jan."""
+    return (
+        (parsed.month in _YEARLESS_LATE and ref.month in _YEARLESS_EARLY)
+        or (parsed.month in _YEARLESS_EARLY and ref.month in _YEARLESS_LATE)
+    )
 
-    A single global year (the first dated sibling's year, or ``now().year``)
-    put ``Dec 31`` after ``Jan 1`` of that year, so a year-end Junos commit
-    lost ``devices[0]`` to a January sibling. Try ``ref.year-1`` / ``ref.year``
-    / ``ref.year+1`` and pick the closest instant.
+
+def _with_year(parsed: datetime, year: int) -> datetime:
+    """``replace(year=…)`` that keeps 29 Feb parseable on a common year."""
+    try:
+        return parsed.replace(year=year)
+    except ValueError:
+        return parsed.replace(year=year, day=28)
+
+
+def _restamp_yearless(parsed: datetime, ref: datetime) -> datetime:
+    """Assign a calendar year so RFC3164 Dec/Jan rollovers stay ordered.
+
+    A single global year put ``Dec 31`` after ``Jan 1`` of that year, so a
+    year-end Junos commit lost ``devices[0]`` to a January sibling. Only
+    wrap when the pair is actually a year boundary (Nov/Dec next to
+    Jan/Feb). Blind nearest-year on a June ISO sibling restamped
+    December into the previous year and inverted same-year order.
     """
+    if not _is_rollover_pair(parsed, ref):
+        return _with_year(parsed, ref.year)
     best: datetime | None = None
     best_delta: float | None = None
     for year in (ref.year - 1, ref.year, ref.year + 1):
-        try:
-            candidate = parsed.replace(year=year)
-        except ValueError:
-            candidate = parsed.replace(year=year, day=28)
+        candidate = _with_year(parsed, year)
         delta = abs((candidate - ref).total_seconds())
         if best is None or delta < best_delta:
             best = candidate
@@ -175,10 +195,11 @@ def _restamp_yearless(parsed: datetime, ref: datetime) -> datetime:
 def event_time(event: ClassifiedEvent, year: datetime | int | None = None) -> datetime | None:
     """Best-effort naive datetime for ``event``, or None if the stamp is unknown.
 
-    A datetime ``year`` is a nearest-instant anchor so Dec/Jan rollovers
-    stay chronological. An int ``year`` is a literal calendar year
-    (``Aug 29`` + ``2026`` stays ``2026-08-29``, not the year nearest
-    1 January). ``None`` restamps against ``now()``.
+    A datetime ``year`` is a restamp anchor: wrap only at a Nov/Dec–Jan/Feb
+    boundary so year-end rollovers stay chronological without inverting
+    a mid-year sibling. An int ``year`` is a literal calendar year
+    (``Aug 29`` + ``2026`` stays ``2026-08-29``). ``None`` restamps
+    against ``now()``.
     """
     parsed = _parse_event_ts(event.timestamp or "")
     if parsed is None:

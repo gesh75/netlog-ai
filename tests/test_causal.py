@@ -257,6 +257,39 @@ def test_event_time_int_year_is_literal_calendar_year():
     )
 
 
+def test_change_window_names_june_iso_before_later_rfc3164_dec():
+    """A mid-year dated sibling must keep December in the same calendar year.
+
+    Blind nearest-year restamped ``Dec 31`` as ``2024-12-31`` next to
+    ``2025-06-15``, so the later December host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2025-06-15T12:00:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-02", "rt-01"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-02", "rt-01"]
+
+
+def test_analyze_change_window_june_iso_before_later_rfc3164_dec():
+    """Streaming reserve must not wrap December behind a June ISO sibling."""
+    events = [
+        LogEvent("2025-06-15T12:00:00", "rt-02", "mgd", "info",
+                 "commit complete confirmed"),
+        LogEvent("Dec 31 23:50:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-02"
+    assert "rt-01" in result.change_window["devices"]
+
+
 def test_analyze_change_window_year_end_rfc3164_names_earliest_host():
     """Streaming reserve + change_window must agree across Dec/Jan."""
     events = [
