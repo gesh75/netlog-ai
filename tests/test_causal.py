@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ai_log_analyzer.analyzer import ActionItem, analyze
-from ai_log_analyzer.causal import blast_radius, build_timeline, change_window
+from ai_log_analyzer.causal import blast_radius, build_timeline, change_window, event_time
 from ai_log_analyzer.classifier import ClassifiedEvent, LogEvent
 
 pytestmark = pytest.mark.unit
@@ -178,6 +178,129 @@ def test_change_window_names_rfc3164_feb29_before_later_iso():
     ]
     cw = change_window(events)
     assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_rfc3164_dec31_before_later_jan_iso():
+    """Year-end Junos RFC3164 must not inherit January's calendar year.
+
+    A single sibling year restamped ``Dec 31`` as ``2025-12-31``, after
+    ``2025-01-01``, so the later January host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="2025-01-01T00:10:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_yearless_dec31_before_later_jan():
+    """RFC3164-only Dec/Jan pair must stay chronological without an ISO sibling."""
+    events = [
+        _ce(timestamp="Jan  1 00:10:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_yearless_dec31_before_jan_at_year_midpoint(monkeypatch):
+    """Independent restamp-vs-now inverts Dec/Jan around 2 July.
+
+    Both stamps pick the same calendar year when each is nearest to
+    mid-year ``now()``, so ``Jan 1`` sorts first. Pin the first yearless
+    stamp to now, then restamp the other against that sibling.
+    """
+    monkeypatch.setattr(
+        "ai_log_analyzer.causal._now",
+        lambda: datetime(2026, 7, 2, 12, 0, 0),
+    )
+    jan_first = [
+        _ce(timestamp="Jan  1 00:10:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    dec_first = [jan_first[1], jan_first[0]]
+    for events in (jan_first, dec_first):
+        cw = change_window(events)
+        assert cw["devices"] == ["rt-01", "rt-02"]
+        nodes = build_timeline(events)
+        assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_event_time_int_year_is_literal_calendar_year():
+    """An int year must not be treated as 1 January for nearest-instant restamp.
+
+    ``Aug 29`` nearest to ``2026-01-01`` is ``2025-08-29``, which would
+    invert a mixed August RFC3164 + later 2026 ISO commit.
+    """
+    ev = _ce(timestamp="Aug 29 09:55:00", category="config", severity="low",
+             hostname="rt-01", description="Configuration change committed")
+    assert event_time(ev, 2026) == datetime(2026, 8, 29, 9, 55, 0)
+    assert event_time(ev, datetime(2026, 8, 29, 9, 56, 0)) == datetime(
+        2026, 8, 29, 9, 55, 0,
+    )
+
+
+def test_change_window_names_june_iso_before_later_rfc3164_dec():
+    """A mid-year dated sibling must keep December in the same calendar year.
+
+    Blind nearest-year restamped ``Dec 31`` as ``2024-12-31`` next to
+    ``2025-06-15``, so the later December host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2025-06-15T12:00:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-02", "rt-01"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-02", "rt-01"]
+
+
+def test_analyze_change_window_june_iso_before_later_rfc3164_dec():
+    """Streaming reserve must not wrap December behind a June ISO sibling."""
+    events = [
+        LogEvent("2025-06-15T12:00:00", "rt-02", "mgd", "info",
+                 "commit complete confirmed"),
+        LogEvent("Dec 31 23:50:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-02"
+    assert "rt-01" in result.change_window["devices"]
+
+
+def test_analyze_change_window_year_end_rfc3164_names_earliest_host():
+    """Streaming reserve + change_window must agree across Dec/Jan."""
+    events = [
+        LogEvent("Dec 31 23:50:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+        LogEvent("2025-01-01T00:10:00", "rt-02", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-01"
+    assert "rt-02" in result.change_window["devices"]
 
 
 def test_analyze_change_window_mixed_rfc3164_and_iso_names_earliest_host():

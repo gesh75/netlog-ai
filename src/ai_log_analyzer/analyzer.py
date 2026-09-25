@@ -12,7 +12,7 @@ from typing import Any
 from ai_log_analyzer import kb, llm
 from ai_log_analyzer.causal import (
     _event_sort_key,
-    _reference_year,
+    _reference_dt,
     blast_radius,
     build_timeline,
     change_window,
@@ -582,8 +582,8 @@ def _merge_config_reserve(
     for _, _, ev in newest:
         reserved[id(ev)] = ev
     # Oldest first so change_window.devices names the earliest commit host.
-    year = _reference_year(reserved.values())
-    return sorted(reserved.values(), key=lambda ev: _event_sort_key(ev, year))
+    ref = _reference_dt(reserved.values())
+    return sorted(reserved.values(), key=lambda ev: _event_sort_key(ev, ref))
 
 
 def _with_reserved_config(
