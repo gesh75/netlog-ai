@@ -47,16 +47,11 @@ dev = [
 # MCP SDK 2.x required (FastMCP was renamed to MCPServer and moved to
 # mcp.server.mcpserver). The server was ported in PR #20 / issue #17.
 mcp = ["mcp>=2,<3"]
-all = ["mcp>=2,<3"]
-# NOTE: there was a `parse = ["tfsm-fire>=0.1.0"]` extra here through v0.5.0.
-# Upstream withdrew `tfsm-fire` from PyPI and deleted github.com/scottpeterman/tfsm_fire
-# between 2026-07-13 (last green CI, which installed tfsm_fire-0.1.0) and 2026-07-28
-# (404 on both). There is no surviving fork, mirror, or renamed distribution, so the
-# extra could not be repointed — it only made `pip install netlog-ai[parse]` and
-# `[all]` unresolvable. The adapter (adapters/tfsm_auto.py) is unchanged and still
-# works if you install a copy of tfsm-fire yourself; see docs/TFSM_AUTO_PARSER.md.
-# Do NOT re-add it as a PEP 508 direct reference (`tfsm-fire @ git+https://...`) —
-# PyPI rejects direct references in uploaded metadata. tests/test_packaging.py enforces this.
+# textfsm + ntc-templates replace the withdrawn tfsm-fire package (issue #19).
+# Do not point this extra at a PEP 508 direct reference — PyPI rejects those.
+# tests/test_packaging.py still forbids the dead `tfsm-fire` distribution name.
+parse = ["textfsm>=1.1.3", "ntc-templates>=4.0"]
+all = ["mcp>=2,<3", "textfsm>=1.1.3", "ntc-templates>=4.0"]
 
 [project.urls]
 Homepage = "https://github.com/gesh75/netlog-ai"

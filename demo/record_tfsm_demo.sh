@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Record the tfsm_fire demo as a webm video.
+# Record the TextFSM auto-detect demo as a webm video.
 #
 # Pipeline:  asciinema rec → .cast file → agg renders frames → ffmpeg → .webm + .gif
 #
@@ -34,14 +34,14 @@ typeit() {
 }
 
 clear
-echo -e "\033[1;36m# netlog-ai · NEW: tfsm_fire auto-detect parser\033[0m"
-echo -e "\033[2m# scottpeterman/tfsm_fire wired in as a fallback parser\033[0m"
+echo -e "\033[1;36m# netlog-ai · TextFSM auto-detect parser (ntc-templates)\033[0m"
+echo -e "\033[2m# pip install netlog-ai[parse]\033[0m"
 sleep 1
 echo
 
 # ─── proof of install ─────────────────────────────────────────────────────────
-typeit ".venv/bin/pip show tfsm-fire | head -3"
-.venv/bin/pip show tfsm-fire | head -3
+typeit ".venv/bin/pip show ntc-templates | head -3"
+.venv/bin/pip show ntc-templates | head -3
 sleep 1.5
 echo
 

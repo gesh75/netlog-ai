@@ -377,7 +377,7 @@ def _later_storm_incidents(
     stamp_ref = _anchor_dt([*prefix, *missing], year)
     leftover_cats = {e.category for e in leftover}
     later_storm = _same_category_later_storm(
-        leftover, leftover_cats, missing, stamp_year,
+        leftover, leftover_cats, missing, stamp_ref,
     )
     if later_storm is not None:
         return later_storm
