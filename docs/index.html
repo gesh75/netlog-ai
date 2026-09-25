@@ -351,7 +351,7 @@
   <section class="hero" id="hero" aria-label="Introduction">
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <span class="tagchip"><span class="spark" aria-hidden="true"></span>v0.6.0 · causal console · sanitize-before-LLM</span>
+        <span class="tagchip"><span class="spark" aria-hidden="true"></span>v0.7.0 · incident handoff · sanitize-before-share</span>
         <h1 class="hero-title">netlog-ai</h1>
         <p class="hero-tag">Network logs in. <b>Ranked actions out.</b> A local, sanitize-first, multi-vendor AI log analyzer that turns raw syslog and CLI output into prioritized, copy-pastable root-cause playbooks.</p>
 
@@ -617,6 +617,7 @@
     NET -->|sanitized prompt| LLM
     LLM -->|5-phase playbook JSON| NET
     NET -->|ranked actions and CLI fixes| OP
+    NET -->|sanitized handoff paste| OP
     NET -->|tool results| AGENT
 
     classDef sys fill:#7c3aed,stroke:#c4b5fd,color:#f8fafc,stroke-width:2px
@@ -646,6 +647,7 @@
         SAN["sanitize.py redact gate"]
         CLS["classifier.py 80 regexes"]
         ANA["analyzer.py orchestrator"]
+        HND["handoff.py sanitized paste card"]
         SITE["site intel topology optimize copilot"]
     end
     subgraph BRAIN["Intelligence"]
@@ -659,6 +661,7 @@
     SRC --> ANA
     ADP --> ANA
     ANA --> SAN --> CLS
+    ANA --> HND --> SAN
     ANA --> SITE
     ANA --> LLMC
     LLMC -.fallback.-> KB
@@ -672,7 +675,7 @@
     class WEB,CLI,MCP entry
     class SRC,ADP ingest
     class SAN gate
-    class CLS,ANA,SITE core
+    class CLS,ANA,HND,SITE core
     class LLMC,KB brain</pre>
         </div>
       </div>
@@ -714,8 +717,10 @@
         end
     end
     AN->>AN: health_score 0-100 plus grade
-    AN-->>API: AnalysisResult JSON
-    API-->>OP: score actions CLI topology</pre>
+    AN->>SA: scrub handoff paste
+    SA-->>AN: redacted paste card
+    AN-->>API: AnalysisResult JSON including handoff
+    API-->>OP: score actions CLI topology paste card</pre>
         </div>
         <div class="diagram-card card reveal">
           <h3>Data Flow — the analysis pipeline</h3>
@@ -728,7 +733,8 @@
     GATE{{"sanitize gate"}}
     DEEP["Deep analysis 5-phase playbook"]
     SCORE["Health score 0-100 + A-F"]
-    OUT["Outputs SPA CLI MCP reports"]
+    CARD["Handoff paste score blast change window"]
+    OUT["Outputs SPA CLI MCP ticket paste"]
 
     RAW -->|adapters and connectors| EV
     EV -->|strip_ansi + regex KB| CE
@@ -736,8 +742,10 @@
     AI -->|top-N context| GATE
     GATE -->|LLM or rule KB| DEEP
     AI --> SCORE
+    SCORE --> CARD
+    CARD -->|sanitize before share| GATE
     DEEP --> OUT
-    SCORE --> OUT
+    GATE --> OUT
 
     classDef raw fill:#475569,stroke:#94a3b8,color:#f8fafc
     classDef stage fill:#7c3aed,stroke:#c4b5fd,color:#f8fafc
@@ -746,7 +754,7 @@
     classDef out fill:#a78bfa,stroke:#ddd6fe,color:#0b1220
 
     class RAW,EV raw
-    class CE,AI,DEEP stage
+    class CE,AI,DEEP,CARD stage
     class GATE gate
     class SCORE score
     class OUT out</pre>
@@ -818,12 +826,12 @@ pytest --cov=src --cov-report=term-missing</pre>
   <section id="roadmap" aria-labelledby="road-h">
     <div class="wrap">
       <p class="eyebrow">Status + plan</p>
-      <h2 class="title" id="road-h">0.6.0 shipped · 0.7 next</h2>
-      <p class="lead" style="margin-bottom:30px">v0.6.0 is the causal console: Grok as a first-class sanitize-first backend, a timeline of the incident, blast-radius, change-window correlation, a sanitize-diff viewer, a custom-rule editor, and SONiC + Cumulus classifier coverage. 423 tests.</p>
+      <h2 class="title" id="road-h">0.7.0 incident handoff</h2>
+      <p class="lead" style="margin-bottom:30px">v0.7.0 adds a sanitized paste card on top of the 0.6 causal console. The card is the health score, blast radius, change window, and top actions, run through the sanitize gate before it can be copied into a ticket. Raw syslog stays out.</p>
       <div class="grid features">
         <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>0.5.2 — shipped</h3><p>Fail-closed docker-exec allow-list, POP-scoped site prefixes, secret-sanitized template memory, incident-search API token, bounded custom regex, webhook payload sanitize.</p></article>
         <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>0.6.0 — shipped</h3><p>Grok (xAI) provider, causal timeline, blast-radius estimator, change-window correlator, sanitize-diff API + UI, custom-rule editor, SONiC orchagent/syncd/swss/teamd + Cumulus clagd/switchd/NVUE/PTMD patterns.</p></article>
-        <article class="card feat reveal"><div class="ico" aria-hidden="true">·</div><h3>0.7.0 — planned</h3><p>Multi-site comparison, Slack/Teams webhook simulator with redaction, cross-run Drain template UI, voice incident brief, PDF executive one-pager from the console.</p></article>
+        <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>0.7.0 — incident handoff</h3><p>Paste card on every analysis: score, blast radius, change window, and top actions, sanitized before share. Still planned later in 0.7: multi-site comparison, webhook simulator, Drain template UI, voice brief, PDF one-pager.</p></article>
       </div>
     </div>
   </section>
@@ -864,7 +872,7 @@ pytest --cov=src --cov-report=term-missing</pre>
     { icon: "🧠", title: "Local-first LLM, graceful fallback", desc: "Provider chain walks Ollama → Docker Model Runner → Anthropic Claude → xAI Grok, then degrades to a deterministic rule-based KB so the tool never hard-fails on a missing model. Grok is sanitize-first — it never sees unsanitized logs." },
     { icon: "🗺️", title: "Multi-layer topology", desc: "Cytoscape.js + ELK renders PHYSICAL, BGP, OSPF, and VXLAN as separate overlays on the same fabric, with AS/RID/VTEP on nodes and inferred link speed on edges." },
     { icon: "📄", title: "Executable remediation + reports", desc: "Every finding ships Junos set lines, EOS running-config patches, and FRR vtysh commands plus rollback/verify steps, exportable as Markdown/HTML/CSV/PDF." },
-    { icon: "⏱", title: "Causal timeline + blast radius", desc: "0.6 causal console: chronological incident chain with cause links (link-down → BGP/OSPF/LAG, config-commit → critical), a blast-radius estimator naming the epicenter, and a change-window correlator that flags commits inside the same window." },
+    { icon: "📋", title: "Sanitized incident handoff", desc: "0.7 paste card on every analysis: health score, blast radius, change window, and top actions, run through the sanitize gate before the text can be copied into a ticket or chat. Raw syslog is not included." },
     { icon: "🛡", title: "Sanitize diff + custom rule editor", desc: "See exactly what the LLM is allowed to see (per-rule redaction counts) and extend the classifier at runtime from the UI — custom rules run before the built-in KB." },
     { icon: "⌨️", title: "Keyboard-first, accessible PWA", desc: "WCAG-AA dark dashboard with 1/2/3 tab switching, Cmd/Ctrl+Enter to run, ARIA roles, prefers-reduced-motion, and an installable PWA manifest." }
   ];
@@ -874,7 +882,7 @@ pytest --cov=src --cov-report=term-missing</pre>
     "vanilla JS (no build)", "Cytoscape.js + ELK", "requests", "raw AF_UNIX socket HTTP",
     "subprocess (docker CLI)", "Ollama", "Docker Model Runner (OpenAI-compat)",
     "Anthropic Claude (claude-haiku-4-5)", "xAI Grok (grok-4)", "rule-based KB", "MCP SDK 2.x (MCPServer)",
-    "tfsm-fire / TextFSM (optional)", "pytest + pytest-cov + ruff", "Docker + docker-compose"
+    "ntc-templates / TextFSM (optional parse extra)", "pytest + pytest-cov + ruff", "Docker + docker-compose"
   ];
 
   const components = [
@@ -890,6 +898,7 @@ pytest --cov=src --cov-report=term-missing</pre>
     { name: "cli.py", tech: "Python argparse", resp: "Console entrypoint (ai-log-analyzer / netlog-ai) with serve, analyze, containers, and mcp subcommands." },
     { name: "topology_infer.py", tech: "Python", resp: "Multi-signal edge inference (BGP, MLAG, descriptions, subnets) feeding the multi-layer topology graph builder (topology.py)." },
     { name: "causal.py", tech: "Python", resp: "0.6 causal console: chronological timeline with cause links, blast-radius estimator, and change-window correlator. Wired into analyze() so Flask, CLI and MCP share the same surfaces." },
+    { name: "handoff.py", tech: "Python", resp: "0.7 paste card: health score, blast radius, change window, and top actions, sanitized before the text can be copied into a ticket or chat. Raw syslog is not included." },
     { name: "site_optimize.py", tech: "Python", resp: "Site-wide cross-device gap finder emitting split scores: fabric_design_score and operational_readiness_score with ALLOWED_HOSTNAMES anchoring." }
   ];
 

@@ -6,6 +6,15 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **0.7.0 incident handoff.** `handoff.incident_handoff` builds a paste card from the
+  health score, blast radius, change window, and top actions, then runs that
+  card through the sanitize gate. The analysis payload includes it as `handoff`.
+  Raw syslog stays out of the paste. Commercial NOC tools already post incident
+  stories into Slack and ServiceNow; this is the local preview that strips
+  secrets and public IPs before that paste.
+
 ### Fixed
 
 - **Restore auto-detection parsing** (#19). `tfsm-fire` stays off the dependency

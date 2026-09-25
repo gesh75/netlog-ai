@@ -24,6 +24,7 @@ from ai_log_analyzer.classifier import (
     LogEvent,
     iter_classify,
 )
+from ai_log_analyzer.handoff import incident_handoff
 from ai_log_analyzer.patterns import TemplateMiner, apply_template_store
 from ai_log_analyzer.sanitize import sanitize, sanitize_report
 from ai_log_analyzer.stability import StabilityTracker
@@ -109,6 +110,7 @@ class AnalysisResult:
     blast: dict = field(default_factory=dict)
     change_window: dict = field(default_factory=dict)
     sanitize_diff: dict = field(default_factory=dict)
+    handoff: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -129,6 +131,7 @@ class AnalysisResult:
             "blast": self.blast,
             "change_window": self.change_window,
             "sanitize_diff": self.sanitize_diff,
+            "handoff": self.handoff,
         }
 
 
@@ -715,7 +718,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
             "inside this window — treat as change-induced until proven otherwise."
         )
 
-    return AnalysisResult(
+    result = AnalysisResult(
         score=score, grade=grade, grade_label=grade_label,
         severity_counts=sev_counts, category_counts=cat_counts,
         action_items=action_items, top_devices=top_devices,
@@ -730,6 +733,8 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
         change_window=cw,
         sanitize_diff=sdiff,
     )
+    result.handoff = incident_handoff(result.to_dict())
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
