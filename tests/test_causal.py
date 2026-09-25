@@ -1,10 +1,12 @@
 """Causal console: timeline, blast radius, change-window correlator."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from ai_log_analyzer.analyzer import ActionItem, analyze
-from ai_log_analyzer.causal import blast_radius, build_timeline, change_window
+from ai_log_analyzer.causal import blast_radius, build_timeline, change_window, event_time
 from ai_log_analyzer.classifier import ClassifiedEvent, LogEvent
 
 pytestmark = pytest.mark.unit
@@ -105,6 +107,218 @@ def test_change_window_devices_follow_earliest_timestamp_not_input_order():
     assert cw["detected"] is True
     assert cw["count"] == 2
     assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_rfc3164_commit_before_later_iso_noise():
+    """CLI ``--frr`` (ISO) + ``--file`` (Junos RFC3164) must not invert order.
+
+    Lexicographic sort puts ``2026-08-29T09:56:00`` before ``Aug 29 09:55:00``
+    because ``'2' < 'A'``, so the later FRR host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="2026-08-29T09:56:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Aug 29 09:55:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_iso_commit_before_later_loki_epoch():
+    """Loki stores nanosecond unix timestamps; those sort before ISO as strings."""
+    late = datetime(2026, 8, 29, 9, 56, 0, tzinfo=timezone.utc)
+    events = [
+        _ce(timestamp=str(int(late.timestamp() * 1e9)), category="config",
+            severity="low", hostname="rt-02",
+            description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2026-08-29T09:55:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_offset_iso_before_later_zulu():
+    """Aware ISO must compare as UTC instants, not stripped wall clocks.
+
+    ``10:00+05:00`` is 05:00 UTC. Stripping tzinfo left it at 10:00 naive,
+    after ``09:55Z``, so the later Z host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="2026-08-29T09:55:00Z", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2026-08-29T10:00:00+05:00", category="config",
+            severity="low", hostname="rt-01",
+            description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_rfc3164_feb29_before_later_iso():
+    """29 Feb RFC3164 must parse. Year 1900 is not a leap year, so the
+    yearless sentinel has to be one (then restamped from the ISO sibling).
+    """
+    events = [
+        _ce(timestamp="2024-02-29T09:56:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Feb 29 09:55:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_rfc3164_dec31_before_later_jan_iso():
+    """Year-end Junos RFC3164 must not inherit January's calendar year.
+
+    A single sibling year restamped ``Dec 31`` as ``2025-12-31``, after
+    ``2025-01-01``, so the later January host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="2025-01-01T00:10:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_yearless_dec31_before_later_jan():
+    """RFC3164-only Dec/Jan pair must stay chronological without an ISO sibling."""
+    events = [
+        _ce(timestamp="Jan  1 00:10:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-01", "rt-02"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_change_window_names_yearless_dec31_before_jan_at_year_midpoint(monkeypatch):
+    """Independent restamp-vs-now inverts Dec/Jan around 2 July.
+
+    Both stamps pick the same calendar year when each is nearest to
+    mid-year ``now()``, so ``Jan 1`` sorts first. Pin the first yearless
+    stamp to now, then restamp the other against that sibling.
+    """
+    monkeypatch.setattr(
+        "ai_log_analyzer.causal._now",
+        lambda: datetime(2026, 7, 2, 12, 0, 0),
+    )
+    jan_first = [
+        _ce(timestamp="Jan  1 00:10:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    dec_first = [jan_first[1], jan_first[0]]
+    for events in (jan_first, dec_first):
+        cw = change_window(events)
+        assert cw["devices"] == ["rt-01", "rt-02"]
+        nodes = build_timeline(events)
+        assert [n["device"] for n in nodes] == ["rt-01", "rt-02"]
+
+
+def test_event_time_int_year_is_literal_calendar_year():
+    """An int year must not be treated as 1 January for nearest-instant restamp.
+
+    ``Aug 29`` nearest to ``2026-01-01`` is ``2025-08-29``, which would
+    invert a mixed August RFC3164 + later 2026 ISO commit.
+    """
+    ev = _ce(timestamp="Aug 29 09:55:00", category="config", severity="low",
+             hostname="rt-01", description="Configuration change committed")
+    assert event_time(ev, 2026) == datetime(2026, 8, 29, 9, 55, 0)
+    assert event_time(ev, datetime(2026, 8, 29, 9, 56, 0)) == datetime(
+        2026, 8, 29, 9, 55, 0,
+    )
+
+
+def test_change_window_names_june_iso_before_later_rfc3164_dec():
+    """A mid-year dated sibling must keep December in the same calendar year.
+
+    Blind nearest-year restamped ``Dec 31`` as ``2024-12-31`` next to
+    ``2025-06-15``, so the later December host stole devices[0].
+    """
+    events = [
+        _ce(timestamp="Dec 31 23:50:00", category="config", severity="low",
+            hostname="rt-01", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+        _ce(timestamp="2025-06-15T12:00:00", category="config", severity="low",
+            hostname="rt-02", description="Configuration change committed",
+            sample_message="commit complete confirmed"),
+    ]
+    cw = change_window(events)
+    assert cw["devices"] == ["rt-02", "rt-01"]
+    nodes = build_timeline(events)
+    assert [n["device"] for n in nodes] == ["rt-02", "rt-01"]
+
+
+def test_analyze_change_window_june_iso_before_later_rfc3164_dec():
+    """Streaming reserve must not wrap December behind a June ISO sibling."""
+    events = [
+        LogEvent("2025-06-15T12:00:00", "rt-02", "mgd", "info",
+                 "commit complete confirmed"),
+        LogEvent("Dec 31 23:50:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-02"
+    assert "rt-01" in result.change_window["devices"]
+
+
+def test_analyze_change_window_year_end_rfc3164_names_earliest_host():
+    """Streaming reserve + change_window must agree across Dec/Jan."""
+    events = [
+        LogEvent("Dec 31 23:50:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+        LogEvent("2025-01-01T00:10:00", "rt-02", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-01"
+    assert "rt-02" in result.change_window["devices"]
+
+
+def test_analyze_change_window_mixed_rfc3164_and_iso_names_earliest_host():
+    """Streaming reserve + change_window must agree on mixed vendor stamps."""
+    events = [
+        LogEvent("Aug 29 09:55:00", "rt-01", "mgd", "info",
+                 "commit complete confirmed"),
+    ]
+    events.extend(
+        LogEvent(
+            f"2026-08-29T09:56:{i:02d}", "rt-02", "mgd", "info",
+            "commit complete confirmed",
+        )
+        for i in range(55)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["devices"][0] == "rt-01"
+    assert "rt-02" in result.change_window["devices"]
 
 
 def test_analyze_exposes_causal_fields():
@@ -516,6 +730,55 @@ def test_timeline_surfaces_later_storm_despite_intermediate_leftover_category():
     ) >= 8
 
 
+def test_timeline_surfaces_mixed_rfc3164_iso_storm_as_one_cluster():
+    """A mixed-format BGP storm must stay one leftover cluster.
+
+    Sorting restamps RFC3164 from a sibling year, but leftover-cluster
+    gaps used raw ``_parse_event_ts`` (yearless sentinel vs ISO). Adjacent
+    mixed-format rows then looked ~126 years apart, so ``preferred[-1]``
+    kept a single event and the floor showed 0–1 routing rows.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    for i in range(20):
+        ts = (
+            f"Aug 29 10:00:{i:02d}" if i % 2 == 0
+            else f"2026-08-29T10:00:{i:02d}"
+        )
+        events.append(
+            _ce(
+                timestamp=ts,
+                category="routing",
+                severity="high",
+                description="BGP peer down / connect failure",
+                hostname="spine-01",
+            )
+        )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
 def test_timeline_surfaces_later_storm_with_rfc3164_leftover_overflow():
     """Syslog-stamped leftover overflow must still yield the later storm.
 
@@ -762,6 +1025,223 @@ def test_timeline_surfaces_later_storm_despite_larger_intermediate_hardware():
             hostname="spine-01",
         )
         for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
+def test_timeline_surfaces_later_same_category_storm_despite_trailing_other():
+    """Morning BGP leftover + afternoon BGP must not lose the later storm.
+
+    Category-only leftover skip treated the spine routing burst as
+    overflow (same leftover category), then last-non-leftover-cluster
+    pulled the trailing interface rows. Action items still named
+    spine-01; the causal timeline showed 0 of its outage rows.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T11:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-03",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
+def test_timeline_surfaces_later_same_category_storm_not_recovery():
+    """Same-category leftover + storm + recovery must floor the collapse.
+
+    After skipping leftover-category rows the fallback slice was the
+    newest missing rows — BGP established — so the timeline closed on
+    healing and hid the 10:00 spine down burst.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T11:00:{i:02d}",
+            category="routing",
+            severity="medium",
+            description="BGP peer established",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert sum(
+        1 for n in nodes
+        if n.get("device") == "spine-01"
+        and n.get("title") == "BGP peer down / connect failure"
+    ) >= 8
+    assert not any(
+        n.get("title") == "BGP peer established" for n in nodes
+    )
+
+
+def test_timeline_surfaces_later_same_category_storm_despite_trailing_same_category():
+    """Trailing leftover-signature routing must not steal a later storm.
+
+    Last-stormish selection treated afternoon leftover-category flaps as
+    the outage, so the 10:00 spine collapse stayed hidden (0 routing)
+    while leaf-03 leftover filled the floor.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T11:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-03",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+    assert not any(n.get("device") == "leaf-03" for n in nodes)
+
+
+def test_timeline_surfaces_later_same_category_storm_when_leftover_resumes():
+    """Leftover routing that resumes immediately before the storm is overflow.
+
+    A leftover-headed 60s cluster (leaf-01 flaps at 10:00:00 then
+    spine-01 BGP at 10:00:10) filled the floor with leftover hosts.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(8)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(10, 30)
     )
     nodes = build_timeline(events, limit=24)
     assert len(nodes) == 24
@@ -1021,3 +1501,95 @@ def test_analyze_timeline_keeps_storm_after_config_flood():
     assert any("BGP" in (n.get("title") or "") for n in result.timeline)
     assert sum(1 for n in result.timeline if n.get("category") != "config") >= 8
     assert all(e.category != "config" for e in result.classified_events)
+
+
+def test_analyze_timeline_keeps_same_category_storm_after_routing_leftover():
+    """Morning leaf BGP leftover must not hide an afternoon spine collapse.
+
+    Real classifier messages (hold-timer / LINK-3-UPDOWN) take the same
+    path as the console: leftover_cats={routing} skipped the spine storm,
+    then the floor pulled trailing interface rows. Action items still
+    reported both hosts; the timeline and blast epicenter did not.
+    """
+    events = [
+        LogEvent(
+            f"2026-08-29T09:00:{i:02d}", "leaf-01", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.2 (External AS 65002): hold timer expired",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        LogEvent(
+            "2026-08-29T09:58:00", "rt-01", "mgd", "info",
+            "commit complete confirmed",
+        )
+    )
+    events.extend(
+        LogEvent(
+            f"2026-08-29T10:00:{i:02d}", "spine-01", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.1 (External AS 65001): hold timer expired",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        LogEvent(
+            f"2026-08-29T11:00:{i:02d}", "leaf-03", "Ebra", "err",
+            "%LINK-3-UPDOWN: Interface Ethernet49/1, changed state to down",
+        )
+        for i in range(20)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["detected"] is True
+    assert "rt-01" in result.change_window["devices"]
+    assert sum(
+        1 for n in result.timeline
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+    assert any(
+        a.category == "routing" and "spine-01" in a.devices
+        for a in result.action_items
+    )
+
+
+def test_analyze_timeline_keeps_same_category_storm_despite_trailing_leftover():
+    """analyze() must keep the spine collapse when leftover routing resumes later.
+
+    Real classifier messages: leftover hold-timer on leaf-01, afternoon
+    hold-timer on spine-01, then leftover-signature hold-timer on leaf-03.
+    Last-stormish floored leaf-03 and hid spine-01.
+    """
+    events = [
+        LogEvent(
+            f"2026-08-29T09:00:{i:02d}", "leaf-01", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.2 (External AS 65002): hold timer expired",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        LogEvent(
+            "2026-08-29T09:58:00", "rt-01", "mgd", "info",
+            "commit complete confirmed",
+        )
+    )
+    events.extend(
+        LogEvent(
+            f"2026-08-29T10:00:{i:02d}", "spine-01", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.1 (External AS 65001): hold timer expired",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        LogEvent(
+            f"2026-08-29T11:00:{i:02d}", "leaf-03", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.3 (External AS 65003): hold timer expired",
+        )
+        for i in range(20)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["detected"] is True
+    assert "rt-01" in result.change_window["devices"]
+    assert sum(
+        1 for n in result.timeline
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+    assert not any(n.get("device") == "leaf-03" for n in result.timeline)
