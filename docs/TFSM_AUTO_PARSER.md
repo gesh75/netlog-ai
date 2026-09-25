@@ -1,28 +1,12 @@
-# Auto-Detection Parser (tfsm_fire integration)
+# Auto-Detection Parser
 
-> ## ⚠️ Upstream status: withdrawn (July 2026)
->
-> `tfsm-fire` has been **removed from PyPI** and `github.com/scottpeterman/tfsm_fire` has
-> been **deleted**. Both return 404. There is no surviving fork, mirror, renamed
-> distribution, or Wayback snapshot, and the template-DB raw URL is dead too.
->
-> It was installable as recently as **2026-07-13** (netlog-ai CI installed
-> `tfsm_fire-0.1.0-py3-none-any.whl` that day), so pre-existing environments may still
-> have it cached. But it can no longer be obtained from anywhere.
->
-> **What changed in netlog-ai v0.5.1:** the `parse` extra was removed and `all` reduced
-> to `mcp` only. Keeping the dependency made `pip install netlog-ai[parse]` and
-> `pip install netlog-ai[all]` hard-fail for every user, and broke CI on all Python
-> versions. A `git+https://` direct reference was not an option: the repo is gone, and
-> PyPI rejects direct references in uploaded metadata regardless.
->
-> **What did not change:** `adapters/tfsm_auto.py` and its API are untouched. The adapter
-> is a strict fallback that nothing else depends on, and it degrades to no-match when the
-> package or DB is absent. If you have a copy of both, everything below still works —
-> see [Installation](#installation).
+netlog-ai scores [ntc-templates](https://github.com/networktocode/ntc-templates) TextFSM
+templates as an **opt-in fallback parser** for arbitrary CLI output where the platform
+and command aren't known up-front.
 
-netlog-ai integrates `tfsm_fire` as an **opt-in fallback parser** for arbitrary CLI output
-where the platform and command aren't known up-front.
+`tfsm-fire` (the previous engine) was withdrawn from PyPI in July 2026. The `parse`
+extra no longer depends on it. The scorer lives in `adapters/tfsm_auto.py` and reads
+templates from the installed `ntc-templates` package.
 
 ## Why
 
@@ -32,41 +16,18 @@ Our hand-written FRR / syslog parsers handle the lab cleanly, but break down for
 - MCP tool calls where the LLM hands us raw text without telling us the vendor
 - Heterogeneous device inventory where you don't know which template applies
 
-`tfsm_fire` solves this by scoring every TextFSM template in a SQLite DB (~700 templates
-from ntc-templates) against the input, then returning the one with the highest score on a
+The adapter tries each matching template, then returns the one with the highest score on a
 0–100 scale. We use it **only as a fallback** — primary regex paths stay fast.
 
 ## Installation
 
-There is no longer an extra for this — `pip install netlog-ai[parse]` was removed in
-v0.5.1 because the dependency is unobtainable (see the banner above). Both pieces must
-now be supplied manually.
-
-**1. The package.** You need a copy of `tfsm-fire` 0.1.0 (imports as `tfire`, depends on
-`textfsm>=1.1.3`). If you have one in an existing environment, an old wheel, or a private
-index:
-
 ```bash
-pip install textfsm
-pip install /path/to/tfsm_fire-0.1.0-py3-none-any.whl   # or: pip install -e /path/to/checkout
+pip install netlog-ai[parse]
 ```
 
-**2. The template DB** (~576 KB SQLite). This was never bundled in the pip package — it
-lived only in the upstream GitHub repo, which is gone. The auto-download will fail, so
-point the adapter at your own copy:
-
-```bash
-export TFSM_DB_PATH=/opt/netlog-ai/tfsm_templates.db     # local copy, or
-export TFSM_DB_URL=https://your-mirror.example/tfsm_templates.db
-```
-
-The templates came from [networktocode/ntc-templates](https://github.com/networktocode/ntc-templates),
-which is still actively maintained — a compatible DB can be rebuilt from that source if
-you no longer have the original.
-
-If either piece is missing, `is_available()` returns `False`, `auto_parse()` returns an
-unmatched `ParseResult`, and `tests/test_tfsm_auto.py` skips at module level. Nothing
-raises and no other feature is affected.
+That extra installs `textfsm` and `ntc-templates`. `all` includes it too. If the extra
+is missing, `is_available()` returns `False` and `auto_parse()` returns an unmatched
+`ParseResult`. Nothing raises and no other feature is affected.
 
 ## Quick start
 
@@ -135,7 +96,7 @@ records = parse_output(cmd, filter_hint="bgp_summary")
 
 ### `is_available() -> bool`
 
-Cheap probe — use it to gate UI affordances when `tfsm-fire` isn't installed.
+Cheap probe — use it to gate UI affordances when the `parse` extra isn't installed.
 
 ## Scoring guide
 
@@ -146,8 +107,10 @@ Cheap probe — use it to gate UI affordances when `tfsm-fire` isn't installed.
 | 40–49    | Borderline — consider as a hint, not a fact |
 | 0–39     | Low confidence — usually a false positive    |
 
-The scorer rewards: record count, field richness, population rate, and consistency across
-records. See `tfire.tfsm_fire._calculate_template_score` upstream for the math.
+The scorer rewards record count, field richness, population rate, and consistency across
+records, then scales that by how much of the input the records account for. A template
+that only lifts a few words out of prose stays under the usual `min_score=40` bar.
+The math is `_calculate_template_score` in `adapters/tfsm_auto.py`.
 
 ## Filter hints by use case
 
@@ -160,8 +123,8 @@ records. See `tfire.tfsm_fire._calculate_template_score` upstream for the math.
 | `"route"`      | Routing table dumps                             |
 | `"vlan"`       | VLAN tables                                     |
 
-Always pass a hint when you can — full scans iterate 700+ templates and are noticeably
-slower than filtered ones.
+Always pass a hint when you can — a full scan walks every installed ntc-templates file
+and is noticeably slower than a filtered one.
 
 ## Why we use it as a fallback only
 
@@ -169,25 +132,20 @@ slower than filtered ones.
 2. **TextFSM templates can mismatch** — a Cisco LLDP output may score highest against a
    Juniper template (both use similar column layouts). For known-vendor flows we want
    deterministic parsers, not best-guess.
-3. **The template DB is a network dependency** — relying on it for hot paths would create
-   a cold-start latency spike on the first parse of every process.
+3. **A full template scan is slow** — the first call loads the ntc-templates index, and
+   an unfiltered parse walks every template. Known-vendor flows should not pay that cost.
 
-The right mental model: tfsm_fire is the *parser of last resort* when nothing else applies.
+The right mental model: this adapter is the *parser of last resort* when nothing else applies.
 
-## Lessons learned during integration
+## Notes
 
-- The pip package installs as the Python module `tfire`, not `tfsm_fire`. The upstream
-  README's `from tfsm_fire import TextFSMAutoEngine` example is wrong — use
-  `from tfire.tfsm_fire import TextFSMAutoEngine`.
-- The 576 KB SQLite template DB ships **only** in the GitHub repo, not the wheel.
-- The engine is thread-safe (one SQLite connection per thread via `threading.local`), so
-  a module-level singleton is safe.
-- Per-template parse failures are swallowed inside `find_best_template` — exceptions
-  bubble up only on SQLite / DB-level errors.
+- Templates ship inside the `ntc-templates` wheel. There is no runtime download.
+- The index is cached on the module after the first successful parse.
+- Per-template parse failures are swallowed. `auto_parse` returns an unmatched result
+  instead of raising.
 
 ## References
 
-- Upstream repo: `https://github.com/scottpeterman/tfsm_fire` — **deleted, 404 as of 2026-07-28**
-- Template source: https://github.com/networktocode/ntc-templates (still maintained)
-- Our adapter: [`src/ai_log_analyzer/adapters/tfsm_auto.py`](../src/ai_log_analyzer/adapters/tfsm_auto.py)
+- Template source: https://github.com/networktocode/ntc-templates
+- Adapter: [`src/ai_log_analyzer/adapters/tfsm_auto.py`](../src/ai_log_analyzer/adapters/tfsm_auto.py)
 - Tests: [`tests/test_tfsm_auto.py`](../tests/test_tfsm_auto.py)
