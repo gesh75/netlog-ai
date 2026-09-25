@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from ai_log_analyzer.sanitize import sanitize_report
+from ai_log_analyzer.work_shift import shift_brief, ticket_fields
 
 _MAX_ACTIONS = 5
 
@@ -56,9 +57,12 @@ def incident_handoff(result: dict[str, Any]) -> dict[str, Any]:
     """
     draft = "\n".join(_lines(result))
     report = sanitize_report(draft, mask_pii=True)
+    notes = report["sanitized"]
     return {
-        "paste": report["sanitized"],
+        "paste": notes,
         "redactions": report["total"],
         "by_rule": report["by_rule"],
         "safe_to_share": True,
+        "ticket": ticket_fields(result, notes),
+        "brief": shift_brief(result),
     }

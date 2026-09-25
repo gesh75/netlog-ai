@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,18 @@ _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9._/-]{2,}")
 
 def _tokens(text: str) -> set[str]:
     return set(_TOKEN_RE.findall(text.lower()))
+
+
+def _parse_stamp(stamp: str) -> datetime | None:
+    if not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 class IncidentStore:
@@ -77,6 +90,34 @@ class IncidentStore:
             "last_seen": max(r.get("generated_at", "") for r in matches),
             "devices": sorted(devices)[:10],
         }
+
+    def repeats(self, *, now: datetime, days: int = 7) -> list[dict]:
+        """Host + category pairs seen at least twice inside ``days``.
+
+        ``now`` is the clock for the window so tests can pin it. Counts include
+        the current run when it has already been recorded.
+        """
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        cutoff = now - timedelta(days=days)
+        counts: dict[tuple[str, str], int] = {}
+        last: dict[tuple[str, str], str] = {}
+        for record in self._records:
+            seen = _parse_stamp(str(record.get("generated_at") or ""))
+            if seen is None or seen < cutoff:
+                continue
+            category = str(record.get("category") or "")
+            for host in record.get("devices") or []:
+                key = (str(host), category)
+                counts[key] = counts.get(key, 0) + 1
+                last[key] = str(record.get("generated_at") or "")
+        rows = [
+            {"hostname": host, "category": category, "count": count, "last_seen": last[(host, category)]}
+            for (host, category), count in counts.items()
+            if count >= 2
+        ]
+        rows.sort(key=lambda row: (-row["count"], row["hostname"]))
+        return rows[:8]
 
     def find_similar(self, query: str, top_n: int = 5) -> list[dict]:
         """Free-text token-overlap search across the journal (Jaccard)."""
