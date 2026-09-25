@@ -29,6 +29,12 @@ _TIMELINE_INCIDENT_FLOOR = 8
 # sit at least this far apart. Morning flaps are seconds apart; the
 # leftover tests place the BGP storm an hour later.
 _LEFTOVER_CLUSTER_GAP_S = 60.0
+# Morning leftover and the afternoon outage can share a category
+# (BGP flaps → later BGP collapse). Category-only skip then treats the
+# real storm as leftover overflow. These are the leftover categories
+# where a later same-category burst on the timeline is still the storm.
+_SAME_CATEGORY_STORM = frozenset({"routing"})
+_STORM_SEVERITY = frozenset({"critical", "high"})
 _RFC3164_MONTHS = {
     name: idx
     for idx, name in enumerate(
@@ -167,6 +173,99 @@ def _gap_clusters(
     return clusters
 
 
+def _is_stormish(cluster: list[ClassifiedEvent], storm_cats: set[str]) -> bool:
+    """True when a gap-cluster carries a high/critical leftover-storm category."""
+    return any(
+        e.category in storm_cats and e.severity in _STORM_SEVERITY
+        for e in cluster
+    )
+
+
+def _leftover_host_only(
+    cluster: list[ClassifiedEvent], leftover_cats: set[str], leftover_hosts: set[str],
+) -> bool:
+    """True when leftover-category rows in ``cluster`` stay on leftover hosts."""
+    return all(
+        e.hostname in leftover_hosts
+        for e in cluster
+        if e.category in leftover_cats
+    )
+
+
+def _same_category_later_storm(
+    leftover: list[ClassifiedEvent],
+    leftover_cats: set[str],
+    missing: list[ClassifiedEvent],
+    stamp_year: int,
+) -> list[ClassifiedEvent] | None:
+    """Floor a later leftover-category storm; skip leftover overflow.
+
+    Category-only skip treats a later routing collapse as leftover
+    overflow. Taking the last high/critical leftover-category cluster
+    then lets trailing leftover-signature flaps steal the floor, and a
+    leftover-headed cluster (flaps resume, then BGP <60s later) fills
+    the floor with leftover hosts. Keep the first later storm after
+    leftover-host overflow; strip a leftover-host prefix that shares
+    that cluster.
+    """
+    storm_cats = leftover_cats & _SAME_CATEGORY_STORM
+    if not storm_cats:
+        return None
+    leftover_hosts = {e.hostname for e in leftover}
+    leftover_last = leftover[-1]
+    clusters = _gap_clusters(missing, stamp_year)
+    idx = 0
+    while idx < len(clusters):
+        cluster = clusters[idx]
+        if cluster[0].category not in leftover_cats:
+            break
+        # Leftover-host burst still abutting leftover[-1] is overflow.
+        # A new-host storm (or a same-host storm after the 60s gap) is not.
+        if (
+            not _leftover_host_only(cluster, leftover_cats, leftover_hosts)
+            or _event_gap_seconds(leftover_last, cluster[0], stamp_year)
+            >= _LEFTOVER_CLUSTER_GAP_S
+        ):
+            break
+        idx += 1
+    remaining = clusters[idx:]
+    stormish = [c for c in remaining if _is_stormish(c, storm_cats)]
+    if not stormish:
+        return None
+    has_new_host = any(
+        e.hostname not in leftover_hosts
+        for cluster in stormish
+        for e in cluster
+        if e.category in storm_cats and e.severity in _STORM_SEVERITY
+    )
+    if has_new_host:
+        stormish = [
+            c for c in stormish
+            if any(
+                e.hostname not in leftover_hosts
+                and e.category in storm_cats
+                and e.severity in _STORM_SEVERITY
+                for e in c
+            )
+        ]
+    if not stormish:
+        return None
+    chosen = list(stormish[0])
+    while (
+        len(chosen) > 1
+        and chosen[0].category in leftover_cats
+        and chosen[0].hostname in leftover_hosts
+        and any(
+            e.hostname not in leftover_hosts
+            and e.category in storm_cats
+            and e.severity in _STORM_SEVERITY
+            for e in chosen[1:]
+        )
+    ):
+        chosen = chosen[1:]
+    return chosen
+
+
 def _later_storm_incidents(
     prefix: list[ClassifiedEvent],
     missing: list[ClassifiedEvent],
@@ -182,6 +281,11 @@ def _later_storm_incidents(
     starts soon after leftover flaps), drop later clusters that still
     share a leftover category (afternoon flaps of the same signature),
     and take the last remaining cluster.
+    If leftover itself is a storm category (routing), a later
+    high/critical cluster of that category is the outage — do not skip
+    it as overflow or let trailing leftover-category / other-category /
+    recovery rows win. Leftover-host flaps that resume immediately
+    before that storm are still overflow.
     If every later cluster is leftover-category (same-signature storm)
     or stamps cannot be clustered, fall back to the last cluster / the
     newest floor-sized slice.
@@ -191,6 +295,11 @@ def _later_storm_incidents(
         return missing
     stamp_year = _reference_year([*prefix, *missing]) if year is None else year
     leftover_cats = {e.category for e in leftover}
+    later_storm = _same_category_later_storm(
+        leftover, leftover_cats, missing, stamp_year,
+    )
+    if later_storm is not None:
+        return later_storm
     idx = 0
     # Leftover-category overflow is leftover whether it abuts the prefix
     # or resumes after a commit / time gap. Requiring a <60s gap from

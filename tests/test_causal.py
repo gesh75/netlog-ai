@@ -912,6 +912,223 @@ def test_timeline_surfaces_later_storm_despite_larger_intermediate_hardware():
     ) >= 8
 
 
+def test_timeline_surfaces_later_same_category_storm_despite_trailing_other():
+    """Morning BGP leftover + afternoon BGP must not lose the later storm.
+
+    Category-only leftover skip treated the spine routing burst as
+    overflow (same leftover category), then last-non-leftover-cluster
+    pulled the trailing interface rows. Action items still named
+    spine-01; the causal timeline showed 0 of its outage rows.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T11:00:{i:02d}",
+            category="interface",
+            description="Interface link down",
+            hostname="leaf-03",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
+def test_timeline_surfaces_later_same_category_storm_not_recovery():
+    """Same-category leftover + storm + recovery must floor the collapse.
+
+    After skipping leftover-category rows the fallback slice was the
+    newest missing rows — BGP established — so the timeline closed on
+    healing and hid the 10:00 spine down burst.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T11:00:{i:02d}",
+            category="routing",
+            severity="medium",
+            description="BGP peer established",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert sum(
+        1 for n in nodes
+        if n.get("device") == "spine-01"
+        and n.get("title") == "BGP peer down / connect failure"
+    ) >= 8
+    assert not any(
+        n.get("title") == "BGP peer established" for n in nodes
+    )
+
+
+def test_timeline_surfaces_later_same_category_storm_despite_trailing_same_category():
+    """Trailing leftover-signature routing must not steal a later storm.
+
+    Last-stormish selection treated afternoon leftover-category flaps as
+    the outage, so the 10:00 spine collapse stayed hidden (0 routing)
+    while leaf-03 leftover filled the floor.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T11:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-03",
+        )
+        for i in range(20)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+    assert not any(n.get("device") == "leaf-03" for n in nodes)
+
+
+def test_timeline_surfaces_later_same_category_storm_when_leftover_resumes():
+    """Leftover routing that resumes immediately before the storm is overflow.
+
+    A leftover-headed 60s cluster (leaf-01 flaps at 10:00:00 then
+    spine-01 BGP at 10:00:10) filled the floor with leftover hosts.
+    """
+    events = [
+        _ce(
+            timestamp=f"2026-08-29T09:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        _ce(
+            timestamp="2026-08-29T09:58:00",
+            category="config",
+            severity="low",
+            description="Configuration change committed",
+            hostname="rt-01",
+        )
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            description="BGP peer down / connect failure",
+            hostname="leaf-01",
+        )
+        for i in range(8)
+    )
+    events.extend(
+        _ce(
+            timestamp=f"2026-08-29T10:00:{i:02d}",
+            category="routing",
+            severity="high",
+            description="BGP peer down / connect failure",
+            hostname="spine-01",
+        )
+        for i in range(10, 30)
+    )
+    nodes = build_timeline(events, limit=24)
+    assert len(nodes) == 24
+    assert any(n.get("category") == "config" and n.get("device") == "rt-01" for n in nodes)
+    assert sum(
+        1 for n in nodes
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+
+
 def test_timeline_floor_swaps_late_commits_not_the_storm():
     """After flooring later incidents, pin true late commits by swapping
     remaining early commits — do not evict the outage just surfaced.
@@ -1161,3 +1378,95 @@ def test_analyze_timeline_keeps_storm_after_config_flood():
     assert any("BGP" in (n.get("title") or "") for n in result.timeline)
     assert sum(1 for n in result.timeline if n.get("category") != "config") >= 8
     assert all(e.category != "config" for e in result.classified_events)
+
+
+def test_analyze_timeline_keeps_same_category_storm_after_routing_leftover():
+    """Morning leaf BGP leftover must not hide an afternoon spine collapse.
+
+    Real classifier messages (hold-timer / LINK-3-UPDOWN) take the same
+    path as the console: leftover_cats={routing} skipped the spine storm,
+    then the floor pulled trailing interface rows. Action items still
+    reported both hosts; the timeline and blast epicenter did not.
+    """
+    events = [
+        LogEvent(
+            f"2026-08-29T09:00:{i:02d}", "leaf-01", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.2 (External AS 65002): hold timer expired",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        LogEvent(
+            "2026-08-29T09:58:00", "rt-01", "mgd", "info",
+            "commit complete confirmed",
+        )
+    )
+    events.extend(
+        LogEvent(
+            f"2026-08-29T10:00:{i:02d}", "spine-01", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.1 (External AS 65001): hold timer expired",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        LogEvent(
+            f"2026-08-29T11:00:{i:02d}", "leaf-03", "Ebra", "err",
+            "%LINK-3-UPDOWN: Interface Ethernet49/1, changed state to down",
+        )
+        for i in range(20)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["detected"] is True
+    assert "rt-01" in result.change_window["devices"]
+    assert sum(
+        1 for n in result.timeline
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+    assert any(
+        a.category == "routing" and "spine-01" in a.devices
+        for a in result.action_items
+    )
+
+
+def test_analyze_timeline_keeps_same_category_storm_despite_trailing_leftover():
+    """analyze() must keep the spine collapse when leftover routing resumes later.
+
+    Real classifier messages: leftover hold-timer on leaf-01, afternoon
+    hold-timer on spine-01, then leftover-signature hold-timer on leaf-03.
+    Last-stormish floored leaf-03 and hid spine-01.
+    """
+    events = [
+        LogEvent(
+            f"2026-08-29T09:00:{i:02d}", "leaf-01", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.2 (External AS 65002): hold timer expired",
+        )
+        for i in range(32)
+    ]
+    events.append(
+        LogEvent(
+            "2026-08-29T09:58:00", "rt-01", "mgd", "info",
+            "commit complete confirmed",
+        )
+    )
+    events.extend(
+        LogEvent(
+            f"2026-08-29T10:00:{i:02d}", "spine-01", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.1 (External AS 65001): hold timer expired",
+        )
+        for i in range(20)
+    )
+    events.extend(
+        LogEvent(
+            f"2026-08-29T11:00:{i:02d}", "leaf-03", "rpd", "err",
+            "bgp_connect_failed: peer 10.0.0.3 (External AS 65003): hold timer expired",
+        )
+        for i in range(20)
+    )
+    result = analyze(events, use_llm=False)
+    assert result.change_window["detected"] is True
+    assert "rt-01" in result.change_window["devices"]
+    assert sum(
+        1 for n in result.timeline
+        if n.get("category") == "routing" and n.get("device") == "spine-01"
+    ) >= 8
+    assert not any(n.get("device") == "leaf-03" for n in result.timeline)
