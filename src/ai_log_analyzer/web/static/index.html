@@ -1112,7 +1112,7 @@
       <span class="brand-title">AI Log Analyzer</span>
       <!-- Static fallback only — app.js overwrites this from /api/health,
            so the badge always tracks the installed package version -->
-      <span class="brand-version">v0.3</span>
+      <span class="brand-version">v0.7.0</span>
     </div>
   </div>
   <div class="header-spacer"></div>
@@ -1229,8 +1229,8 @@
                The sticky-run-row class pins this row to the bottom of the sidebar's scroll
                container so it remains visible on short viewports (≤ ~760px tall). -->
           <div class="sticky-run-row" style="display:flex;gap:6px;align-items:stretch;">
-            <button id="run-btn" class="primary" aria-label="Run log analysis (Ctrl/Cmd+Enter)" title="Run log analysis (Ctrl/Cmd+Enter)"
-                    style="flex:1;margin-top:0;">▶ Run Analysis</button>
+            <button id="run-btn" class="primary" aria-label="Select a container before running" title="Select at least one lab container" disabled
+                    style="flex:1;margin-top:0;">Select a container</button>
             <button class="secondary" id="reload-containers" aria-label="Reload lab containers list" title="Reload lab containers"
                     style="width:auto;margin-top:0;padding:9px 12px;font-size:13px;flex:0 0 auto;">↻</button>
           </div>
@@ -1256,6 +1256,7 @@
             <option value="high">high</option>
             <option value="critical">critical</option>
           </select>
+          <button id="tail-listen-btn" class="secondary" type="button">Listen on UDP 5514</button>
           <button id="tail-btn" class="secondary" aria-label="Start or stop live tail">▶ Start Live Tail</button>
           <div class="hint" style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45;">
             Streams classified events from a registered <code style="background:var(--bg-2);padding:0 4px;border-radius:3px;">syslog</code>
@@ -1466,6 +1467,14 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="panel" id="handoff-panel" style="display:none;">
+      <h2>📋 Shift brief <span class="h2-count" id="handoff-posted"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Paste this into the ticket. It is already sanitized. Nothing is posted from this screen.</p>
+      <pre id="handoff-brief" class="row-msg" style="white-space:pre-wrap;"></pre>
+      <p id="handoff-ticket-meta" class="row-msg" style="margin:8px 0;"></p>
+      <pre id="handoff-notes" class="row-msg" style="white-space:pre-wrap;max-height:180px;overflow:auto;"></pre>
     </div>
 
     <div class="panel" id="summary-panel" style="display:none;">
