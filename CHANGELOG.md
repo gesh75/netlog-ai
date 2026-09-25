@@ -8,6 +8,8 @@ loose semantic versioning.
 
 ### Added
 
+- **Readable unknowns, shorter VXLAN labels, a local syslog listen button, and an LLM checkbox that stays off.** Unknown-pattern rows wrap and carry a one-line meaning. VXLAN edges show a count instead of every VNI. Live tail can open UDP 5514. Unchecking Use LLM is no longer overwritten by the status poll.
+
 - **Shift brief on the Logs tab.** After an analysis, the UI shows the sanitized
   brief and the ServiceNow-shaped ticket fields. The ticket is still not posted.
   Timeline rows include the syslog sample so a commit is not only a category title.
