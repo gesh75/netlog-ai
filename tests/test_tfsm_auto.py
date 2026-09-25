@@ -1,10 +1,8 @@
-"""Tests for the tfsm_fire auto-parsing adapter.
+"""Tests for the TextFSM auto-parsing adapter.
 
-These tests are skipped unless `tfsm-fire` is installed. Since v0.5.1 that means a
-manual install: upstream withdrew the package from PyPI and deleted its GitHub repo
-(see the adapter docstring), so there is no extra that can pull it in. They use real
-templates against canned device output — no mocking — to prove the integration
-actually works end-to-end when the dependency and template DB are present.
+These use real ntc-templates against canned device output — no mocking — so the
+``parse`` extra (textfsm + ntc-templates) must be installed. CI installs ``.[all]``,
+which includes that extra.
 """
 from __future__ import annotations
 
@@ -14,26 +12,6 @@ from ai_log_analyzer.adapters import tfsm_auto
 from ai_log_analyzer.adapters.network_tool import CommandResult, parse_output
 
 pytestmark = pytest.mark.unit
-
-
-# ---------------------------------------------------------------------------
-# Skip unless tfsm-fire is present. Since v0.5.1 there is no extra that installs
-# it — upstream withdrew the package — so this is a manual-install-only path and
-# these tests skip on every stock checkout. The unit suite must stay green there.
-# ---------------------------------------------------------------------------
-if not tfsm_auto.is_available():
-    pytest.skip("tfsm-fire not installed — withdrawn from PyPI upstream, so there is no "
-                "extra to install it; supply your own copy to run these tests",
-                allow_module_level=True)
-
-# The template DB was a third-party download from the upstream GitHub raw file, which
-# no longer exists. The adapter degrades to no-match by design — skip the end-to-end
-# tests rather than fail CI. Point TFSM_DB_URL at a mirror or TFSM_DB_PATH at a local
-# copy to re-enable them.
-if tfsm_auto._get_engine() is None:
-    pytest.skip("tfsm_fire template DB unavailable (upstream repo deleted — "
-                "set TFSM_DB_URL/TFSM_DB_PATH to a mirror or local copy)",
-                allow_module_level=True)
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +49,17 @@ def test_auto_parse_empty_input_returns_no_match():
 def test_auto_parse_whitespace_only_returns_no_match():
     """Whitespace-only input is equivalent to empty."""
     result = tfsm_auto.auto_parse("   \n\n  \t  ")
+    assert result.matched is False
+    assert result.records == []
+
+
+def test_auto_parse_unstructured_text_returns_no_match():
+    """Prose that is not CLI output must not clear the confidence bar."""
+    result = tfsm_auto.auto_parse(
+        "random log line nothing structured here at all",
+        filter_hint="lldp_neighbor",
+        min_score=40.0,
+    )
     assert result.matched is False
     assert result.records == []
 

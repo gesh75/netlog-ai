@@ -6,6 +6,14 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Restore auto-detection parsing** (#19). `tfsm-fire` stays off the dependency
+  list — that distribution is still gone from PyPI — and the `parse` extra now
+  installs `textfsm` plus `ntc-templates`. `adapters/tfsm_auto.py` scores those
+  templates in-process. `pip install netlog-ai[parse]` and `[all]` work again,
+  and `tests/test_tfsm_auto.py` runs instead of skipping.
+
 ### Changed
 
 - **MCP server requires SDK 2.x** (#17). `mcp_server/server.py` constructs

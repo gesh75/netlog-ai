@@ -216,16 +216,14 @@ The topology engine ingests configs from every shipped sample:
 - **Nokia SRL** — `interface ethernet-1/X { subinterface 0 { ipv4 { address ... } } }`, `system0` loopback as implicit VTEP when `afi-safi evpn` is signaled.
 - **FRR** — Quagga-style block syntax, `interface lo` as implicit VTEP when `advertise-all-vni` is present, `vrf X { vni Y }` for L3 VNIs.
 
-### Auto-detection fallback parser (optional, currently unavailable upstream)
+### Auto-detection fallback parser (optional)
 
-> **⚠️ Upstream withdrawn (2026-07).** `tfsm-fire` was removed from PyPI and its GitHub
-> repo deleted, with no surviving fork or mirror. The `parse` extra was removed in
-> **v0.5.1** — it made `pip install netlog-ai[parse]` and `[all]` fail for everyone.
-> The adapter below still ships and still works if you supply the package and template
-> DB yourself; it degrades to a no-op otherwise. Nothing else in netlog-ai depends on it.
+```bash
+pip install netlog-ai[parse]
+```
 
-For arbitrary `show` output where the platform isn't known up-front, `tfsm_fire` scores
-every TextFSM template in a 700-template DB and returns the best match:
+For arbitrary `show` output where the platform isn't known up-front, the adapter scores
+ntc-templates TextFSM templates and returns the best match:
 
 ```python
 from ai_log_analyzer.adapters.tfsm_auto import auto_parse

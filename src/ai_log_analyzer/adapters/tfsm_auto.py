@@ -1,77 +1,39 @@
-"""TextFSM auto-detection adapter — wraps scottpeterman/tfsm_fire as a fallback parser.
+"""TextFSM auto-detection adapter — scores ntc-templates and returns the best match.
 
 Why this exists
 ---------------
 netlog-ai's primary parsers are hand-written regex (FRR daemon logs, syslog RFC3164/5424)
-and vendor-specific paths. Those handle ~80% of what we see in the lab but fall over on:
+and vendor-specific paths. Those handle the lab but fall over on:
 
-  * Multi-vendor `show` command output where the platform isn't known up-front
+  * Multi-vendor ``show`` command output where the platform isn't known up-front
   * Arbitrary device snippets pasted into the analyzer
-  * netlog-ai MCP tool calls where the LLM passes raw CLI output without saying which vendor
+  * MCP tool calls where the LLM passes raw CLI output without naming the vendor
 
-tfsm_fire scores every TextFSM template in its SQLite DB against the input and returns the
-best match. We use it as a strict *fallback* — never the primary path — so regex stays fast
-and tfsm only runs when we don't already have a parser for the input.
+This module is a strict *fallback*. It tries every TextFSM template whose name matches
+an optional hint, scores the parses, and returns the best one. It never raises.
 
-Upstream status (as of 2026-07-28) — READ THIS FIRST
-----------------------------------------------------
-`tfsm-fire` has been **withdrawn from PyPI**, and `github.com/scottpeterman/tfsm_fire`
-has been deleted. Both return 404; there is no surviving fork, mirror, or renamed
-distribution. It installed cleanly as recently as 2026-07-13, so older environments may
-still have it — but it can no longer be obtained, and the template-DB URL below is dead
-too. The `parse` extra that used to install it was removed in v0.5.1 because it made
-`pip install netlog-ai[parse]` and `[all]` unresolvable for everyone.
+Install the optional extra to turn it on::
 
-This module is kept intact and fully functional for anyone who still has a copy of the
-package and a copy of the template DB. It is inert (never raises, always returns
-no-match) everywhere else.
+    pip install netlog-ai[parse]
 
-Soft-dependency
----------------
-All public functions return an empty/None result if the package isn't installed — they
-never raise. Use `is_available()` to gate UI affordances.
+That pulls ``textfsm`` and ``ntc-templates``. Without them, ``is_available()`` is false
+and ``auto_parse()`` returns an unmatched result.
 
-Template DB
------------
-The pip package never shipped the 576KB SQLite template DB — it lived only in the (now
-deleted) upstream GitHub repo. The auto-download below therefore fails on a stock setup.
-To use this adapter you must supply the DB yourself:
-
-    export TFSM_DB_PATH=/opt/netlog-ai/tfsm_templates.db   # local copy, or
-    export TFSM_DB_URL=https://your-mirror.example/tfsm_templates.db
-
-Templates originate from networktocode/ntc-templates, which is still maintained — a
-compatible DB can be rebuilt from that source.
+``textfsm`` and ``ntc_templates`` are imported inside the functions that need them.
+They are an optional extra, so importing this module must succeed when they are absent.
 """
 from __future__ import annotations
 
 import logging
-import os
-import urllib.request
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Historical URL of the upstream template database. The upstream repo was deleted in
-# July 2026, so this default now 404s and _ensure_db() will always fall through to the
-# "download failed" path unless you override it. Retained so environments that already
-# cached the DB keep working, and so it starts working again if upstream is ever
-# restored. Set TFSM_DB_URL to a mirror, or TFSM_DB_PATH to a local copy.
-_UPSTREAM_DB_URL = os.environ.get(
-    "TFSM_DB_URL",
-    "https://github.com/scottpeterman/tfsm_fire/raw/main/tfire/tfsm_templates.db",
-)
-_DEFAULT_DB_PATH = Path(
-    os.environ.get(
-        "TFSM_DB_PATH",
-        str(Path.home() / ".cache" / "netlog-ai" / "tfsm_templates.db"),
-    )
-).expanduser()
-
-# Cached engine — tfsm_fire's engine is thread-safe and holds a SQLite connection
-# per thread, so a module-level singleton is the cheapest path.
-_engine = None
+# Cached index. ``_engine_db_path`` is the on-disk templates directory the index
+# was loaded from, so a later call with a different directory rebuilds it.
+_engine: _TemplateIndex | None = None
 _engine_db_path: Path | None = None
 
 
@@ -79,9 +41,9 @@ _engine_db_path: Path | None = None
 class ParseResult:
     """Immutable result of an auto-parse attempt.
 
-    `template` is the matched cli_command name (e.g. "cisco_ios_show_lldp_neighbors").
-    `score` is on a 0-100 scale from tfsm_fire's heuristic. Treat <40 as low confidence.
-    `records` is a list of dicts, one per parsed row. Empty list means no template matched.
+    ``template`` is the matched template stem (e.g. "cisco_ios_show_lldp_neighbors").
+    ``score`` is on a 0-100 scale. Treat <40 as low confidence.
+    ``records`` is a list of dicts, one per parsed row. Empty list means no template matched.
     """
 
     template: str | None
@@ -95,66 +57,167 @@ class ParseResult:
 
 
 def is_available() -> bool:
-    """Return True if tfsm_fire is importable. Cheap to call repeatedly."""
+    """Return True if textfsm and ntc-templates are importable."""
     try:
-        import tfire.tfsm_fire  # noqa: F401
-        return True
+        import ntc_templates  # noqa: F401
+        import textfsm  # noqa: F401
     except ImportError:
         return False
+    return True
 
 
-def _ensure_db(db_path: Path = _DEFAULT_DB_PATH, timeout: float = 30.0) -> Path | None:
-    """Ensure the template DB exists locally; download from upstream if missing.
-
-    Returns the path on success, or None if download failed.
-    Idempotent — does nothing if the file already exists.
-    """
-    if db_path.exists() and db_path.stat().st_size > 0:
-        return db_path
-
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("Downloading tfsm_fire template DB from %s -> %s", _UPSTREAM_DB_URL, db_path)
+def _templates_dir() -> Path | None:
+    """Return the installed ntc-templates directory, or None when it is missing."""
     try:
-        # urllib is stdlib — we don't pull requests in for this one cold-start call.
-        # The URL is a hardcoded constant pointing at a public GitHub raw file, so no
-        # SSRF surface: nosec B310 (urllib.urlopen with non-user-controlled URL).
-        with urllib.request.urlopen(_UPSTREAM_DB_URL, timeout=timeout) as resp:  # noqa: S310
-            data = resp.read()
-        if not data:
-            logger.warning("tfsm_fire DB download returned empty payload")
-            return None
-        # Write atomically: write to .tmp then rename, so a crash mid-download doesn't
-        # leave a half-written DB that tfsm_fire would then fail to open.
-        tmp_path = db_path.with_suffix(db_path.suffix + ".tmp")
-        tmp_path.write_bytes(data)
-        tmp_path.replace(db_path)
-        logger.info("tfsm_fire DB cached at %s (%d bytes)", db_path, len(data))
-        return db_path
-    except Exception as exc:  # network / filesystem errors are non-fatal — caller falls back
-        logger.warning("Failed to download tfsm_fire DB: %s", exc)
+        import ntc_templates
+    except ImportError:
         return None
+    root = Path(ntc_templates.__file__).resolve().parent / "templates"
+    if (root / "index").is_file():
+        return root
+    logger.warning("ntc-templates index missing at %s", root)
+    return None
 
 
-def _get_engine(db_path: Path = _DEFAULT_DB_PATH):
-    """Return a cached TextFSMAutoEngine, building it lazily on first call.
+def _template_names(index_path: Path) -> tuple[str, ...]:
+    """Template filenames from an ntc-templates index file.
 
-    Returns None if tfsm_fire isn't installed or the DB couldn't be obtained.
+    Each data line is ``filename.textfsm, command, platform``. The command
+    column can contain commas, so only the first field is the filename.
     """
+    names: list[str] = []
+    for raw in index_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        filename = line.split(",", 1)[0].strip()
+        if filename.endswith(".textfsm"):
+            names.append(filename)
+    return tuple(names)
+
+
+def _filled(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, list):
+        return any(_filled(item) for item in value)
+    return bool(str(value).strip())
+
+
+def _token_coverage(records: list[dict], output: str) -> float:
+    """Share of input tokens that show up in the parsed records.
+
+    A template that lifts a few words out of prose looks fully populated and
+    would otherwise score like a real table. Coverage pulls that back down.
+    """
+    source = set(re.findall(r"\S+", output.lower()))
+    if not source:
+        return 0.0
+    captured: set[str] = set()
+    for row in records:
+        for value in row.values():
+            captured.update(re.findall(r"\S+", str(value).lower()))
+    return len(captured & source) / len(source)
+
+
+def _calculate_template_score(records: list[dict], output: str) -> float:
+    """Score a parse on a 0-100 scale.
+
+    Rewards record count, field richness, how many cells are populated, and
+    whether each field is consistently filled or consistently empty across rows.
+    The result is scaled by how much of the input the records account for.
+    """
+    if not records:
+        return 0.0
+    fields = list(records[0].keys())
+    if not fields:
+        return 0.0
+
+    row_count = len(records)
+    fill_rates: list[float] = []
+    populated = 0
+    for field in fields:
+        filled = sum(1 for row in records if _filled(row.get(field)))
+        populated += filled
+        fill_rates.append(filled / row_count)
+
+    population = populated / (row_count * len(fields))
+    richness = min(len(fields), 8) / 8
+    consistency = sum(1 for rate in fill_rates if rate >= 0.8 or rate == 0.0) / len(fill_rates)
+    volume = min(row_count, 5) / 5
+    base = 100.0 * (0.45 * population + 0.20 * richness + 0.20 * consistency + 0.15 * volume)
+    coverage = _token_coverage(records, output)
+    # A one-row grab of a few words looks fully populated. Squaring coverage
+    # on a single record drops that under the usual min_score of 40. Multi-row
+    # tables keep a linear penalty so header lines do not wipe out the score.
+    if row_count == 1:
+        coverage *= coverage
+    return round(base * coverage, 4)
+
+
+def _parse_template(template_path: Path, output: str) -> list[dict]:
+    """Run one TextFSM template. A bad template or a non-match returns []."""
+    import textfsm
+
+    try:
+        with template_path.open(encoding="utf-8") as handle:
+            fsm = textfsm.TextFSM(handle)
+        rows = fsm.ParseText(output)
+    except Exception:
+        logger.debug("template %s did not match", template_path.name, exc_info=True)
+        return []
+    return [dict(zip(fsm.header, row, strict=False)) for row in rows]
+
+
+class _TemplateIndex:
+    """In-memory list of ntc-templates filenames. Parsing happens per call."""
+
+    def __init__(self, templates_dir: Path) -> None:
+        self.templates_dir = templates_dir
+        self.names = _template_names(templates_dir / "index")
+
+    def find_best_template(
+        self,
+        output: str,
+        filter_string: str | None = None,
+    ) -> tuple[str | None, list[dict], float, list[tuple[str, float, int]]]:
+        hint = (filter_string or "").lower()
+        scored: list[tuple[str, float, list[dict]]] = []
+        for filename in self.names:
+            stem = filename[: -len(".textfsm")]
+            if hint and hint not in stem.lower():
+                continue
+            records = _parse_template(self.templates_dir / filename, output)
+            score = _calculate_template_score(records, output)
+            if score <= 0 or not records:
+                continue
+            scored.append((stem, score, records))
+
+        if not scored:
+            return None, [], 0.0, []
+
+        scored.sort(key=lambda item: (item[1], len(item[2])), reverse=True)
+        best_name, best_score, best_records = scored[0]
+        candidates = [(name, score, len(records)) for name, score, records in scored]
+        return best_name, best_records, best_score, candidates
+
+
+def _get_engine() -> _TemplateIndex | None:
+    """Return a cached template index, or None when the extra is not installed."""
     global _engine, _engine_db_path
 
     if not is_available():
         return None
 
-    if _engine is not None and _engine_db_path == db_path:
-        return _engine
-
-    resolved = _ensure_db(db_path)
-    if resolved is None:
+    templates_dir = _templates_dir()
+    if templates_dir is None:
         return None
 
-    from tfire.tfsm_fire import TextFSMAutoEngine
-    _engine = TextFSMAutoEngine(str(resolved), verbose=False)
-    _engine_db_path = resolved
+    if _engine is not None and _engine_db_path == templates_dir:
+        return _engine
+
+    _engine = _TemplateIndex(templates_dir)
+    _engine_db_path = templates_dir
     return _engine
 
 
@@ -163,17 +226,17 @@ def auto_parse(
     filter_hint: str | None = None,
     min_score: float = 0.0,
 ) -> ParseResult:
-    """Try every TextFSM template and return the best match.
+    """Try TextFSM templates and return the best match.
 
     Args:
         output: Raw CLI output to parse.
-        filter_hint: Optional template-name filter (e.g. "lldp", "bgp", "version") to narrow
-            the candidate pool. Maps directly to tfsm_fire's `filter_string`. Faster + safer.
+        filter_hint: Optional template-name substring (e.g. "lldp", "bgp", "version").
+            Narrows the candidate pool. Much faster than a full scan.
         min_score: Reject matches below this score. Default 0 returns whatever scored best.
             Use ~40 for production filtering of low-confidence matches.
 
-    Returns ParseResult — never raises. `matched` is False on every failure mode
-    (missing dependency, empty input, no template matched, score below threshold).
+    Returns ParseResult — never raises. ``matched`` is False on every failure mode
+    (missing extra, empty input, no template matched, score below threshold).
     """
     if not output or not output.strip():
         return ParseResult(template=None, score=0.0, records=[], candidates=[])
@@ -187,12 +250,10 @@ def auto_parse(
             output, filter_string=filter_hint
         )
     except Exception as exc:
-        # tfsm_fire's engine swallows per-template parse failures internally, so reaching
-        # here means a SQLite / DB-level error. Log and degrade gracefully.
-        logger.warning("tfsm_fire engine error: %s", exc)
+        logger.warning("auto-parse failed: %s", exc)
         return ParseResult(template=None, score=0.0, records=[], candidates=[])
 
-    if score < min_score or not parsed:
+    if best_template is None or score < min_score or not parsed:
         return ParseResult(
             template=None,
             score=float(score or 0.0),
@@ -209,7 +270,7 @@ def auto_parse(
 
 
 def reset_engine_cache() -> None:
-    """Drop the cached engine. Primarily for tests that swap the DB path."""
+    """Drop the cached template index. Primarily for tests."""
     global _engine, _engine_db_path
     _engine = None
     _engine_db_path = None
