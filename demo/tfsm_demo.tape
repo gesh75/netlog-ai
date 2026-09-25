@@ -24,16 +24,16 @@ Type "clear" Enter
 Show
 
 # ─── ACT 1 · framing ──────────────────────────────────────────────────────────
-Type "# netlog-ai · NEW: tfsm_fire auto-detect parser"
+Type "# netlog-ai · TextFSM auto-detect parser (ntc-templates)"
 Sleep 800ms
 Enter
-Type "# scottpeterman/tfsm_fire wired in as a fallback parser"
+Type "# pip install netlog-ai[parse]"
 Sleep 800ms
 Enter
 Sleep 600ms
 
 # ─── ACT 2 · install proof ────────────────────────────────────────────────────
-Type ".venv/bin/pip show tfsm-fire | head -3"
+Type ".venv/bin/pip show ntc-templates | head -3"
 Sleep 300ms
 Enter
 Sleep 1200ms

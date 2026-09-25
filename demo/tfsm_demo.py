@@ -1,6 +1,6 @@
 """Demo driver — used by demo/tfsm_demo.tape (VHS).
 
-Self-contained Python session that exercises the new tfsm_fire adapter and prints
+Self-contained Python session that exercises the TextFSM auto-detect adapter and prints
 human-readable results. Designed to look good when recorded with VHS.
 Run directly:  python demo/tfsm_demo.py
 """
@@ -23,7 +23,7 @@ def show(label: str, value: object) -> None:
 
 
 def main() -> int:
-    hdr("netlog-ai · tfsm_fire auto-detect parser")
+    hdr("netlog-ai · TextFSM auto-detect parser")
     show("available", is_available())
 
     # 1) Cisco LLDP table — give the engine a hint so it's fast

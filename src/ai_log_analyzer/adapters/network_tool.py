@@ -159,11 +159,11 @@ def _docker_running_config(container: str, timeout: float = 30.0) -> str | None:
 
 def parse_output(result: CommandResult, filter_hint: str | None = None,
                  min_score: float = 40.0) -> list[dict]:
-    """Parse a CommandResult into structured records via tfsm_fire auto-detection.
+    """Parse a CommandResult into structured records via TextFSM auto-detection.
 
-    Returns an empty list if tfsm_fire isn't installed, the command failed, or no
-    template scored above `min_score`. Use `tfsm_auto.auto_parse` directly when you
-    need the score + candidate list for debugging.
+    Returns an empty list if the ``parse`` extra isn't installed, the command failed,
+    or no template scored above `min_score`. Use `tfsm_auto.auto_parse` directly when
+    you need the score and candidate list for debugging.
     """
     if not result.ok or not result.output:
         return []
