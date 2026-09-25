@@ -285,11 +285,25 @@ function setContext(text) {
 
 // ── Chip-picker for FRR containers ─────────────────────────────────────────
 
+function selectedContainerCount() {
+  const sel = $("containers");
+  if (!sel) return 0;
+  return Array.from(sel.options).filter((o) => o.selected).length;
+}
+
+function syncRunButton() {
+  const btn = $("run-btn");
+  if (!btn || btn.classList.contains("running")) return;
+  const needsContainer = $("source") && $("source").value === "frr" && selectedContainerCount() === 0;
+  btn.disabled = needsContainer;
+  btn.textContent = needsContainer ? "Select a container" : "▶ Run Analysis";
+}
+
 function refreshChipsCount() {
   const sel = $("containers");
   if (!sel) return;
   const total = sel.options.length;
-  const n = Array.from(sel.options).filter((o) => o.selected).length;
+  const n = selectedContainerCount();
   const lbl = $("chips-count");
   if (lbl) {
     if (total === 0)       lbl.textContent = "no containers";
@@ -297,6 +311,7 @@ function refreshChipsCount() {
     else if (n === total)  lbl.textContent = `all ${total} selected`;
     else                   lbl.textContent = `${n}/${total} selected`;
   }
+  syncRunButton();
 }
 
 // Bulk toggle helpers — wired to the "All" / "None" sidebar buttons.
@@ -433,11 +448,12 @@ function setChipText(badgeId, text) {
 async function refreshLLMStatus() {
   try {
     const s = await fetchJSON("/api/llm/status");
-    setChipText("llm-badge", `LLM: ${s.enabled ? "on" : "off"}`);
-    $("llm-badge").classList.toggle("ok",   !!s.enabled);
-    $("llm-badge").classList.toggle("warn", !s.enabled);
-
     const provInfo = (s.providers_available || []).find((p) => p.id === s.provider) || {};
+    const reachable = !!provInfo.available;
+    setChipText("llm-badge", reachable ? `LLM: ${s.enabled ? "on" : "off"}` : "LLM: unreachable");
+    $("llm-badge").classList.toggle("ok",   !!s.enabled && reachable);
+    $("llm-badge").classList.toggle("warn", !s.enabled || !reachable);
+
     const lastErr = (s.last_errors || {})[s.provider];
     let label = `Provider: ${s.provider}`;
     if (!provInfo.available) label += " (unreachable)";
@@ -448,6 +464,12 @@ async function refreshLLMStatus() {
     $("prov-badge").classList.toggle("ok",   !!provInfo.available && !lastErr && !!s.enabled);
     $("prov-badge").classList.toggle("warn", !provInfo.available || !!lastErr || !s.enabled);
     $("provider").value = s.provider;
+    const fallback = (s.providers_available || []).find((p) => p.available);
+    if (!reachable && fallback && fallback.id !== s.provider && !$("provider").dataset.switching) {
+      $("provider").dataset.switching = "1";
+      $("provider").value = fallback.id;
+      changeProvider().finally(() => { delete $("provider").dataset.switching; });
+    }
 
     // Visually dim the Provider chip + sidebar select when LLM is off — the
     // header badge alone is easy to miss when scanning the sidebar.
@@ -535,10 +557,17 @@ function showSourceControls() {
       el.setAttribute("aria-hidden", "true");
     }
   }
+  syncRunButton();
 }
 
 // ── Run analysis ─────────────────────────────────────────────────────────────
 async function runAnalysis() {
+  if ($("source").value === "frr" && selectedContainerCount() === 0) {
+    setStatus("Select at least one container");
+    toast("Select at least one lab container", "error");
+    syncRunButton();
+    return;
+  }
   const btn = $("run-btn");
   btn.disabled = true;
   btn.classList.add("running");
@@ -576,10 +605,10 @@ async function runAnalysis() {
     setStatus(`Error: ${e.message}`);
     toast(`Analysis failed: ${e.message}`, "error", 6000);
   } finally {
-    btn.disabled = false;
     btn.classList.remove("running");
     btn.removeAttribute("aria-busy");
     clearProgress();
+    syncRunButton();
   }
 }
 
@@ -744,6 +773,23 @@ function render(r) {
   _setHealthStatZero("hs-high", sc.high);
   _setHealthStatZero("hs-med",  sc.medium);
 
+  const handoff = r.handoff || {};
+  const hPanel = $("handoff-panel");
+  if (hPanel) {
+    if (handoff.brief) {
+      hPanel.style.display = "block";
+      $("handoff-brief").textContent = handoff.brief;
+      const ticket = handoff.ticket || {};
+      $("handoff-posted").textContent = ticket.posted ? "(posted)" : "(not posted)";
+      $("handoff-ticket-meta").textContent =
+        [ticket.urgency, ticket.configuration_item, ticket.short_description]
+          .filter(Boolean).join(" · ");
+      $("handoff-notes").textContent = ticket.work_notes || handoff.paste || "";
+    } else {
+      hPanel.style.display = "none";
+    }
+  }
+
   // Summary
   $("summary-panel").style.display = "block";
   const ul = $("summary-list");
@@ -850,8 +896,10 @@ function render(r) {
       clear(list);
       tl.forEach((n) => {
         const cause = n.cause_of ? ` ← ${n.cause_of}` : "";
+        const when = n.t && n.t !== "—" ? n.t : "time unknown";
+        const sample = n.sample ? ` — ${n.sample}` : "";
         list.appendChild(el("li", {
-          text: `${n.t} · ${n.device} · ${n.severity} · ${n.title}${cause}`,
+          text: `${when} · ${n.device} · ${n.severity} · ${n.title}${sample}${cause}`,
         }));
       });
     } else {
@@ -2702,6 +2750,17 @@ function switchSideTab(name) {
   });
   // Reset both the page scroll and the sidebar's internal scroll — avoids
   // landing on a tab at a confusing scroll position from the previous one.
+  const siteOnly = ["topo-panel", "site-panel", "compliance-panel", "copilot-panel", "pm-panel", "site-wide-panel"];
+  if (name !== "site") {
+    siteOnly.forEach((id) => {
+      const panel = $(id);
+      if (panel) panel.style.display = "none";
+    });
+  } else if (typeof _topoState !== "undefined" && _topoState.topo) {
+    const topo = $("topo-panel");
+    if (topo) topo.style.display = "block";
+  }
+  hideIdleStateIfAnyPanelVisible();
   window.scrollTo({ top: 0, behavior: "smooth" });
   const aside = document.querySelector("aside");
   if (aside) aside.scrollTop = 0;
