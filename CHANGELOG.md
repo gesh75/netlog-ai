@@ -8,6 +8,13 @@ loose semantic versioning.
 
 ### Added
 
+- **Shift brief on the Logs tab.** After an analysis, the UI shows the sanitized
+  brief and the ServiceNow-shaped ticket fields. The ticket is still not posted.
+  Timeline rows include the syslog sample so a commit is not only a category title.
+- **Logs tab guards.** Run Analysis stays disabled until a lab container is selected.
+  The topology map hides when you leave Site. The header version comes from the
+  package, and the LLM chip stays off while the selected provider is unreachable.
+
 - **Work shift.** Every analysis handoff now includes a ServiceNow-shaped ticket
   (`short_description`, `urgency`, `configuration_item`, `work_notes`) that is
   not posted, and a one-page shift brief with the epicenter, the change window,

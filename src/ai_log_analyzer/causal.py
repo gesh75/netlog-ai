@@ -581,12 +581,14 @@ def build_timeline(events: Iterable[ClassifiedEvent], limit: int = 24) -> list[d
     rows = _select_timeline_rows(events, limit)
     nodes: list[dict[str, Any]] = []
     for e in rows[:limit]:
+        sample = (e.sample_message or "").strip().replace("\n", " ")
         nodes.append({
             "t": e.timestamp or "—",
             "device": e.hostname or "unknown",
             "severity": e.severity,
             "category": e.category,
             "title": e.description,
+            "sample": sample[:160],
         })
     for i in range(1, len(nodes)):
         prev, cur = nodes[i - 1], nodes[i]
