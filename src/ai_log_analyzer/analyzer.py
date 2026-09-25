@@ -111,6 +111,7 @@ class AnalysisResult:
     change_window: dict = field(default_factory=dict)
     sanitize_diff: dict = field(default_factory=dict)
     handoff: dict = field(default_factory=dict)
+    repeat_offenders: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -132,6 +133,7 @@ class AnalysisResult:
             "change_window": self.change_window,
             "sanitize_diff": self.sanitize_diff,
             "handoff": self.handoff,
+            "repeat_offenders": self.repeat_offenders,
         }
 
 
@@ -691,10 +693,12 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
     # history from prior runs, then journal this run (env-gated, local-only).
     from ai_log_analyzer.memory import get_store
     store = get_store()
+    repeats: list[dict] = []
     if store is not None:
         for a in action_items:
             a.recurrence = store.recurrence(a.description)
         store.record([a.to_dict() for a in action_items], generated_at)
+        repeats = store.repeats(now=datetime.now(timezone.utc))
 
     stab = tracker.report()
     samples = "\n".join(
@@ -732,6 +736,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
         blast=blast_radius(action_items, stab),
         change_window=cw,
         sanitize_diff=sdiff,
+        repeat_offenders=repeats,
     )
     result.handoff = incident_handoff(result.to_dict())
     return result
