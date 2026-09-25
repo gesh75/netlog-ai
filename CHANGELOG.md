@@ -8,6 +8,14 @@ loose semantic versioning.
 
 ### Added
 
+- **Work shift.** Every analysis handoff now includes a ServiceNow-shaped ticket
+  (`short_description`, `urgency`, `configuration_item`, `work_notes`) that is
+  not posted, and a one-page shift brief with the epicenter, the change window,
+  and up to three read-only commands. IOS-XE, Aruba, and Meraki lines for an
+  access point down, 802.1X failure, DHCP pool exhaustion, WAN failover, and a
+  non-Meraki VPN down classify on their own. When the incident journal is on,
+  the brief names a host and category seen at least twice in seven days.
+
 - **0.7.0 incident handoff.** `handoff.incident_handoff` builds a paste card from the
   health score, blast radius, change window, and top actions, then runs that
   card through the sanitize gate. The analysis payload includes it as `handoff`.

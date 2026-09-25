@@ -40,6 +40,16 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"%sysmgr-2-service_crashed|%sysmgr.*(?:crash|terminated)",        "critical", "system",     "NX-OS service crash"),
     (r"%vpc-2-|vpc.*peer.*(?:down|fail)",                               "high",     "lag",        "vPC peer failure (NX-OS)"),
     (r"%hsrp-5-statechange|%fhrp",                                      "high",     "redundancy", "VRRP/gateway failover"),
+    # Work edge — IOS-XE, Aruba, Meraki. Specific tokens before the generic
+    # auth and vpn rules so those descriptions stay distinct.
+    (r"(?:aruba|meraki).*(?:\bap\b|access point).*(?:down|offline)|\bap\s+\S+\s+(?:is\s+)?(?:down|offline)",
+                                                                         "high",     "wireless",   "Access point down"),
+    (r"dot1x.*fail|802\.1x.*(?:fail|unauth)|eap.*fail|access-reject",   "high",     "security",   "802.1X authentication failure"),
+    (r"dhcp.*(?:pool|scope).*(?:exhaust|full|deplet)|no\s+(?:free\s+)?addresses\s+(?:left|available)",
+                                                                         "high",     "dhcp",       "DHCP pool exhausted"),
+    (r"wan.*failover|uplink.*failover|cellular.*(?:failover|active)",   "high",     "redundancy", "WAN uplink failover"),
+    (r"non-meraki.*vpn.*down|vpn\s+registry.*(?:down|fail)|site-to-site.*vpn.*down",
+                                                                         "high",     "vpn",        "VPN/IPsec tunnel failure"),
     (r"%envmon.*(?:fan|temperature|supply)|%platform.*(?:thermal|power)", "critical", "hardware", "Power supply or fan failure"),
     (r"%module-2-|%platform-2-",                                        "critical", "hardware",  "Chassis alarm triggered"),
     # SONiC + Cumulus (specific tokens first so they win over generic link-down)
