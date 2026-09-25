@@ -12,7 +12,7 @@ xAI Grok) write a 5-phase root-cause playbook with copy-pastable per-vendor CLI 
 invariant is **sanitize-before-LLM** — every config and log is scrubbed of secrets and public IPs before
 any outbound call — and it degrades gracefully to a deterministic rule-based KB when no model is available.
 The same analyzer core is exposed three ways: a no-build Flask + vanilla-JS dashboard (port 6060), a CLI,
-and an MCP server for agent clients like Claude Code. v0.6.0 adds a causal console (timeline, blast
+and an MCP server for agent clients like Claude Code. v0.7.0 adds a sanitized incident-handoff paste. v0.6.0 adds a causal console (timeline, blast
 radius, change-window correlator) plus a sanitize-diff viewer.
 
 ---
@@ -92,6 +92,7 @@ flowchart TB
         CLS["classifier.py - 80 regexes"]
         ANA["analyzer.py - orchestrator"]
         CAU["causal.py - timeline, blast, change-window"]
+        HND["handoff.py - sanitized paste card"]
         SITE["site intelligence - topology, optimize, copilot"]
     end
 
@@ -104,6 +105,7 @@ flowchart TB
     SRC & ADP --> ANA
     ANA --> SAN --> CLS
     ANA --> CAU
+    ANA --> HND --> SAN
     ANA --> SITE
     ANA --> LLMC
     LLMC -.fallback.-> KB
@@ -117,7 +119,7 @@ flowchart TB
     class WEB,CLI,MCP entry
     class SRC,ADP in
     class SAN gate
-    class CLS,ANA,CAU,SITE core
+    class CLS,ANA,CAU,HND,SITE core
     class LLMC,KB brain
 ```
 
@@ -158,8 +160,10 @@ sequenceDiagram
         end
     end
     AN->>AN: health_score 0 to 100 plus grade plus exec summary
-    AN-->>API: AnalysisResult JSON
-    API-->>OP: score, actions, CLI, topology, timeline
+    AN->>SA: scrub handoff paste secrets and public IPs
+    SA-->>AN: redacted paste card
+    AN-->>API: AnalysisResult JSON including handoff
+    API-->>OP: score, actions, CLI, topology, timeline, paste card
 ```
 
 ---
@@ -179,7 +183,8 @@ flowchart LR
     GATE{{"sanitize gate"}}
     DEEP["Deep analysis - 5-phase playbook"]
     SCORE["Health score - 0 to 100 plus A to F"]
-    OUT["Outputs - SPA, CLI, MCP, reports"]
+    CARD["Handoff paste - score, blast, change window"]
+    OUT["Outputs - SPA, CLI, MCP, reports, ticket paste"]
 
     RAW -->|adapters and connectors| EV
     EV -->|strip_ansi plus regex KB| CE
@@ -187,8 +192,10 @@ flowchart LR
     AI -->|top-N context| GATE
     GATE -->|LLM or rule KB| DEEP
     AI --> SCORE
+    SCORE --> CARD
+    CARD -->|sanitize before share| GATE
     DEEP --> OUT
-    SCORE --> OUT
+    GATE --> OUT
 
     classDef raw   fill:#0891b2,stroke:#67e8f9,color:#fff
     classDef stage fill:#7c3aed,stroke:#c4b5fd,color:#fff
@@ -197,7 +204,7 @@ flowchart LR
     classDef out   fill:#a16207,stroke:#fbbf24,color:#fff
 
     class RAW,EV raw
-    class CE,AI,DEEP stage
+    class CE,AI,DEEP,CARD stage
     class GATE gate
     class SCORE score
     class OUT out
@@ -297,6 +304,7 @@ flowchart TB
         CLASSIFIER["classifier.py"]
         ANALYZER["analyzer.py"]
         CAUSAL["causal.py - timeline, blast, change-window"]
+        HANDOFF["handoff.py - sanitized paste card"]
     end
 
     subgraph INTEL["intelligence"]
@@ -313,6 +321,7 @@ flowchart TB
     SOURCES & ADAPTERS --> ANALYZER
     ANALYZER --> SANITIZE --> CLASSIFIER
     ANALYZER --> CAUSAL
+    ANALYZER --> HANDOFF --> SANITIZE
     ANALYZER --> LLM
     LLM -.fallback.-> KB
     ANALYZER --> SITE
@@ -323,7 +332,7 @@ flowchart TB
     classDef site fill:#059669,stroke:#34d399,color:#fff
 
     class SOURCES,ADAPTERS in
-    class SANITIZE,CLASSIFIER,ANALYZER,CAUSAL pipe
+    class SANITIZE,CLASSIFIER,ANALYZER,CAUSAL,HANDOFF pipe
     class LLM,KB ai
     class TOPO,OPT,EXTRA site
 ```
