@@ -54,7 +54,11 @@ loose semantic versioning.
   resume after a commit or time gap immediately before the storm —
   so a leftover-headed burst cannot swallow the outage. A storm that
   starts within 60s of leftover flaps (flaps → commit → immediate
-  BGP) is not swallowed. Those leftover flaps can also
+  BGP) is not swallowed. When leftover itself is already routing, a
+  later high/critical routing cluster is kept as the storm — trailing
+  leftover-signature flaps, leftover-host resume that heads the same
+  60s cluster, other-category rows, and recovery do not steal the
+  floor. Those leftover flaps can also
   be evicted when they occupy the cap and leave no commit slots to spare.
   After flooring, remaining early commits (or leftover flaps, when no
   commit sat in the prefix) are swapped for true late commits rather
