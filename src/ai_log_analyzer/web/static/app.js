@@ -285,11 +285,25 @@ function setContext(text) {
 
 // ── Chip-picker for FRR containers ─────────────────────────────────────────
 
+function selectedContainerCount() {
+  const sel = $("containers");
+  if (!sel) return 0;
+  return Array.from(sel.options).filter((o) => o.selected).length;
+}
+
+function syncRunButton() {
+  const btn = $("run-btn");
+  if (!btn || btn.classList.contains("running")) return;
+  const needsContainer = $("source") && $("source").value === "frr" && selectedContainerCount() === 0;
+  btn.disabled = needsContainer;
+  btn.textContent = needsContainer ? "Select a container" : "▶ Run Analysis";
+}
+
 function refreshChipsCount() {
   const sel = $("containers");
   if (!sel) return;
   const total = sel.options.length;
-  const n = Array.from(sel.options).filter((o) => o.selected).length;
+  const n = selectedContainerCount();
   const lbl = $("chips-count");
   if (lbl) {
     if (total === 0)       lbl.textContent = "no containers";
@@ -297,6 +311,7 @@ function refreshChipsCount() {
     else if (n === total)  lbl.textContent = `all ${total} selected`;
     else                   lbl.textContent = `${n}/${total} selected`;
   }
+  syncRunButton();
 }
 
 // Bulk toggle helpers — wired to the "All" / "None" sidebar buttons.
@@ -433,11 +448,12 @@ function setChipText(badgeId, text) {
 async function refreshLLMStatus() {
   try {
     const s = await fetchJSON("/api/llm/status");
-    setChipText("llm-badge", `LLM: ${s.enabled ? "on" : "off"}`);
-    $("llm-badge").classList.toggle("ok",   !!s.enabled);
-    $("llm-badge").classList.toggle("warn", !s.enabled);
-
     const provInfo = (s.providers_available || []).find((p) => p.id === s.provider) || {};
+    const reachable = !!provInfo.available;
+    setChipText("llm-badge", reachable ? `LLM: ${s.enabled ? "on" : "off"}` : "LLM: unreachable");
+    $("llm-badge").classList.toggle("ok",   !!s.enabled && reachable);
+    $("llm-badge").classList.toggle("warn", !s.enabled || !reachable);
+
     const lastErr = (s.last_errors || {})[s.provider];
     let label = `Provider: ${s.provider}`;
     if (!provInfo.available) label += " (unreachable)";
@@ -448,6 +464,12 @@ async function refreshLLMStatus() {
     $("prov-badge").classList.toggle("ok",   !!provInfo.available && !lastErr && !!s.enabled);
     $("prov-badge").classList.toggle("warn", !provInfo.available || !!lastErr || !s.enabled);
     $("provider").value = s.provider;
+    const fallback = (s.providers_available || []).find((p) => p.available);
+    if (!reachable && fallback && fallback.id !== s.provider && !$("provider").dataset.switching) {
+      $("provider").dataset.switching = "1";
+      $("provider").value = fallback.id;
+      changeProvider().finally(() => { delete $("provider").dataset.switching; });
+    }
 
     // Visually dim the Provider chip + sidebar select when LLM is off — the
     // header badge alone is easy to miss when scanning the sidebar.
@@ -455,8 +477,9 @@ async function refreshLLMStatus() {
     const provSection = $("provider").closest(".side-section-body");
     if (provSection) provSection.classList.toggle("llm-disabled", !s.enabled);
     // Sync the checkbox in the Provider section
-    if ($("use-llm").checked !== !!s.enabled) {
-      $("use-llm").checked = !!s.enabled;
+    const box = $("use-llm");
+    if (box && !box.dataset.userSet && box.checked !== !!s.enabled) {
+      box.checked = !!s.enabled;
     }
   } catch {
     setChipText("llm-badge", "LLM: error");
@@ -535,10 +558,17 @@ function showSourceControls() {
       el.setAttribute("aria-hidden", "true");
     }
   }
+  syncRunButton();
 }
 
 // ── Run analysis ─────────────────────────────────────────────────────────────
 async function runAnalysis() {
+  if ($("source").value === "frr" && selectedContainerCount() === 0) {
+    setStatus("Select at least one container");
+    toast("Select at least one lab container", "error");
+    syncRunButton();
+    return;
+  }
   const btn = $("run-btn");
   btn.disabled = true;
   btn.classList.add("running");
@@ -576,10 +606,10 @@ async function runAnalysis() {
     setStatus(`Error: ${e.message}`);
     toast(`Analysis failed: ${e.message}`, "error", 6000);
   } finally {
-    btn.disabled = false;
     btn.classList.remove("running");
     btn.removeAttribute("aria-busy");
     clearProgress();
+    syncRunButton();
   }
 }
 
@@ -700,6 +730,16 @@ function _updateKpiGrid(r) {
   }
 }
 
+
+function unknownHint(template) {
+  const t = String(template || "").toLowerCase();
+  if (t.includes("tcp-sig")) return "TCP signature failed on a session. Usually follows a BGP or interface flap.";
+  if (t.includes("password") || t.includes("bgpd")) return "A BGP neighbor line the classifier did not match. The password is already redacted.";
+  if (t.includes("mkdir")) return "FRR tried to create a directory that already exists. Noise unless the path itself is wrong.";
+  if (t.includes("configuration file")) return "FRR could not read or write its config file.";
+  return "No built-in rule matched this shape.";
+}
+
 function render(r) {
   // Hide the idle welcome panel once we have a real result
   const idle = $("idle-state");
@@ -743,6 +783,23 @@ function render(r) {
   _setHealthStatZero("hs-crit", sc.critical);
   _setHealthStatZero("hs-high", sc.high);
   _setHealthStatZero("hs-med",  sc.medium);
+
+  const handoff = r.handoff || {};
+  const hPanel = $("handoff-panel");
+  if (hPanel) {
+    if (handoff.brief) {
+      hPanel.style.display = "block";
+      $("handoff-brief").textContent = handoff.brief;
+      const ticket = handoff.ticket || {};
+      $("handoff-posted").textContent = ticket.posted ? "(posted)" : "(not posted)";
+      $("handoff-ticket-meta").textContent =
+        [ticket.urgency, ticket.configuration_item, ticket.short_description]
+          .filter(Boolean).join(" · ");
+      $("handoff-notes").textContent = ticket.work_notes || handoff.paste || "";
+    } else {
+      hPanel.style.display = "none";
+    }
+  }
 
   // Summary
   $("summary-panel").style.display = "block";
@@ -828,7 +885,10 @@ function render(r) {
         const flags = (t.severity_hint !== "info" ? "⚠" : "") + (t.is_new ? " 🆕" : "");
         const tr = el("tr", { className: t.severity_hint !== "info" ? "sev-row-medium" : "" },
           el("td", { text: flags.trim() }),
-          el("td", {}, el("span", { className: "row-msg", text: t.template })),
+          el("td", {},
+            el("div", { className: "row-msg", text: t.template, style: { whiteSpace: "pre-wrap", maxWidth: "520px" } }),
+            el("div", { className: "row-msg", text: unknownHint(t.template), style: { color: "var(--muted)", marginTop: "2px" } }),
+          ),
           el("td", { text: String(t.count) }),
           el("td", { text: hostLabel }),
         );
@@ -850,8 +910,10 @@ function render(r) {
       clear(list);
       tl.forEach((n) => {
         const cause = n.cause_of ? ` ← ${n.cause_of}` : "";
+        const when = n.t && n.t !== "—" ? n.t : "time unknown";
+        const sample = n.sample ? ` — ${n.sample}` : "";
         list.appendChild(el("li", {
-          text: `${n.t} · ${n.device} · ${n.severity} · ${n.title}${cause}`,
+          text: `${when} · ${n.device} · ${n.severity} · ${n.title}${sample}${cause}`,
         }));
       });
     } else {
@@ -1882,9 +1944,8 @@ function _edgeLabels(e, layer) {
     // VTEP shown on each node. Show VNI list only if present and short.
     const vnis = [...(e.l2_vnis || []), ...(e.l3_vnis || [])];
     if (!vnis.length) return { src: "", tgt: "", mid: "" };
-    const head = vnis.slice(0, 3).join(",");
-    const more = vnis.length > 3 ? ` +${vnis.length - 3}` : "";
-    return { src: "", tgt: "", mid: `VNI ${head}${more}` };
+    if (vnis.length === 1) return { src: "", tgt: "", mid: `VNI ${vnis[0]}` };
+    return { src: "", tgt: "", mid: `${vnis.length} VNIs` };
   }
   return { src: "", tgt: "", mid: "" };
 }
@@ -2702,6 +2763,17 @@ function switchSideTab(name) {
   });
   // Reset both the page scroll and the sidebar's internal scroll — avoids
   // landing on a tab at a confusing scroll position from the previous one.
+  const siteOnly = ["topo-panel", "site-panel", "compliance-panel", "copilot-panel", "pm-panel", "site-wide-panel"];
+  if (name !== "site") {
+    siteOnly.forEach((id) => {
+      const panel = $(id);
+      if (panel) panel.style.display = "none";
+    });
+  } else if (typeof _topoState !== "undefined" && _topoState.topo) {
+    const topo = $("topo-panel");
+    if (topo) topo.style.display = "block";
+  }
+  hideIdleStateIfAnyPanelVisible();
   window.scrollTo({ top: 0, behavior: "smooth" });
   const aside = document.querySelector("aside");
   if (aside) aside.scrollTop = 0;
@@ -2750,6 +2822,32 @@ async function loadTailSources() {
       sel.lastChild.value = "";
     }
   } catch { /* sources API unavailable — leave empty */ }
+}
+
+
+async function listenLocalSyslog() {
+  const btn = $("tail-listen-btn");
+  if (btn) btn.disabled = true;
+  try {
+    await fetchJSON("/api/sources", {
+      method: "POST",
+      body: JSON.stringify({
+        id: "lab-syslog",
+        type: "syslog",
+        url: "udp://127.0.0.1:5514",
+        extra: { bind: "127.0.0.1", port: "5514", proto: "udp" },
+      }),
+    });
+    await loadTailSources();
+    if ($("tail-source")) $("tail-source").value = "lab-syslog";
+    setStatus("Listening for syslog on UDP 127.0.0.1:5514");
+    toast("Syslog listener ready on UDP 5514", "success");
+  } catch (err) {
+    setStatus(`Syslog listener failed: ${err.message}`);
+    toast(`Syslog listener failed: ${err.message}`, "error", 6000);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function stopLiveTail() {
@@ -2897,9 +2995,15 @@ document.addEventListener("DOMContentLoaded", () => {
   loadSamples();
   loadSites();
   $("use-llm").addEventListener("change", async (e) => {
-    await fetchJSON("/api/llm/toggle", {
-      method: "POST", body: JSON.stringify({ enabled: e.target.checked }),
-    });
+    e.target.dataset.userSet = "1";
+    try {
+      await fetchJSON("/api/llm/toggle", {
+        method: "POST", body: JSON.stringify({ enabled: e.target.checked }),
+      });
+    } catch (err) {
+      e.target.checked = !e.target.checked;
+      setStatus(`Could not change LLM: ${err.message}`);
+    }
     refreshLLMStatus();
   });
   showSourceControls();
@@ -2909,6 +3013,8 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshRules();
   const ruleBtn = $("rule-add-btn");
   if (ruleBtn) ruleBtn.addEventListener("click", addCustomRule);
+  const tailListen = $("tail-listen-btn");
+  if (tailListen) tailListen.addEventListener("click", listenLocalSyslog);
   refreshRecentPathsDatalist();   // hydrate File Path autocomplete from localStorage
 
   // Sidebar overflow detection — toggles the bottom-fade scroll hint when the
