@@ -25,13 +25,6 @@ loose semantic versioning.
   non-Meraki VPN down classify on their own. When the incident journal is on,
   the brief names a host and category seen at least twice in seven days.
 
-- **0.7.0 incident handoff.** `handoff.incident_handoff` builds a paste card from the
-  health score, blast radius, change window, and top actions, then runs that
-  card through the sanitize gate. The analysis payload includes it as `handoff`.
-  Raw syslog stays out of the paste. Commercial NOC tools already post incident
-  stories into Slack and ServiceNow; this is the local preview that strips
-  secrets and public IPs before that paste.
-
 ### Fixed
 
 - **Restore auto-detection parsing** (#19). `tfsm-fire` stays off the dependency
@@ -105,6 +98,17 @@ loose semantic versioning.
   After flooring, remaining early commits (or leftover flaps, when no
   commit sat in the prefix) are swapped for true late commits rather
   than evicting the storm.
+
+## [0.7.0] - 2026-10-08
+
+### Added
+
+- **0.7.0 incident handoff.** `handoff.incident_handoff` builds a paste card from the
+  health score, blast radius, change window, and top actions, then runs that
+  card through the sanitize gate. The analysis payload includes it as `handoff`.
+  Raw syslog stays out of the paste. Commercial NOC tools already post incident
+  stories into Slack and ServiceNow; this is the local preview that strips
+  secrets and public IPs before that paste.
 
 ## [0.6.0] - 2026-08-29
 
