@@ -20,6 +20,8 @@ from collections.abc import Callable
 
 import requests
 
+from ai_log_analyzer.dedup import deduplicate_logs, is_dedup_enabled
+
 # Single shared HTTP session — connection pooling reduces per-call overhead
 _SESSION = requests.Session()
 
@@ -121,6 +123,21 @@ def set_provider(provider: str) -> tuple[bool, str]:
 def set_enabled(enabled: bool) -> bool:
     _state["enabled"] = bool(enabled)
     return _state["enabled"]
+
+
+def prepare_log_samples(messages: list[str]) -> str:
+    """Join sample log lines for an LLM prompt.
+
+    When Drain-style dedup is on, compress repeated templates first so a
+    syslog burst does not dominate the prompt. Default is a passthrough so
+    existing tests and behaviour stay unchanged.
+    """
+    if not messages:
+        return "  (no samples)"
+    if is_dedup_enabled():
+        compact = deduplicate_logs(messages).format_for_llm()
+        return compact or "  (no samples)"
+    return "\n".join(f"  - {m}" for m in messages)
 
 
 def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | None:

@@ -180,7 +180,7 @@ def test_web_empty_file_still_404(monkeypatch, tmp_path):
 # ── CLI streaming path (was 0% covered) ─────────────────────────────────────
 
 def _ns(**kw) -> argparse.Namespace:
-    base = {"frr": None, "file": None, "stdin": False, "tail": 200, "no_llm": True}
+    base = {"frr": None, "file": None, "stdin": False, "tail": 200, "no_llm": True, "dedup": False}
     base.update(kw)
     return argparse.Namespace(**base)
 

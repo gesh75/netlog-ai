@@ -19,6 +19,7 @@ from collections.abc import Iterable
 
 from ai_log_analyzer.adapters.file import parse_lines
 from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.ingest import decode_bytes, sanitize_raw_line
 from ai_log_analyzer.sources.base import SourceConfig, SourceError, registry
 
 log = logging.getLogger(__name__)
@@ -164,10 +165,10 @@ class SyslogListenerSource:
 
     def _ingest(self, raw: bytes) -> None:
         try:
-            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            line = sanitize_raw_line(decode_bytes(raw).rstrip("\r\n"))
         except Exception:
             return
-        if not line:
+        if not line.strip():
             return
         with self._lock:
             self._buffer.append(line)

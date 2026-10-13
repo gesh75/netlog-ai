@@ -8,6 +8,10 @@ loose semantic versioning.
 
 ### Added
 
+- **Drain-style log deduplication** (`dedup.py`). `NetworkLogDeduplicator` masks IPv4/IPv6, MAC, interface, ASN, hex, PID, and number tokens, clusters identical templates, and emits compact `[DEDUP xN]` lines for LLM prompts. Opt-in via `analyze(..., dedup=True)`, `--dedup`, or `AI_LOG_ANALYZER_DEDUP=1` — default off so classification counts and the streaming memory bound stay unchanged.
+- **Ingestion hardening.** File/syslog ingest now replaces bad encodings, strips BOM and control characters, blanks out-of-range timestamps, and caps oversized lines (`AI_LOG_ANALYZER_MAX_LINE_BYTES`, default 64KiB) and files (`AI_LOG_ANALYZER_MAX_FILE_BYTES`, default unlimited for the CLI).
+- **Optional NetBox enrichment** (`netbox.py`). When `NETBOX_URL` and `NETBOX_TOKEN` are set, analysis attaches device site/role/type from the NetBox REST API via stdlib `urllib`. Unset = no-op, no network. The token is never logged.
+
 - **Readable unknowns, shorter VXLAN labels, a local syslog listen button, and an LLM checkbox that stays off.** Unknown-pattern rows wrap and carry a one-line meaning. VXLAN edges show a count instead of every VNI. Live tail can open UDP 5514. Unchecking Use LLM is no longer overwritten by the status poll.
 
 - **Shift brief on the Logs tab.** After an analysis, the UI shows the sanitized
