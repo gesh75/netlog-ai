@@ -80,7 +80,8 @@
 
 | File | Size | Use |
 |------|------|-----|
-| [`demo.mp4`](https://github.com/gesh75/netlog-ai/releases/download/media-2026-06/demo.mp4) | 9.0 MB | **LinkedIn upload** (H.264, 1920×1080, faststart, no audio) |
+| [`linkedin-v1.1.0.png`](assets/linkedin-v1.1.0.png) | 550 KB | **LinkedIn post image** (2400×1260, 2× retina dark-mode preview card) |
+| [`demo.mp4`](https://github.com/gesh75/netlog-ai/releases/download/media-2026-06/demo.mp4) | 9.0 MB | **LinkedIn video option** (H.264, 1920×1080, faststart, no audio) |
 | [`demo.webm`](https://github.com/gesh75/netlog-ai/releases/download/media-2026-06/demo.webm) | 9.5 MB | GitHub README inline + Mastodon |
 | [`demo-720p.webm`](https://github.com/gesh75/netlog-ai/releases/download/media-2026-06/demo-720p.webm) | 3.8 MB | Lightweight embed (1280×720 VP9) |
 | `demo-poster.png` | 348 KB | LinkedIn thumbnail + README hero |
