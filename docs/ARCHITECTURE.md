@@ -12,11 +12,12 @@ xAI Grok) write a 5-phase root-cause playbook with copy-pastable per-vendor CLI 
 invariant is **sanitize-before-LLM** — every config and log is scrubbed of secrets and public IPs before
 any outbound call — and it degrades gracefully to a deterministic rule-based KB when no model is available.
 The same analyzer core is exposed three ways: a no-build Flask + vanilla-JS dashboard (port 6060), a CLI,
-and an MCP server for agent clients like Claude Code. v1.1.0 adds vendor-safe remediation guardrails (commit timers)
-and two-way Jira / ServiceNow ITSM integration. v1.0.0 adds protocol-aware EVPN-VXLAN bipartite causal inference
-and optical/counter telemetry interlocking. v0.9.0 adds drain-style syslog dedup, IPv6/MAC sanitize vault tokenization,
-and NetBox v4.x manifest resolution. v0.7.0 adds a sanitized incident-handoff paste. v0.6.0 adds a causal console
-(timeline, blast radius, change-window correlator) plus a sanitize-diff viewer.
+and an MCP server (15 tools) for agent clients like Claude Code. Release v1.1.0 integrates 5-layer EVPN-VXLAN
+causal inference, optical DOM vs. QoS telemetry interlocking, vendor-safe remediation guardrails (commit confirmed,
+commit timers, checkpoints), two-way Jira and ServiceNow incident enrichment, Drain-style log deduplication,
+NetBox v4.x automated topology resolution, a causal console (timeline, blast radius, change-window correlator),
+and a sanitized incident-handoff paste card.
+
 
 ---
 

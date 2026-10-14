@@ -47,13 +47,15 @@ netlog-ai now ships a **pluggable connector layer** so it doesn't just analyze
 pasted logs — it pulls from any common log source (full guide:
 [docs/CONNECTORS.md](docs/CONNECTORS.md)).
 
-| Connector  | Source              | One-line setup |
-|------------|---------------------|----------------|
-| `kibana`   | Elasticsearch / Kibana | `NETLOG_SOURCE_kibana_URL=… NETLOG_SOURCE_kibana_API_TOKEN=…` |
-| `splunk`   | Splunk REST search  | `NETLOG_SOURCE_splunk_URL=… NETLOG_SOURCE_splunk_API_TOKEN=…` |
-| `loki`     | Grafana Loki        | `NETLOG_SOURCE_loki_URL=… NETLOG_SOURCE_loki_API_TOKEN=…` |
-| `syslog`   | UDP/TCP listener    | Zero-config — point any device at port 5514 |
-| `librenms` | LibreNMS REST       | `NETLOG_SOURCE_librenms_URL=… NETLOG_SOURCE_librenms_API_TOKEN=…` |
+| Connector   | Source                 | One-line setup |
+|-------------|------------------------|----------------|
+| `kibana`    | Elasticsearch / Kibana | `NETLOG_SOURCE_kibana_URL=… NETLOG_SOURCE_kibana_API_TOKEN=…` |
+| `splunk`    | Splunk REST search     | `NETLOG_SOURCE_splunk_URL=… NETLOG_SOURCE_splunk_API_TOKEN=…` |
+| `loki`      | Grafana Loki           | `NETLOG_SOURCE_loki_URL=… NETLOG_SOURCE_loki_API_TOKEN=…` |
+| `syslog`    | UDP/TCP listener       | Zero-config — point any device at port 5514 |
+| `librenms`  | LibreNMS REST          | `NETLOG_SOURCE_librenms_URL=… NETLOG_SOURCE_librenms_API_TOKEN=…` |
+| `netbox`    | NetBox v4.x REST / DCIM| `NETLOG_SOURCE_netbox_URL=… NETLOG_SOURCE_netbox_API_TOKEN=…` |
+| `telemetry` | Prometheus REST        | `NETLOG_SOURCE_telemetry_PROMETHEUS_URL=…` |
 
 And the analyzer engine is now **agent-callable** via a built-in MCP server:
 
@@ -62,17 +64,24 @@ pip install 'netlog-ai[mcp]'
 netlog-ai mcp        # stdio transport — wire into Claude Code, Cursor, Continue
 ```
 
-Tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
+15 agent tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
 `analyze_logs`, `get_top_offenders`, `correlate_sources`, `analyze_device`,
-`list_sites`, `analyze_site`, plus healthcheck + connector inventory. See
+`list_sites`, `analyze_site`, `analyze_evpn_causality`, `generate_remediation_plan`,
+`enrich_itsm_incident`, plus healthcheck + connector inventory. See
 [docs/CONNECTORS.md](docs/CONNECTORS.md) for the full reference.
 
 ## Features
 
 | | |
 |---|---|
-| 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
-| 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly as agent tools |
+| 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, NetBox v4.x, Prometheus telemetry, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
+| 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly via 15 agent tools |
+| 🌐 **EVPN Causal Engine** | 5-layer bipartite graph (L1 Physical → L2 Link → L3 Underlay → L4 Overlay → L5 Services) with 2-hop topological symptom suppression and root-cause isolation |
+| 🔒 **Safe Remediation** | Vendor-safe change plan generation (`remediation.py`) with auto-revert timers (`commit confirmed`, `commit timer`, `checkpoint`, `revert timer`), destructive command blocklist, and post-check assertions |
+| 🎫 **Two-Way ITSM** | Bi-directional Jira Service Management and ServiceNow incident enrichment with deterministic `NETLOG-<SHA256>` deduplication keys |
+| 📊 **Telemetry Fusion** | Optical DOM (Rx dBm) vs. QoS queue discard correlation (`telemetry.py`) to separate dirty fiber from microburst drops |
+| 🗜️ **Drain-style Dedup** | Fixed-depth parse tree log clustering (`dedup.py`) with RFC 5424 PRI strip, yielding 90%+ prompt token savings during storms |
+| 🗄️ **Sanitize Vault** | Stateful reversible token vault (`sanitize_vault.py`) for IPv4, IPv6, MAC, and ASN addresses across EVPN Type-2 routes |
 | 🔗 **Cross-source correlation** | **Device tab** → *Correlate Sources*: scans every registered source and tags each host `confirmed` (flagged by ≥ 2 sources) or `suspected` (1) in a sortable, severity-coded table |
 | 🔬 **Per-device triage** | **Device tab** → *Triage Device*: one host's verdict + 0–100 health score, severity histogram, top processes, and deduped error patterns in a single panel |
 | 🔎 **Classify** | 80 regex patterns across Junos, EOS, FRR, **Cisco IOS-XE, NX-OS, Nokia SR Linux, SONiC, Cumulus**, RFC-3164/5424 — each event carries a confidence score; add your own rules via `AI_LOG_ANALYZER_CUSTOM_RULES` / `POST /api/rules` or the UI editor |

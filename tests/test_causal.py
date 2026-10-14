@@ -1311,7 +1311,7 @@ def _storm_with_commit(commit_ts: str, storm_ts: str) -> list[LogEvent]:
 def test_analyze_change_window_survives_severity_cap():
     """Config commits are low-severity; a 300+ storm must not hide them.
 
-    The 0.6 causal console treats a commit inside the window as
+    The causal console treats a commit inside the window as
     change-induced. If analyze() only feeds the severity-priority top_k
     into change_window/timeline, a fabric-wide BGP flap produces a false
     negative on the headline signal.

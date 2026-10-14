@@ -1,8 +1,10 @@
 # netlog-ai
 
-AI-powered network log analyzer with LLM-assisted root-cause analysis for Junos, EOS, and FRR.
-Runs against a local Docker Model Runner or Anthropic Claude, and sanitizes log content before
-it reaches any model. MIT licensed, published to PyPI.
+AI-powered network log analyzer with EVPN-VXLAN causal RCA, optical/QoS telemetry fusion,
+vendor-safe remediation, and ITSM enrichment for Junos, Arista EOS, Cisco IOS-XE/NX-OS,
+Nokia SR Linux, SONiC, Cumulus, and FRR.
+Runs against a local Docker Model Runner, Ollama, Anthropic Claude, or xAI Grok, and
+sanitizes log content before it reaches any model. MIT licensed, published to PyPI.
 
 **Stack.** Python >=3.10, packaged via `pyproject.toml`. Docker + docker-compose. JS front end.
 
@@ -11,13 +13,10 @@ it reaches any model. MIT licensed, published to PyPI.
 ## Build and test
 
 ```bash
-python -m pip install --upgrade pip
-python -m pip install -e '.[dev]'
-python -m pytest -q
+uv run --extra dev --extra all pytest
+uv run --extra dev ruff check src/ tests/
 ```
 
-Note: the `parse` and `all` extras pin `tfsm-fire`, which is **not published on PyPI**. Install
-the `dev` extra for development; `.[all,dev]` currently fails to resolve.
 
 ## Engineering conventions (non-negotiable)
 

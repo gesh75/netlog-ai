@@ -47,7 +47,7 @@
   </g>
 
   <!-- Title -->
-  <text x="640" y="50" text-anchor="middle" font-size="26" font-weight="700" fill="#f0f6fc">netlog-ai · Architecture</text>
+  <text x="640" y="50" text-anchor="middle" font-size="26" font-weight="700" fill="#f0f6fc">netlog-ai v1.1.0 · Architecture</text>
   <text x="640" y="74" text-anchor="middle" font-size="13" fill="#8b949e">Network logs in. Ranked actions out. — local-first, multi-vendor, sanitize-before-LLM</text>
 
   <!-- Column headers -->
@@ -152,7 +152,7 @@
     <g transform="translate(560,250)">
       <rect width="160" height="60" rx="10" fill="#0d1117" stroke="#f59e0b" stroke-opacity="0.7" filter="url(#glow)"/>
       <text x="80" y="22" text-anchor="middle" font-size="12" fill="#f59e0b" font-weight="700">🔎 Classify</text>
-      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">50+ regex patterns</text>
+      <text x="80" y="40" text-anchor="middle" font-size="10" fill="#8b949e">80+ regex patterns</text>
       <text x="80" y="53" text-anchor="middle" font-size="10" fill="#8b949e">Junos · EOS · FRR · IOS</text>
     </g>
     <g transform="translate(560,330)">
@@ -415,6 +415,6 @@
 
   <!-- Legend dot pulse animation -->
   <g transform="translate(640,700)" text-anchor="middle">
-    <text font-size="10" fill="#6b7280">github.com/gesh75/netlog-ai · MIT · 237 tests passing</text>
+    <text font-size="10" fill="#6b7280">github.com/gesh75/netlog-ai · MIT · 584 tests passing</text>
   </g>
 </svg>

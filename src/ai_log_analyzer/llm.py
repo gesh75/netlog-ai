@@ -4,7 +4,7 @@
   - "local"       : Docker Model Runner (OpenAI-compatible) via TCP or Unix socket
   - "claude"      : Anthropic Claude direct API
   - "claude-only" : Claude only (never call local)
-  - "grok"        : xAI Grok (OpenAI-compatible) — sanitize-first, first-class in 0.6
+  - "grok"        : xAI Grok (OpenAI-compatible) — sanitize-first, first-class support
 
 Provider is selectable at runtime via set_provider() — used by /api/llm/provider.
 Always returns either a cleaned string or None (caller falls back to rule-based KB).
