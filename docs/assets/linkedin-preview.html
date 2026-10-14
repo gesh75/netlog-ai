@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    width: 2400px;
+    height: 1260px;
+    background: #080c18;
+    color: #f1f5f9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 70px 80px 65px 80px;
+  }
+
+  /* Ambient Glow Orbs */
+  .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .orb-1 {
+    width: 800px;
+    height: 800px;
+    top: -200px;
+    left: 200px;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.22) 0%, rgba(56, 189, 248, 0.08) 60%, transparent 80%);
+  }
+  .orb-2 {
+    width: 900px;
+    height: 700px;
+    bottom: -150px;
+    right: 150px;
+    background: radial-gradient(circle, rgba(168, 85, 247, 0.20) 0%, rgba(236, 72, 153, 0.08) 60%, transparent 80%);
+  }
+  .orb-3 {
+    width: 600px;
+    height: 600px;
+    top: 350px;
+    left: 900px;
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.12) 0%, transparent 70%);
+  }
+
+  /* Cyber Grid Background */
+  .grid-bg {
+    position: absolute;
+    inset: 0;
+    background-image: 
+      linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    background-size: 60px 60px;
+    mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 1) 40%, rgba(0, 0, 0, 0.2) 90%);
+    z-index: 1;
+  }
+
+  /* Header Container */
+  .header {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .header-left {
+    max-width: 1700px;
+  }
+  .brand-row {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin-bottom: 14px;
+  }
+  .brand-logo {
+    width: 58px;
+    height: 58px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #0284c7, #6366f1 60%, #a855f7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 35px rgba(99, 102, 241, 0.55), inset 0 0 15px rgba(255, 255, 255, 0.35);
+  }
+  .brand-title {
+    font-size: 68px;
+    font-weight: 850;
+    letter-spacing: -0.035em;
+    background: linear-gradient(135deg, #ffffff 20%, #cbd5e1 60%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .version-tag {
+    font-size: 30px;
+    font-weight: 700;
+    padding: 6px 18px;
+    border-radius: 100px;
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(99, 102, 241, 0.25));
+    border: 1.5px solid rgba(56, 189, 248, 0.45);
+    color: #38bdf8;
+    box-shadow: 0 0 25px rgba(56, 189, 248, 0.25);
+    -webkit-text-fill-color: #38bdf8;
+    letter-spacing: -0.01em;
+  }
+  .tag-release {
+    font-size: 20px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    color: #34d399;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .subtitle {
+    font-size: 31px;
+    font-weight: 450;
+    color: #94a3b8;
+    line-height: 1.35;
+    letter-spacing: -0.015em;
+  }
+  .subtitle b {
+    color: #e2e8f0;
+    font-weight: 600;
+  }
+  .header-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+  }
+  .badge-mit {
+    font-size: 20px;
+    font-weight: 600;
+    padding: 8px 20px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #cbd5e1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .badge-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 12px #10b981;
+  }
+  .airgap-pill {
+    font-size: 19px;
+    font-weight: 550;
+    color: #64748b;
+    letter-spacing: 0.02em;
+  }
+
+  /* 5-Tier Pipeline Container */
+  .pipeline-section {
+    position: relative;
+    z-index: 2;
+    margin: 30px 0 25px 0;
+  }
+  .section-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .section-label {
+    font-size: 19px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-label-line {
+    height: 1px;
+    flex: 1;
+    background: linear-gradient(to right, rgba(100, 116, 139, 0.3), transparent);
+    margin-left: 18px;
+  }
+  .pipeline-grid {
+    display: grid;
+    grid-template-columns: 1fr 42px 1fr 42px 1.22fr 42px 1.05fr 42px 1.15fr;
+    align-items: center;
+  }
+
+  /* Flow Arrow */
+  .arrow-col {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .arrow-svg {
+    width: 34px;
+    height: 34px;
+    stroke: rgba(148, 163, 184, 0.45);
+    stroke-width: 2.5;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* Pipeline Card */
+  .pipe-card {
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(20px);
+    border-radius: 20px;
+    padding: 30px 26px;
+    border: 1.5px solid rgba(255, 255, 255, 0.08);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 480px;
+    box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+  }
+
+  /* Hero Card Highlight (EVPN Causal Engine) */
+  .card-hero {
+    background: linear-gradient(165deg, rgba(24, 20, 52, 0.85) 0%, rgba(15, 23, 42, 0.8) 100%);
+    border: 2px solid rgba(168, 85, 247, 0.55);
+    box-shadow: 0 0 50px rgba(168, 85, 247, 0.25), 0 25px 50px -12px rgba(0, 0, 0, 0.65), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  }
+
+  .card-top {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .card-tier-tag {
+    font-size: 15px;
+    font-weight: 750;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tier-1 { color: #38bdf8; }
+  .tier-2 { color: #a78bfa; }
+  .tier-3 { color: #f472b6; }
+  .tier-4 { color: #fbbf24; }
+  .tier-5 { color: #34d399; }
+
+  .card-title {
+    font-size: 26px;
+    font-weight: 750;
+    color: #ffffff;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+  }
+  .card-desc {
+    font-size: 16.5px;
+    color: #94a3b8;
+    line-height: 1.45;
+    margin-top: 4px;
+  }
+
+  .card-body {
+    margin: 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .feature-pill {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 15px;
+    color: #cbd5e1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    line-height: 1.3;
+  }
+  .feature-pill code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 14.5px;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.1);
+    padding: 2px 6px;
+    border-radius: 5px;
+  }
+
+  /* Hierarchy Visual in Tier 3 */
+  .hierarchy-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .hierarchy-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .h-layer {
+    font-family: ui-monospace, monospace;
+    font-size: 12.5px;
+    color: #f472b6;
+  }
+  .h-name {
+    color: #e2e8f0;
+  }
+  .h-action {
+    font-size: 12px;
+    color: #10b981;
+    background: rgba(16, 185, 129, 0.15);
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .h-suppress {
+    font-size: 12px;
+    color: #fb7185;
+    background: rgba(244, 63, 94, 0.15);
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+
+  .card-footer {
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .footer-highlight {
+    font-size: 15px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Bottom Metrics Row */
+  .bottom-bar {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(15, 23, 42, 0.5);
+    backdrop-filter: blur(15px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 20px 32px;
+  }
+  .metrics-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .metric-badge {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .metric-val {
+    font-size: 24px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: -0.02em;
+  }
+  .metric-lbl {
+    font-size: 16px;
+    font-weight: 550;
+    color: #94a3b8;
+  }
+
+  .vendor-pill {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 24px;
+    border-radius: 12px;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    font-size: 17px;
+    font-weight: 650;
+    color: #e2e8f0;
+  }
+  .vendor-sep {
+    color: rgba(148, 163, 184, 0.4);
+  }
+  .vendor-item {
+    color: #f8fafc;
+  }
+
+  .metrics-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 17px;
+    font-weight: 550;
+    color: #64748b;
+  }
+  .repo-tag {
+    color: #38bdf8;
+    font-family: ui-monospace, monospace;
+    font-size: 17px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+  <!-- Background Orbs and Mesh -->
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+  <div class="grid-bg"></div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="brand-row">
+        <div class="brand-logo">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+        </div>
+        <div class="brand-title">
+          netlog-ai
+          <span class="version-tag">v1.1.0</span>
+          <span class="tag-release">Official Release</span>
+        </div>
+      </div>
+      <div class="subtitle">
+        <b>AI-Assisted Network Observability</b>, <b>EVPN-VXLAN Causal RCA</b> & <b>Vendor-Safe Remediation</b>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="badge-mit">
+        <span class="badge-dot"></span>
+        MIT Open Source · 100% Local Execution
+      </div>
+      <div class="airgap-pill">
+        🛡️ Zero-Telemetry · Air-Gapped Laptop & Bastion Architecture
+      </div>
+    </div>
+  </header>
+
+  <!-- 5-Tier Pipeline Diagram -->
+  <section class="pipeline-section">
+    <div class="section-label-row">
+      <div class="section-label">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.5"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        End-to-End Operational Pipeline
+        <span class="section-label-line"></span>
+      </div>
+      <div style="font-size:16px;color:#64748b;font-weight:600;">
+        Raw Multi-Vendor Logs &rarr; Closed-Loop ITSM Resolution
+      </div>
+    </div>
+
+    <div class="pipeline-grid">
+      <!-- Tier 1 -->
+      <div class="pipe-card">
+        <div class="card-top">
+          <div class="card-tier-tag tier-1">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            01 · Ingestion & Discovery
+          </div>
+          <div class="card-title">Syslog & NetBox v4.x</div>
+          <div class="card-desc">Pluggable streaming ingest & topology adjacency</div>
+        </div>
+        <div class="card-body">
+          <div class="feature-pill">
+            <span>📡</span>
+            <span>Zero-config <code>UDP 5514</code> syslog listener</span>
+          </div>
+          <div class="feature-pill">
+            <span>🗺️</span>
+            <span>NetBox REST v4.x cable manifest & fallback</span>
+          </div>
+          <div class="feature-pill">
+            <span>🔌</span>
+            <span>Kibana, Splunk, Loki & LibreNMS connectors</span>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="footer-highlight" style="color:#38bdf8;">
+            <span>⚡ Multi-Source Ingest</span>
+          </div>
+          <span style="font-size:14px;color:#64748b;">7 Connectors</span>
+        </div>
+      </div>
+
+      <!-- Arrow 1 -->
+      <div class="arrow-col">
+        <svg class="arrow-svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+
+      <!-- Tier 2 -->
+      <div class="pipe-card">
+        <div class="card-top">
+          <div class="card-tier-tag tier-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+            02 · Pre-LLM Clustering
+          </div>
+          <div class="card-title">Drain Log Dedup</div>
+          <div class="card-desc">Template clustering & PII/MAC/IPv6 token vault</div>
+        </div>
+        <div class="card-body">
+          <div class="feature-pill">
+            <span>🌲</span>
+            <span>Fixed-depth parse tree template clustering</span>
+          </div>
+          <div class="feature-pill">
+            <span>🔒</span>
+            <span>Reversible Token Vault (IPv6/MAC/ASN mask)</span>
+          </div>
+          <div class="feature-pill">
+            <span>🏷️</span>
+            <span>RFC 5424 PRI & Cisco sequence prefix strip</span>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="footer-highlight" style="color:#a78bfa;">
+            <span>📉 -90% Prompt Tokens</span>
+          </div>
+          <span style="font-size:14px;color:#64748b;">Bounded RAM</span>
+        </div>
+      </div>
+
+      <!-- Arrow 2 -->
+      <div class="arrow-col">
+        <svg class="arrow-svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+
+      <!-- Tier 3 (Hero) -->
+      <div class="pipe-card card-hero">
+        <div class="card-top">
+          <div class="card-tier-tag tier-3">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            03 · CLOS Bipartite Engine
+          </div>
+          <div class="card-title">5-Layer EVPN Causal</div>
+          <div class="card-desc">Protocol hierarchy with 2-hop topological suppression</div>
+        </div>
+        <div class="card-body">
+          <div class="hierarchy-box">
+            <div class="hierarchy-row">
+              <span class="h-layer">L5 OVERLAY</span>
+              <span class="h-name">EVPN Type-2 / Type-5 Flaps</span>
+              <span class="h-suppress">SUPPRESSED</span>
+            </div>
+            <div class="hierarchy-row">
+              <span class="h-layer">L4 VTEP</span>
+              <span class="h-name">NVE Tunnel Drops</span>
+              <span class="h-suppress">SUPPRESSED</span>
+            </div>
+            <div class="hierarchy-row" style="background:rgba(236, 72, 153, 0.2);border:1px solid rgba(244, 114, 182, 0.4);">
+              <span class="h-layer" style="color:#ffffff;">L1-L3 ROOT</span>
+              <span class="h-name" style="color:#ffffff;font-weight:700;">Underlay Link / BGP / BFD Flap</span>
+              <span class="h-action">ROOT CAUSE</span>
+            </div>
+          </div>
+          <div class="feature-pill" style="margin-top:4px;">
+            <span>🔄</span>
+            <span>EVPN MAC Mobility & duplicate freeze recovery</span>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="footer-highlight" style="color:#f472b6;">
+            <span>🎯 Zero Alert Storms</span>
+          </div>
+          <span style="font-size:14px;color:#c084fc;">120s Window</span>
+        </div>
+      </div>
+
+      <!-- Arrow 3 -->
+      <div class="arrow-col">
+        <svg class="arrow-svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+
+      <!-- Tier 4 -->
+      <div class="pipe-card">
+        <div class="card-top">
+          <div class="card-tier-tag tier-4">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            04 · Counter Interlocking
+          </div>
+          <div class="card-title">Optical DOM vs QoS</div>
+          <div class="card-desc">Diagnostic fusion separates physics from buffer drops</div>
+        </div>
+        <div class="card-body">
+          <div class="feature-pill">
+            <span>🔬</span>
+            <span>Low Rx dBm + CRC = Degraded Transceiver</span>
+          </div>
+          <div class="feature-pill">
+            <span>✂️</span>
+            <span>Hard Rx LOS + 0 CRC = Dark-Fiber Cut</span>
+          </div>
+          <div class="feature-pill">
+            <span>🌊</span>
+            <span>High Queue Drops = Microburst / CoPP Starvation</span>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="footer-highlight" style="color:#fbbf24;">
+            <span>📊 Physical Telemetry</span>
+          </div>
+          <span style="font-size:14px;color:#64748b;">Prometheus Bridge</span>
+        </div>
+      </div>
+
+      <!-- Arrow 4 -->
+      <div class="arrow-col">
+        <svg class="arrow-svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+
+      <!-- Tier 5 -->
+      <div class="pipe-card">
+        <div class="card-top">
+          <div class="card-tier-tag tier-5">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            05 · Safe Closed-Loop Triage
+          </div>
+          <div class="card-title">Rollback CLI & ITSM</div>
+          <div class="card-desc">Timed commit change plans with Jira / ServiceNow</div>
+        </div>
+        <div class="card-body">
+          <div class="feature-pill">
+            <span>⏱️</span>
+            <span>Auto-revert timers (<code>commit confirmed</code>)</span>
+          </div>
+          <div class="feature-pill">
+            <span>🛡️</span>
+            <span>Destructive command guardrail blocklist</span>
+          </div>
+          <div class="feature-pill">
+            <span>🎫</span>
+            <span>Idempotent <code>NETLOG-&lt;SHA256&gt;</code> deduplication</span>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="footer-highlight" style="color:#34d399;">
+            <span>🚀 Zero Outage Risk</span>
+          </div>
+          <span style="font-size:14px;color:#64748b;">1–30m Guardrails</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom Metric Bar -->
+  <footer class="bottom-bar">
+    <div class="metrics-left">
+      <div class="metric-badge">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        <div>
+          <div class="metric-val">579 Passing Tests</div>
+          <div class="metric-lbl">Hermetic Test Suite</div>
+        </div>
+      </div>
+
+      <div class="metric-badge">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <div>
+          <div class="metric-val">15 MCP Tools</div>
+          <div class="metric-lbl">Claude Code & Agentic SDK</div>
+        </div>
+      </div>
+
+      <div class="metric-badge">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <div>
+          <div class="metric-val">7 Connectors</div>
+          <div class="metric-lbl">Syslog, NetBox, SIEM & Telemetry</div>
+        </div>
+      </div>
+
+      <div class="vendor-pill">
+        <span style="color:#64748b;font-weight:700;">OS:</span>
+        <span class="vendor-item">Arista EOS</span>
+        <span class="vendor-sep">|</span>
+        <span class="vendor-item">Juniper Junos</span>
+        <span class="vendor-sep">|</span>
+        <span class="vendor-item">Cisco NX-OS / IOS-XE</span>
+        <span class="vendor-sep">|</span>
+        <span class="vendor-item">FRR</span>
+      </div>
+    </div>
+
+    <div class="metrics-right">
+      <span>Star on GitHub:</span>
+      <span class="repo-tag">github.com/gesh75/netlog-ai</span>
+    </div>
+  </footer>
+
+</body>
+</html>
