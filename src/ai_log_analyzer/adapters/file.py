@@ -9,6 +9,11 @@ from itertools import islice
 from pathlib import Path
 
 from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.ingest import (
+    clean_timestamp,
+    iter_file_lines,
+    iter_sanitized_lines,
+)
 
 # RFC3164: "<PRI>Mmm dd HH:MM:SS host appname[pid]: message"
 _RFC3164_RE = re.compile(
@@ -90,15 +95,28 @@ def _matching_files(path: Path, pattern: str, recursive: bool) -> Iterable[Path]
                     continue
 
 
-def parse_lines(lines: Iterable[str], default_host: str = "") -> Iterable[LogEvent]:
-    """Parse any iterable of log lines, picking the first format that matches."""
-    for line in lines:
-        ev = _parse_line(line.rstrip("\n"), default_host)
+def parse_lines(
+    lines: Iterable[str | bytes],
+    default_host: str = "",
+    max_line_bytes: int | None = None,
+) -> Iterable[LogEvent]:
+    """Parse any iterable of log lines, picking the first format that matches.
+
+    Lines are sanitized first (encoding replacement, control-char strip,
+    oversized-line cap) so a hostile or corrupt feed cannot blow up parsing.
+    """
+    for line in iter_sanitized_lines(lines, max_line_bytes=max_line_bytes):
+        ev = _parse_line(line, default_host)
         if ev:
             yield ev
 
 
-def parse_file(path: str | Path, default_host: str = "") -> Iterable[LogEvent]:
+def parse_file(
+    path: str | Path,
+    default_host: str = "",
+    max_line_bytes: int | None = None,
+    max_file_bytes: int | None = None,
+) -> Iterable[LogEvent]:
     p = Path(path)
     # If the caller didn't pass a host, derive one. For SecureCRT recordings
     # the filename is `hostname (ip) -- YYYY-MM-DD_HH-MM.log` — extract just
@@ -106,11 +124,12 @@ def parse_file(path: str | Path, default_host: str = "") -> Iterable[LogEvent]:
     if not default_host:
         scrt = _SCRT_FILENAME_RE.match(p.stem)
         default_host = scrt.group("host") if scrt else p.stem
-    with p.open("r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            ev = _parse_line(line.rstrip("\n"), default_host)
-            if ev:
-                yield ev
+    for line in iter_file_lines(
+        p, max_line_bytes=max_line_bytes, max_file_bytes=max_file_bytes,
+    ):
+        ev = _parse_line(line, default_host)
+        if ev:
+            yield ev
 
 
 def parse_directory(path: str | Path, pattern: str = "*.log",
@@ -171,7 +190,7 @@ def _parse_line(line: str, default_host: str) -> LogEvent | None:
         if not msg:
             return None  # empty `§` line — just terminal padding
         return LogEvent(
-            timestamp=m.group("ts"),
+            timestamp=clean_timestamp(m.group("ts")),
             hostname=default_host,
             appname="scrt-session",
             severity_raw="info",
@@ -192,7 +211,7 @@ def _from_match(m: re.Match[str], default_host: str) -> LogEvent:
     pri = m.groupdict().get("pri")
     sev_raw = _pri_to_severity(int(pri)) if pri else "info"
     return LogEvent(
-        timestamp=m.group("ts"),
+        timestamp=clean_timestamp(m.group("ts")),
         hostname=m.group("host") or default_host,
         appname=m.group("app"),
         severity_raw=sev_raw,

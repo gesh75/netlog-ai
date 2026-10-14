@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ai_log_analyzer import kb, llm
+from ai_log_analyzer.adapters.file import parse_lines
 from ai_log_analyzer.causal import (
     _event_sort_key,
     _reference_dt,
@@ -24,7 +25,15 @@ from ai_log_analyzer.classifier import (
     LogEvent,
     iter_classify,
 )
+from ai_log_analyzer.dedup import (
+    NetworkLogDeduplicator,
+    is_dedup_enabled,
+    reset_dedup_enabled,
+    set_dedup_enabled,
+)
 from ai_log_analyzer.handoff import incident_handoff
+from ai_log_analyzer.netbox import enrich_hosts
+from ai_log_analyzer.netbox import is_enabled as netbox_is_enabled
 from ai_log_analyzer.patterns import TemplateMiner, apply_template_store
 from ai_log_analyzer.sanitize import sanitize, sanitize_report
 from ai_log_analyzer.stability import StabilityTracker
@@ -112,6 +121,7 @@ class AnalysisResult:
     sanitize_diff: dict = field(default_factory=dict)
     handoff: dict = field(default_factory=dict)
     repeat_offenders: list = field(default_factory=list)
+    netbox: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -134,6 +144,7 @@ class AnalysisResult:
             "sanitize_diff": self.sanitize_diff,
             "handoff": self.handoff,
             "repeat_offenders": self.repeat_offenders,
+            "netbox": self.netbox,
         }
 
 
@@ -245,7 +256,7 @@ def deep_analyze(
         # server keys). Same sanitize gate as the config paths — nothing
         # reaches an external LLM unscrubbed.
         safe_samples = [sanitize(m, mask_pii=True)[0] for m in sample_messages[:5]]
-        samples = "\n".join(f"  - {m}" for m in safe_samples) or "  (no samples)"
+        samples = llm.prepare_log_samples(safe_samples)
         # Descriptions are usually KB constants, but severity-promoted events
         # (raw crit/emerg/alert with no KB match) carry a raw message snippet.
         safe_description, _ = sanitize(description, mask_pii=True)
@@ -658,14 +669,53 @@ def _aggregate_stream(
     return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner, tracker, config_events
 
 
-def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3) -> AnalysisResult:
+def _event_to_raw_line(event: LogEvent) -> str:
+    """Rebuild a syslog-shaped line so the Drain miner can parse the header."""
+    if event.timestamp and event.hostname:
+        if event.appname and event.appname not in {"syslog", "scrt-session"}:
+            return f"{event.timestamp} {event.hostname} {event.appname}: {event.message}"
+        return f"{event.timestamp} {event.hostname} {event.message}"
+    return event.message
+
+
+def _dedup_events(events: Iterable[LogEvent]) -> list[LogEvent]:
+    """Compress syslog bursts before classification. Materializes the stream."""
+    lines = [_event_to_raw_line(event) for event in events]
+    result = NetworkLogDeduplicator().deduplicate(lines)
+    return list(parse_lines(cluster.to_compact_line() for cluster in result.clusters))
+
+
+def analyze(
+    events: Iterable[LogEvent],
+    use_llm: bool = True,
+    llm_top_n: int = 3,
+    dedup: bool | None = None,
+) -> AnalysisResult:
     """End-to-end pipeline: classify → action items → score → executive summary.
 
     Accepts any iterable of LogEvents — pass a generator (e.g. parse_file())
     and the whole pipeline runs in bounded memory, never holding the full
     event list. Thread-safe: never mutates global llm state. `use_llm=False`
     is enforced by forcing `llm_top_n=0` and disabling the LLM exec summary.
+
+    `dedup=True` compresses repeated syslog templates before classification
+    and LLM dispatch. Default is off (or `AI_LOG_ANALYZER_DEDUP`) so existing
+    counts and the streaming memory bound stay unchanged.
     """
+    token = set_dedup_enabled(dedup if dedup is not None else is_dedup_enabled())
+    try:
+        return _analyze_inner(events, use_llm=use_llm, llm_top_n=llm_top_n)
+    finally:
+        reset_dedup_enabled(token)
+
+
+def _analyze_inner(
+    events: Iterable[LogEvent],
+    use_llm: bool,
+    llm_top_n: int,
+) -> AnalysisResult:
+    if is_dedup_enabled():
+        events = _dedup_events(events)
     top_events, sev_counts, cat_counts, groups, by_host, miner, tracker, config_events = _aggregate_stream(
         iter_classify(events)
     )
@@ -722,6 +772,11 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
             "inside this window — treat as change-induced until proven otherwise."
         )
 
+    netbox_data = (
+        enrich_hosts(row["hostname"] for row in top_devices if row.get("hostname"))
+        if netbox_is_enabled() else {}
+    )
+
     result = AnalysisResult(
         score=score, grade=grade, grade_label=grade_label,
         severity_counts=sev_counts, category_counts=cat_counts,
@@ -737,6 +792,7 @@ def analyze(events: Iterable[LogEvent], use_llm: bool = True, llm_top_n: int = 3
         change_window=cw,
         sanitize_diff=sdiff,
         repeat_offenders=repeats,
+        netbox=netbox_data,
     )
     result.handoff = incident_handoff(result.to_dict())
     return result

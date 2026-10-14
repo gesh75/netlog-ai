@@ -37,7 +37,11 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         print("error: no input — pass --frr, --file, or --stdin", file=sys.stderr)
         return 2
 
-    result = analyze(itertools.chain([first], event_iter), use_llm=not args.no_llm)
+    result = analyze(
+        itertools.chain([first], event_iter),
+        use_llm=not args.no_llm,
+        dedup=getattr(args, "dedup", False),
+    )
     print(json.dumps(result.to_dict(), indent=2))
     return 0
 
@@ -172,6 +176,11 @@ def main() -> None:
     ap.add_argument("--stdin", action="store_true", help="Read log lines from stdin")
     ap.add_argument("--tail", type=int, default=500, help="Lines per FRR container (default 500)")
     ap.add_argument("--no-llm", action="store_true", help="Skip LLM, use rule-based KB only")
+    ap.add_argument(
+        "--dedup",
+        action="store_true",
+        help="Compress repeated syslog templates before classification (off by default)",
+    )
     ap.set_defaults(func=cmd_analyze)
 
     cp = sub.add_parser("containers", help="List running FRR lab containers")

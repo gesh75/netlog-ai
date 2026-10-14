@@ -675,6 +675,7 @@ def create_app() -> Flask:
         body = request.get_json(silent=True) or {}
         source = body.get("source", "frr")
         use_llm = _parse_bool(body.get("use_llm"), default=True)
+        dedup = _parse_bool(body.get("dedup"), default=False)
         try:
             tail = max(1, min(10000, int(body.get("tail") or 500)))
         except (TypeError, ValueError):
@@ -765,7 +766,7 @@ def create_app() -> Flask:
             return jsonify({"error": "No events ingested from source"}), 404
         events = itertools.chain([first], event_iter)
 
-        result = analyze(events, use_llm=use_llm)
+        result = analyze(events, use_llm=use_llm, dedup=dedup)
         result_dict = result.to_dict()
         webhooks.notify_analysis(result_dict, source)
         return jsonify(result_dict)
@@ -1054,7 +1055,11 @@ def create_app() -> Flask:
         if not events:
             return jsonify({"ok": True, "count": 0, "result": None,
                             "message": "no events in window"})
-        result = analyze(events, use_llm=_parse_bool(body.get("use_llm", True), default=True))
+        result = analyze(
+            events,
+            use_llm=_parse_bool(body.get("use_llm", True), default=True),
+            dedup=_parse_bool(body.get("dedup"), default=False),
+        )
         result_dict = result.to_dict()
         webhooks.notify_analysis(result_dict, f"source:{source_id}")
         return jsonify({"ok": True, "count": len(events), "result": result_dict})
