@@ -236,6 +236,48 @@ def test_analyze_dedup_flag_compresses_before_classify():
     assert result.severity_counts["high"] == 1
 
 
+def _vendor_prefixed_lines() -> list[str]:
+    """Arista / Junos / FRR / Cisco lines using clab-clos-evpn hostnames."""
+    return [
+        # Arista EOS — PRI + LINEPROTO (demo dialect, leaf1 from clab-clos-evpn)
+        "<134>Oct 13 10:00:01 leaf1 Ebra: %LINEPROTO-5-UPDOWN: Line protocol "
+        "on Interface Ethernet1, changed state to down",
+        # RFC5424 PRI+version
+        "<134>1 2026-10-13T10:00:02Z leaf1 Ebra: %LINEPROTO-5-UPDOWN: Line protocol "
+        "on Interface Ethernet1, changed state to down",
+        # Junos rpd
+        "Oct 13 10:00:03 spine1 rpd[1451]: RPD_BGP_NEIGHBOR_STATE_CHANGED: "
+        "BGP peer 10.255.1.11 state Idle",
+        # FRR bgpd ISO
+        "2026-10-13T10:00:04Z leaf3 bgpd[221]: %NOTIFICATION: sent to neighbor 10.0.0.1 4/0",
+        # Cisco sequence + leading asterisk
+        "004122: *Oct 13 10:00:05.123 leaf4 %LINK-3-UPDOWN: Interface "
+        "GigabitEthernet0/1, changed state to down",
+        # Leading asterisk, no sequence
+        "*Oct 13 10:00:06.001 leaf4 %LINEPROTO-5-UPDOWN: Line protocol on "
+        "Interface GigabitEthernet0/1, changed state to down",
+    ]
+
+
+@pytest.mark.unit
+def test_syslog_header_accepts_pri_cisco_seq_and_asterisk():
+    miner = NetworkLogDeduplicator()
+    cases = _vendor_prefixed_lines()
+    parsed = [miner._parse_header(line) for line in cases]
+    hosts = [h for _ts, h, _body in parsed]
+    assert hosts == ["leaf1", "leaf1", "spine1", "leaf3", "leaf4", "leaf4"]
+    assert all(ts for ts, _h, _b in parsed)
+    assert "LINEPROTO-5-UPDOWN" in parsed[0][2]
+    assert "RPD_BGP_NEIGHBOR_STATE_CHANGED" in parsed[2][2]
+    assert "%NOTIFICATION" in parsed[3][2]
+    assert "LINK-3-UPDOWN" in parsed[4][2]
+    # PRI-stripped and raw-prefixed lines of the same body still cluster.
+    result = deduplicate_logs([cases[0], cases[1]])
+    assert result.unique_templates == 1
+    assert result.clusters[0].count == 2
+    assert result.clusters[0].hosts == {"leaf1"}
+
+
 @pytest.mark.unit
 def test_prepare_log_samples_passthrough_by_default():
     assert prepare_log_samples(["a", "b"]) == "  - a\n  - b"

@@ -8,6 +8,12 @@ loose semantic versioning.
 
 ### Added
 
+- **Protocol-aware EVPN causality** (`evpn_causal.py`). `EVPNBipartiteCausalEngine` classifies syslog into L1–L5 (physical → LAG/MLAG → underlay → VTEP/NVE → EVPN overlay), picks the lowest-layer root cause, and suppresses higher-layer symptoms on the same or adjacent device inside a 120s window. Opt-in via `analyze(..., evpn_causal=True)`, `--evpn-causal`, or `AI_LOG_ANALYZER_EVPN_CAUSAL=1` — default off. Cytoscape elements (`device:LAYER` nodes, dashed overlay edges, pulsing root-cause style) are exposed for topology overlay.
+- **Optical DOM/DDM and interface telemetry correlation** (`sources/telemetry.py`). `TelemetryCorrelator` and `PrometheusTelemetryBridge` evaluate interface optical budgets, FCS/CRC error deltas, and queue discards to separate physical fiber/transceiver degradation from QoS/CoPP microburst buffer drops or clean remote shutdowns.
+- **MCP causality tool** (`analyze_evpn_causality`). `mcp_server/server.py` exposes site-level bipartite underlay/overlay causal analysis as an MCP tool for automated triage.
+- **Log-line vault anonymizer** (`sanitize_vault.py`). `SanitizeVault.anonymize()` masks IPv4, IPv6, MAC (colon/dash/Cisco-dotted), and ASN so EVPN Type-2 MAC/IP lines are fully redacted before `llm.py`. Distinct from the config sanitizer in `sanitize.py`.
+- **NetBox site manifest** (`build_site_manifest()`). Optional stdlib client builds devices + cable adjacency. Cable terminations whose `device` is `None` (FrontPort/RearPort patch panels, CircuitTermination) are skipped instead of raising `AttributeError`.
+
 - **Drain-style log deduplication** (`dedup.py`). `NetworkLogDeduplicator` masks IPv4/IPv6, MAC, interface, ASN, hex, PID, and number tokens, clusters identical templates, and emits compact `[DEDUP xN]` lines for LLM prompts. Opt-in via `analyze(..., dedup=True)`, `--dedup`, or `AI_LOG_ANALYZER_DEDUP=1` — default off so classification counts and the streaming memory bound stay unchanged.
 - **Ingestion hardening.** File/syslog ingest now replaces bad encodings, strips BOM and control characters, blanks out-of-range timestamps, and caps oversized lines (`AI_LOG_ANALYZER_MAX_LINE_BYTES`, default 64KiB) and files (`AI_LOG_ANALYZER_MAX_FILE_BYTES`, default unlimited for the CLI).
 - **Optional NetBox enrichment** (`netbox.py`). When `NETBOX_URL` and `NETBOX_TOKEN` are set, analysis attaches device site/role/type from the NetBox REST API via stdlib `urllib`. Unset = no-op, no network. The token is never logged.
@@ -30,6 +36,9 @@ loose semantic versioning.
   the brief names a host and category seen at least twice in seven days.
 
 ### Fixed
+
+- **Syslog header prefixes.** `dedup._SYSLOG_HEADER_RE` now accepts optional PRI+version (`<134>` / `<134>1 `), Cisco sequence numbers (`004122: `), and a leading asterisk (`*Oct 13`), reconciled with the existing PRI strip from #51. Arista / Junos / FRR / Cisco prefixed lines cluster.
+- **Sanitize vault IPv6/MAC.** EVPN Type-2 MAC/IP advertisements are masked alongside IPv4/ASN before any LLM prompt.
 
 - **Restore auto-detection parsing** (#19). `tfsm-fire` stays off the dependency
   list — that distribution is still gone from PyPI — and the `parse` extra now

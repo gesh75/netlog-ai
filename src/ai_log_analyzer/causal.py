@@ -3,14 +3,21 @@
 Pure functions over classified events / action items. Wired into
 ``analyze()`` so the Flask UI, CLI, and MCP server all see the same 0.6
 surfaces. No I/O, no LLM.
+
+The protocol-aware EVPN overlay lives in ``evpn_causal.py`` and is opt-in
+via ``evpn_causal_hypotheses()`` / ``analyze(..., evpn_causal=True)``.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from ai_log_analyzer.classifier import SEV_ORDER, ClassifiedEvent
+from ai_log_analyzer.evpn_causal import (
+    EVPNBipartiteCausalEngine,
+    hypotheses_payload,
+)
 
 # Actionable for the timeline: critical / high / medium. Recovery (link-up,
 # peer-established) stays visible so the causal chain can close.
@@ -690,3 +697,18 @@ def change_window(events: Iterable[ClassifiedEvent]) -> dict[str, Any]:
         "devices": devices,
         "samples": samples,
     }
+
+
+def evpn_causal_hypotheses(
+    events: Iterable[Any],
+    manifest: Mapping[str, Any] | None = None,
+    adjacency_map: Mapping[str, Iterable[str]] | None = None,
+    max_propagation_window_sec: float = 120,
+) -> dict[str, Any]:
+    """Opt-in EVPN bipartite overlay. Empty payload when nothing classifies."""
+    engine = EVPNBipartiteCausalEngine.from_site_manifest(
+        manifest,
+        adjacency_map=adjacency_map,
+        max_propagation_window_sec=max_propagation_window_sec,
+    )
+    return hypotheses_payload(engine.analyze(events))

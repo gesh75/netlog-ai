@@ -16,6 +16,7 @@ Tools exposed:
   - analyze_device        : per-device deep triage (verdict, score, process/pattern breakdown)
   - list_sites            : enumerate site bundles available locally
   - analyze_site          : run full site-wide analysis on a bundle
+  - analyze_evpn_causality: bipartite underlay/overlay causal inference for a site
 
 The MCP SDK is an optional dependency — install with
 `pip install netlog-ai[mcp]` or `pip install 'mcp>=2,<3'`.
@@ -363,6 +364,87 @@ def _build_server():
             return {"ok": True, "device_count": len(devices), "result": result}
         except Exception as exc:
             return {"ok": False, "error": f"analyze_site failed: {exc}"}
+
+    @mcp.tool()
+    def analyze_evpn_causality(site_name: str) -> dict[str, Any]:
+        """Analyze bipartite EVPN causality across underlay and overlay for a site.
+
+        Loads manifest.json from the site bundle, parses device syslog lines,
+        runs EVPNBipartiteCausalEngine.analyze(), and returns root cause +
+        suppressed overlay symptoms.
+        """
+        import json as _json
+
+        from ai_log_analyzer.adapters.file import parse_file
+        from ai_log_analyzer.evpn_causal import EVPNBipartiteCausalEngine
+
+        safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", site_name)
+        site_dir = _SITES_DIR / safe_id
+        manifest_path = site_dir / "manifest.json"
+        if not manifest_path.is_file():
+            return {"ok": False, "error": f"unknown site {site_name!r}", "sites_dir": str(_SITES_DIR)}
+
+        try:
+            manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
+        except _json.JSONDecodeError as exc:
+            return {"ok": False, "error": f"bad manifest: {exc}"}
+
+        events: list[Any] = []
+        for d in manifest.get("devices", []):
+            fpath = site_dir / d.get("file", "")
+            if fpath.is_file():
+                try:
+                    events.extend(parse_file(fpath))
+                except Exception:
+                    pass
+
+        engine = EVPNBipartiteCausalEngine.from_site_manifest(manifest)
+        hypotheses = engine.analyze(events)
+
+        root_causes = []
+        for h in hypotheses:
+            rc_data = {
+                "event_id": h.root_cause.event_id,
+                "timestamp": h.root_cause.timestamp.isoformat() if hasattr(h.root_cause.timestamp, "isoformat") else str(h.root_cause.timestamp),
+                "device": h.root_cause.device,
+                "layer": h.root_cause.layer.name if hasattr(h.root_cause.layer, "name") else str(h.root_cause.layer),
+                "summary": h.root_cause.summary,
+                "raw_message": h.root_cause.raw_message,
+                "interface": h.root_cause.interface,
+                "vni": h.root_cause.vni,
+            }
+            symptoms_data = [
+                {
+                    "event_id": s.event_id,
+                    "timestamp": s.timestamp.isoformat() if hasattr(s.timestamp, "isoformat") else str(s.timestamp),
+                    "device": s.device,
+                    "layer": s.layer.name if hasattr(s.layer, "name") else str(s.layer),
+                    "summary": s.summary,
+                    "raw_message": s.raw_message,
+                    "interface": s.interface,
+                    "vni": s.vni,
+                }
+                for s in h.suppressed_symptoms
+            ]
+            root_causes.append({
+                "root_cause": rc_data,
+                "suppressed_symptoms": symptoms_data,
+                "affected_devices": sorted(list(h.affected_devices)),
+                "affected_vnis": sorted(list(h.affected_vnis)),
+                "confidence": h.confidence,
+                "rationale": h.rationale,
+                "symptom_suppression_ratio": h.symptom_suppression_ratio,
+            })
+
+        return {
+            "ok": True,
+            "site": manifest.get("site", safe_id),
+            "hypothesis_count": len(hypotheses),
+            "hypotheses": root_causes,
+            "root_cause": root_causes[0]["root_cause"] if root_causes else None,
+            "suppressed_symptoms": root_causes[0]["suppressed_symptoms"] if root_causes else [],
+            "cytoscape_elements": [el for h in hypotheses for el in h.to_cytoscape_elements()],
+        }
 
     return mcp
 

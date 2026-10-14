@@ -1547,6 +1547,12 @@
       <ul id="changewin-samples" class="summary"></ul>
     </div>
 
+    <div class="panel" id="evpn-causal-panel" style="display:none;">
+      <h2>EVPN causal overlay <span class="h2-count" id="evpn-causal-count"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Lowest-layer root causes with higher-layer EVPN/VTEP symptoms suppressed. Off unless analysis ran with EVPN causal enabled.</p>
+      <ol id="evpn-causal-list" class="summary"></ol>
+    </div>
+
     <div class="panel" id="sanitize-panel" style="display:none;">
       <h2>🛡 Sanitize diff <span class="h2-count" id="sanitize-count"></span></h2>
       <p class="row-msg" style="margin:0 0 8px;">What the LLM is allowed to see. Secrets, SSH keys, SNMP/RADIUS, and public IPs are gone before any outbound call.</p>
@@ -1630,6 +1636,9 @@
         </label>
         <label class="topo-chip-toggle" title="PHYSICAL layer: show interface IP addresses at each endpoint (off by default to keep dense fabrics readable)">
           <input type="checkbox" id="topo-show-ips"> Show IPs
+        </label>
+        <label class="topo-chip-toggle" title="Overlay protocol-aware EVPN causal edges (off by default)">
+          <input type="checkbox" id="topo-show-causal"> EVPN causal
         </label>
       </div>
       <!-- Legend — semantic colors mirror the rest of the app -->

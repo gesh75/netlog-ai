@@ -603,6 +603,15 @@ def _guess_platform(text: str) -> str:
 # Finding overlay
 # ─────────────────────────────────────────────────────────────────────────────
 
+def attach_evpn_causal(topo_dict: dict, elements: list | None) -> dict:
+    """Non-breaking: attach EVPN causal cytoscape elements when provided."""
+    if not elements:
+        return topo_dict
+    out = dict(topo_dict)
+    out["evpn_causal_elements"] = list(elements)
+    return out
+
+
 def overlay_findings(topo: Topology, findings: list[dict]) -> Topology:
     """Annotate each node with the worst severity from findings it's mentioned in."""
     sev_order = {"critical": 4, "high": 3, "medium": 2, "low": 1, "": 0}

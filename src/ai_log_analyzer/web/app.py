@@ -676,6 +676,7 @@ def create_app() -> Flask:
         source = body.get("source", "frr")
         use_llm = _parse_bool(body.get("use_llm"), default=True)
         dedup = _parse_bool(body.get("dedup"), default=False)
+        evpn_causal = _parse_bool(body.get("evpn_causal"), default=False)
         try:
             tail = max(1, min(10000, int(body.get("tail") or 500)))
         except (TypeError, ValueError):
@@ -766,7 +767,7 @@ def create_app() -> Flask:
             return jsonify({"error": "No events ingested from source"}), 404
         events = itertools.chain([first], event_iter)
 
-        result = analyze(events, use_llm=use_llm, dedup=dedup)
+        result = analyze(events, use_llm=use_llm, dedup=dedup, evpn_causal=evpn_causal)
         result_dict = result.to_dict()
         webhooks.notify_analysis(result_dict, source)
         return jsonify(result_dict)
@@ -1059,6 +1060,7 @@ def create_app() -> Flask:
             events,
             use_llm=_parse_bool(body.get("use_llm", True), default=True),
             dedup=_parse_bool(body.get("dedup"), default=False),
+            evpn_causal=_parse_bool(body.get("evpn_causal"), default=False),
         )
         result_dict = result.to_dict()
         webhooks.notify_analysis(result_dict, f"source:{source_id}")

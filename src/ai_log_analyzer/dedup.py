@@ -18,18 +18,20 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 
 # Optional `<PRI>` / RFC5424 version prefix so standard syslog still clusters.
+# Belt-and-suspenders: _SYSLOG_HEADER_RE also accepts the same prefix so a
+# caller that skips this strip (Cisco sequence + PRI, raw RFC5424) still parses.
 _PRI_PREFIX_RE = re.compile(r"^<\d+>(?:\d+\s+)?")
 
-# BSD ("Mon dd hh:mm:ss[.f]") or ISO8601 timestamp, then host, then body.
+# Optional PRI+version, Cisco sequence (`004122: `), leading asterisk (`*Oct`),
+# then BSD or ISO8601 timestamp, host, body.
 _SYSLOG_HEADER_RE = re.compile(
-    r"^(?:"
-    r"(?P<ts_bsd>(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
-    r"\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?)"
+    r"^(?:<\d+>(?:\d+\s+)?)?(?:\d+:\s+)?\*?"
+    r"(?P<ts>"
+    r"(?:[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?"
     r"|"
-    r"(?P<ts_iso>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}"
-    r"(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)"
+    r"\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)"
     r")\s+"
-    r"(?P<host>\S+)\s+"
+    r"(?P<host>[A-Za-z0-9_.-]+)\s+"
     r"(?P<body>.*)$"
 )
 
@@ -183,10 +185,10 @@ class NetworkLogDeduplicator:
 
     def _parse_header(self, line: str) -> tuple[str, str, str]:
         stripped = _PRI_PREFIX_RE.sub("", line, count=1)
-        match = _SYSLOG_HEADER_RE.match(stripped)
+        match = _SYSLOG_HEADER_RE.match(stripped) or _SYSLOG_HEADER_RE.match(line)
         if not match:
             return "", "", line
-        ts = match.group("ts_bsd") or match.group("ts_iso") or ""
+        ts = match.group("ts") or ""
         host = match.group("host") or ""
         body = match.group("body") or ""
         return ts, host, body

@@ -18,6 +18,7 @@ from ai_log_analyzer.causal import (
     build_timeline,
     change_window,
     event_time,
+    evpn_causal_hypotheses,
 )
 from ai_log_analyzer.classifier import (
     SEV_ORDER,
@@ -31,6 +32,7 @@ from ai_log_analyzer.dedup import (
     reset_dedup_enabled,
     set_dedup_enabled,
 )
+from ai_log_analyzer.evpn_causal import is_evpn_causal_enabled
 from ai_log_analyzer.handoff import incident_handoff
 from ai_log_analyzer.netbox import enrich_hosts
 from ai_log_analyzer.netbox import is_enabled as netbox_is_enabled
@@ -122,6 +124,7 @@ class AnalysisResult:
     handoff: dict = field(default_factory=dict)
     repeat_offenders: list = field(default_factory=list)
     netbox: dict = field(default_factory=dict)
+    evpn_causal: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -145,6 +148,7 @@ class AnalysisResult:
             "handoff": self.handoff,
             "repeat_offenders": self.repeat_offenders,
             "netbox": self.netbox,
+            "evpn_causal": self.evpn_causal,
         }
 
 
@@ -690,6 +694,8 @@ def analyze(
     use_llm: bool = True,
     llm_top_n: int = 3,
     dedup: bool | None = None,
+    evpn_causal: bool | None = None,
+    site_manifest: dict | None = None,
 ) -> AnalysisResult:
     """End-to-end pipeline: classify → action items → score → executive summary.
 
@@ -701,10 +707,20 @@ def analyze(
     `dedup=True` compresses repeated syslog templates before classification
     and LLM dispatch. Default is off (or `AI_LOG_ANALYZER_DEDUP`) so existing
     counts and the streaming memory bound stay unchanged.
+
+    `evpn_causal=True` runs the protocol-aware EVPN overlay (lowest-layer
+    root, higher-layer suppression). Default is off (or
+    `AI_LOG_ANALYZER_EVPN_CAUSAL`). Pass ``site_manifest`` to seed adjacency.
     """
     token = set_dedup_enabled(dedup if dedup is not None else is_dedup_enabled())
     try:
-        return _analyze_inner(events, use_llm=use_llm, llm_top_n=llm_top_n)
+        return _analyze_inner(
+            events,
+            use_llm=use_llm,
+            llm_top_n=llm_top_n,
+            evpn_causal=evpn_causal,
+            site_manifest=site_manifest,
+        )
     finally:
         reset_dedup_enabled(token)
 
@@ -713,6 +729,8 @@ def _analyze_inner(
     events: Iterable[LogEvent],
     use_llm: bool,
     llm_top_n: int,
+    evpn_causal: bool | None = None,
+    site_manifest: dict | None = None,
 ) -> AnalysisResult:
     if is_dedup_enabled():
         events = _dedup_events(events)
@@ -777,6 +795,12 @@ def _analyze_inner(
         if netbox_is_enabled() else {}
     )
 
+    want_evpn = evpn_causal if evpn_causal is not None else is_evpn_causal_enabled()
+    evpn_data = (
+        evpn_causal_hypotheses(causal_events, manifest=site_manifest)
+        if want_evpn else {}
+    )
+
     result = AnalysisResult(
         score=score, grade=grade, grade_label=grade_label,
         severity_counts=sev_counts, category_counts=cat_counts,
@@ -793,6 +817,7 @@ def _analyze_inner(
         sanitize_diff=sdiff,
         repeat_offenders=repeats,
         netbox=netbox_data,
+        evpn_causal=evpn_data,
     )
     result.handoff = incident_handoff(result.to_dict())
     return result
