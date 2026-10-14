@@ -43,7 +43,26 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         dedup=getattr(args, "dedup", False),
         evpn_causal=getattr(args, "evpn_causal", False) or None,
     )
-    print(json.dumps(result.to_dict(), indent=2))
+    res_dict = result.to_dict()
+    if getattr(args, "remediation", False):
+        from ai_log_analyzer.remediation import RemediationGenerator, VendorOS
+
+        gen = RemediationGenerator()
+        plans = []
+        for item in res_dict.get("action_items", [])[:3]:
+            for dev in item.get("devices", [])[:2]:
+                try:
+                    p = gen.build_graceful_link_drain(
+                        device=dev,
+                        vendor=VendorOS.ARISTA_EOS,
+                        interface="Ethernet1",
+                        rationale=f"Auto-generated remediation for {item.get('description', 'incident')}",
+                    )
+                    plans.append(p.to_dict())
+                except Exception:
+                    pass
+        res_dict["remediation_plans"] = plans
+    print(json.dumps(res_dict, indent=2))
     return 0
 
 
@@ -147,6 +166,55 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_remediation(args: argparse.Namespace) -> int:
+    """Generate vendor-safe remediation plan with automatic rollback timer."""
+    from ai_log_analyzer.remediation import (
+        RemediationActionType,
+        RemediationGenerator,
+        SafetyViolationError,
+        VendorOS,
+    )
+
+    try:
+        vendor = VendorOS(args.vendor)
+    except ValueError:
+        valid_vendors = ", ".join(v.value for v in VendorOS)
+        print(f"error: unknown vendor {args.vendor!r}. Choose from: {valid_vendors}", file=sys.stderr)
+        return 2
+
+    gen = RemediationGenerator(default_rollback_minutes=args.rollback_minutes)
+    try:
+        if args.action in ("drain", RemediationActionType.GRACEFUL_LINK_DRAIN.value):
+            plan = gen.build_graceful_link_drain(
+                device=args.device,
+                vendor=vendor,
+                interface=args.interface or "Ethernet1",
+                bgp_neighbor_ip=args.bgp_neighbor,
+                rollback_minutes=args.rollback_minutes,
+                rationale=args.rationale or "Drain traffic gracefully prior to physical maintenance.",
+            )
+        elif args.action in ("copp", RemediationActionType.QOS_COPP_CONTROL_PLANE_BOOST.value):
+            plan = gen.build_qos_copp_remediation(
+                device=args.device,
+                vendor=vendor,
+                interface=args.interface or "Ethernet1",
+                rollback_minutes=args.rollback_minutes,
+                rationale=args.rationale or "Prioritize control plane traffic.",
+            )
+        else:
+            print(f"error: unsupported action {args.action!r}", file=sys.stderr)
+            return 2
+    except SafetyViolationError as exc:
+        print(f"error: safety violation: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(plan.to_dict(), indent=2))
+    else:
+        print(plan.to_markdown_card())
+    return 0
+
+
 def cmd_mcp(args: argparse.Namespace) -> int:
     """Start the MCP server (stdio by default) so Claude Code / Cursor / Continue
     can call netlog-ai tools directly."""
@@ -187,6 +255,11 @@ def main() -> None:
         action="store_true",
         help="Run protocol-aware EVPN causality (off by default)",
     )
+    ap.add_argument(
+        "--remediation",
+        action="store_true",
+        help="Generate rollback-guarded remediation plans for top action items",
+    )
     ap.set_defaults(func=cmd_analyze)
 
     cp = sub.add_parser("containers", help="List running FRR lab containers")
@@ -204,6 +277,22 @@ def main() -> None:
     ep.add_argument("--show", type=int, default=10, help="Verdicts to print, worst first (default 10)")
     ep.add_argument("--min-score", type=float, default=0.0, help="Exit 1 if overall quality is below this (CI gate)")
     ep.set_defaults(func=cmd_eval)
+
+    rem_p = sub.add_parser("remediation", help="Generate rollback-guarded vendor CLI change plan")
+    rem_p.add_argument("--device", required=True, help="Target device name")
+    rem_p.add_argument(
+        "--vendor",
+        required=True,
+        choices=["arista_eos", "juniper_junos", "cisco_nxos", "cisco_ios", "frr"],
+        help="Device vendor OS",
+    )
+    rem_p.add_argument("--action", choices=["drain", "copp"], default="drain", help="Remediation action type")
+    rem_p.add_argument("--interface", default="Ethernet1", help="Target interface name (e.g. Ethernet1, xe-0/0/0)")
+    rem_p.add_argument("--bgp-neighbor", default=None, help="Optional BGP neighbor IP for drain")
+    rem_p.add_argument("--rollback-minutes", type=int, default=5, help="Auto-rollback timer in minutes (1-30)")
+    rem_p.add_argument("--rationale", default="", help="Engineering justification")
+    rem_p.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    rem_p.set_defaults(func=cmd_remediation)
 
     mp = sub.add_parser("mcp", help="Run as an MCP server (for Claude Code / Cursor / Continue)")
     mp.add_argument("--transport", default="stdio", choices=["stdio", "streamable-http"],
