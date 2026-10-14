@@ -12,8 +12,10 @@ The same engine that processes `--file` and pasted text now also drives:
 | `splunk`   | Splunk REST    | `api_token` · `basic`                 | Uses `oneshot` search — no job polling |
 | `loki`     | Grafana Loki   | `api_token` · `basic` · `cookie`      | LogQL via `query_range` |
 | `syslog`   | UDP/TCP listener | n/a                                 | Zero-config, perfect for laptop demos |
-| `librenms` | LibreNMS REST  | `api_token`                           | Eventlog via `/api/v0/logs/eventlog` |
-| `netbox`   | (planned)      | `api_token`                           | Device enrichment only — see roadmap |
+| `librenms`  | LibreNMS REST    | `api_token`                           | Eventlog via `/api/v0/logs/eventlog` |
+| `netbox`    | NetBox REST      | `api_token`                           | Device role/site/platform enrichment & v4.x cable topology manifest |
+| `telemetry` | Prometheus REST  | `api_token` · `basic`                 | Optical DOM/DDM (dBm), FCS/CRC error deltas, and queue drop fusion |
+| `itsm`      | Jira / ServiceNow| `api_token` · `basic`                 | Two-way incident enrichment, closed-loop triage, and rollback plans |
 
 Every connector implements the same Python `Protocol` (`LogSource`) so the
 classifier, dedup, ranking, and LLM layers don't change — adding a new source
@@ -130,8 +132,11 @@ netlog-ai mcp --transport streamable-http
 | `get_top_offenders`    | Return the N noisiest hostnames                                                      |
 | `correlate_sources`    | Cross-source correlation: marks devices confirmed (2+ sources) or suspected (1)      |
 | `analyze_device`       | Per-device triage: histogram, process breakdown, KB verdict, 0-100 health score      |
-| `list_sites`           | Enumerate bundled site directories                                                   |
-| `analyze_site`         | Run site-wide cross-device analysis                                                  |
+| `list_sites`               | Enumerate bundled site directories                                                   |
+| `analyze_site`             | Run site-wide cross-device analysis                                                  |
+| `analyze_evpn_causality`   | Protocol-aware bipartite CLOS causality; suppresses overlay symptoms from underlay   |
+| `generate_remediation_plan`| Generate vendor-safe remediation plan with rollback timer (EOS/Junos/NX-OS/IOS/FRR) |
+| `enrich_itsm_incident`     | Two-way Jira Service Management / ServiceNow incident correlation & enrichment card  |
 
 ### Hook into Claude Code
 

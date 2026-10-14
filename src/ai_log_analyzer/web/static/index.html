@@ -1112,7 +1112,7 @@
       <span class="brand-title">AI Log Analyzer</span>
       <!-- Static fallback only — app.js overwrites this from /api/health,
            so the badge always tracks the installed package version -->
-      <span class="brand-version">v0.7.0</span>
+      <span class="brand-version">v1.1.0</span>
     </div>
   </div>
   <div class="header-spacer"></div>
@@ -1551,6 +1551,38 @@
       <h2>EVPN causal overlay <span class="h2-count" id="evpn-causal-count"></span></h2>
       <p class="row-msg" style="margin:0 0 8px;">Lowest-layer root causes with higher-layer EVPN/VTEP symptoms suppressed. Off unless analysis ran with EVPN causal enabled.</p>
       <ol id="evpn-causal-list" class="summary"></ol>
+    </div>
+
+    <div class="panel" id="remediation-panel" style="display:none;">
+      <h2>🛡 Vendor-Safe Remediation & ITSM <span class="h2-count" id="remediation-count"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Rollback-protected remediation plans generated with commit timers (Arista EOS, Juniper Junos, Cisco NX-OS/IOS-XE, FRR) and two-way Jira / ServiceNow enrichment.</p>
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap;">
+        <label style="font-size:12px;color:var(--muted);">Target Device:
+          <select id="remediation-device-select" style="padding:4px 8px;font-size:12px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;"></select>
+        </label>
+        <label style="font-size:12px;color:var(--muted);">Vendor OS:
+          <select id="remediation-vendor-select" style="padding:4px 8px;font-size:12px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;">
+            <option value="arista_eos">Arista EOS (commit timer)</option>
+            <option value="juniper_junos">Juniper Junos (commit confirmed)</option>
+            <option value="cisco_nxos">Cisco NX-OS (checkpoint/rollback)</option>
+            <option value="cisco_ios">Cisco IOS-XE (revert timer)</option>
+            <option value="frr">FRRouting (vtysh auto-revert)</option>
+          </select>
+        </label>
+        <label style="font-size:12px;color:var(--muted);">Action:
+          <select id="remediation-action-select" style="padding:4px 8px;font-size:12px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;">
+            <option value="drain">Graceful Link Drain</option>
+            <option value="copp">Control-Plane QoS / CoPP Boost</option>
+          </select>
+        </label>
+        <button id="remediation-generate-btn" class="tiny secondary" style="width:auto;padding:4px 10px;font-size:11px;">⚡ Generate Safe Plan</button>
+        <button id="itsm-preview-btn" class="tiny secondary" style="width:auto;padding:4px 10px;font-size:11px;">🎫 Preview ITSM Payload</button>
+      </div>
+      <pre id="remediation-card-out" class="row-msg" style="white-space:pre-wrap;max-height:300px;overflow:auto;background:var(--bg-dark);padding:10px;border-radius:6px;font-family:monospace;font-size:12px;display:none;"></pre>
+      <div id="itsm-preview-out" style="display:none;margin-top:10px;">
+        <h3 style="font-size:13px;margin:4px 0;">Jira / ServiceNow Enrichment Card (<span id="itsm-fingerprint"></span>)</h3>
+        <pre id="itsm-markdown-out" class="row-msg" style="white-space:pre-wrap;max-height:200px;overflow:auto;background:var(--bg-dark);padding:10px;border-radius:6px;font-family:monospace;font-size:11px;"></pre>
+      </div>
     </div>
 
     <div class="panel" id="sanitize-panel" style="display:none;">

@@ -12,8 +12,11 @@ xAI Grok) write a 5-phase root-cause playbook with copy-pastable per-vendor CLI 
 invariant is **sanitize-before-LLM** — every config and log is scrubbed of secrets and public IPs before
 any outbound call — and it degrades gracefully to a deterministic rule-based KB when no model is available.
 The same analyzer core is exposed three ways: a no-build Flask + vanilla-JS dashboard (port 6060), a CLI,
-and an MCP server for agent clients like Claude Code. v0.7.0 adds a sanitized incident-handoff paste. v0.6.0 adds a causal console (timeline, blast
-radius, change-window correlator) plus a sanitize-diff viewer.
+and an MCP server for agent clients like Claude Code. v1.1.0 adds vendor-safe remediation guardrails (commit timers)
+and two-way Jira / ServiceNow ITSM integration. v1.0.0 adds protocol-aware EVPN-VXLAN bipartite causal inference
+and optical/counter telemetry interlocking. v0.9.0 adds drain-style syslog dedup, IPv6/MAC sanitize vault tokenization,
+and NetBox v4.x manifest resolution. v0.7.0 adds a sanitized incident-handoff paste. v0.6.0 adds a causal console
+(timeline, blast radius, change-window correlator) plus a sanitize-diff viewer.
 
 ---
 
@@ -295,16 +298,20 @@ site-aware features operates over whole-fabric config bundles.
 ```mermaid
 flowchart TB
     subgraph IN["ingest"]
-        SOURCES["sources/ - LogSource Protocol plus SourceManager singleton"]
+        SOURCES["sources/ - LogSource Protocol, NetBox v4.x, Telemetry"]
         ADAPTERS["adapters/ - frr, file, network_tool, tfsm_auto"]
+        DEDUP["dedup.py - syslog header & drain clustering"]
     end
 
     subgraph PIPE["pipeline"]
-        SANITIZE["sanitize.py"]
+        SANITIZE["sanitize.py & sanitize_vault.py"]
         CLASSIFIER["classifier.py"]
         ANALYZER["analyzer.py"]
         CAUSAL["causal.py - timeline, blast, change-window"]
+        EVPN_CAUSAL["evpn_causal.py - L1-L5 CLOS bipartite inference"]
         HANDOFF["handoff.py - sanitized paste card"]
+        REMEDIATION["remediation.py - vendor rollback guardrails"]
+        ITSM["itsm.py - two-way Jira & ServiceNow"]
     end
 
     subgraph INTEL["intelligence"]
@@ -318,9 +325,11 @@ flowchart TB
         EXTRA["copilot, diff, reports, runbook"]
     end
 
-    SOURCES & ADAPTERS --> ANALYZER
+    SOURCES & ADAPTERS --> DEDUP --> ANALYZER
     ANALYZER --> SANITIZE --> CLASSIFIER
     ANALYZER --> CAUSAL
+    ANALYZER --> EVPN_CAUSAL
+    ANALYZER --> REMEDIATION --> ITSM
     ANALYZER --> HANDOFF --> SANITIZE
     ANALYZER --> LLM
     LLM -.fallback.-> KB
@@ -331,8 +340,8 @@ flowchart TB
     classDef ai   fill:#a16207,stroke:#fbbf24,color:#fff
     classDef site fill:#059669,stroke:#34d399,color:#fff
 
-    class SOURCES,ADAPTERS in
-    class SANITIZE,CLASSIFIER,ANALYZER,CAUSAL,HANDOFF pipe
+    class SOURCES,ADAPTERS,DEDUP in
+    class SANITIZE,CLASSIFIER,ANALYZER,CAUSAL,EVPN_CAUSAL,HANDOFF,REMEDIATION,ITSM pipe
     class LLM,KB ai
     class TOPO,OPT,EXTRA site
 ```

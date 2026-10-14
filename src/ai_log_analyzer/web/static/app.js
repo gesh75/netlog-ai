@@ -987,6 +987,44 @@ function render(r) {
     }
   }
 
+  // Remediation & ITSM panel
+  const remPanel = $("remediation-panel");
+  if (remPanel) {
+    const devices = r.devices || [];
+    const actionItems = r.action_items || [];
+    const allDevs = new Set(devices);
+    actionItems.forEach((a) => (a.devices || []).forEach((d) => allDevs.add(d)));
+    if (allDevs.size > 0 || (r.remediation_plans || []).length > 0) {
+      remPanel.style.display = "block";
+      const devSelect = $("remediation-device-select");
+      if (devSelect) {
+        clear(devSelect);
+        Array.from(allDevs).sort().forEach((d) => {
+          const opt = document.createElement("option");
+          opt.value = d;
+          opt.textContent = d;
+          devSelect.appendChild(opt);
+        });
+      }
+      const count = $("remediation-count");
+      if (count) count.textContent = `(${allDevs.size} targets)`;
+      if ((r.remediation_plans || []).length > 0) {
+        const cardOut = $("remediation-card-out");
+        if (cardOut) {
+          cardOut.style.display = "block";
+          cardOut.textContent = r.remediation_plans.map((p) =>
+            `### Remediation Plan ${p.plan_id} — ${p.device} (${p.vendor})\n` +
+            `Action: ${p.action_type} | Rollback: ${p.rollback_minutes}m\n` +
+            `Rationale: ${p.rationale}\n` +
+            `Apply:\n${(p.config_commands || []).concat(p.commit_with_timer_commands || []).join("\n")}`
+          ).join("\n\n---\n\n");
+        }
+      }
+    } else {
+      remPanel.style.display = "none";
+    }
+  }
+
   // Sanitize diff
   const sd = r.sanitize_diff || {};
   const sdPanel = $("sanitize-panel");
@@ -3072,8 +3110,70 @@ document.addEventListener("DOMContentLoaded", () => {
   $("rep-pdf-btn").addEventListener("click",  () => exportReport("pdf"));
   $("sitedoc-md-btn").addEventListener("click",   () => downloadSiteDoc("md"));
   $("sitedoc-html-btn").addEventListener("click", () => downloadSiteDoc("html"));
-  $("sitedoc-pdf-btn").addEventListener("click",  () => downloadSiteDoc("pdf"));
   $("site-wide-btn").addEventListener("click", runSiteWideOptimize);
+
+  const remGenBtn = $("remediation-generate-btn");
+  if (remGenBtn) {
+    remGenBtn.addEventListener("click", async () => {
+      const dev = $("remediation-device-select")?.value;
+      const vendor = $("remediation-vendor-select")?.value || "arista_eos";
+      const action = $("remediation-action-select")?.value || "drain";
+      const cardOut = $("remediation-card-out");
+      if (!dev) return;
+      try {
+        if (cardOut) {
+          cardOut.style.display = "block";
+          cardOut.textContent = "Generating vendor-safe remediation plan with rollback timer...";
+        }
+        const res = await fetch("/api/remediation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ device: dev, vendor, action }),
+        });
+        const data = await res.json();
+        if (cardOut) {
+          cardOut.textContent = data.ok ? data.markdown_card : `Error: ${data.error || "Failed"}`;
+        }
+      } catch (err) {
+        if (cardOut) cardOut.textContent = `Error: ${err.message}`;
+      }
+    });
+  }
+
+  const itsmBtn = $("itsm-preview-btn");
+  if (itsmBtn) {
+    itsmBtn.addEventListener("click", async () => {
+      const dev = $("remediation-device-select")?.value || "leaf1";
+      const vendor = $("remediation-vendor-select")?.value || "arista_eos";
+      const previewDiv = $("itsm-preview-out");
+      const mdOut = $("itsm-markdown-out");
+      const fpSpan = $("itsm-fingerprint");
+      try {
+        if (previewDiv) previewDiv.style.display = "block";
+        if (mdOut) mdOut.textContent = "Fetching two-way ITSM correlation preview...";
+        const res = await fetch("/api/itsm/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            system: "jira",
+            device: dev,
+            vendor,
+            root_cause_summary: "Automated root cause detected by causal inference",
+            dry_run: true,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          if (fpSpan) fpSpan.textContent = data.fingerprint;
+          if (mdOut) mdOut.textContent = data.markdown_card;
+        } else {
+          if (mdOut) mdOut.textContent = `Error: ${data.error || "Failed"}`;
+        }
+      } catch (err) {
+        if (mdOut) mdOut.textContent = `Error: ${err.message}`;
+      }
+    });
+  }
   loadSamples();
   loadSites();
   $("use-llm").addEventListener("change", async (e) => {

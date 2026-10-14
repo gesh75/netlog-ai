@@ -4,61 +4,50 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
-## [Unreleased]
+## [1.1.0] - 2026-10-14
 
 ### Added
 
 - **Vendor-safe remediation & rollback guardrails** (`remediation.py`). Generates deterministic pre-checks, transactional configuration blocks with auto-revert timers (`commit confirmed` on Junos, `configure session ... commit timer` on Arista EOS, `checkpoint` on Cisco NX-OS, `configure terminal revert timer` on Cisco IOS-XE, and `vtysh` snapshot + auto-revert on FRR), post-checks, and explicit abort/rollback sequences. Strictly enforces destructive command blocklist and 1–30 minute timer limits via `SafetyGuardrail`.
 - **Two-way Jira & ServiceNow ITSM integration** (`itsm.py`, `integrations/itsm.py`). Deterministic incident fingerprinting (`NETLOG-<SHA256>`) for idempotent ticket deduplication across CLOS fabrics. Updates open tickets with markdown RCA summaries and remediation cards or creates new incidents via `JiraITSMClient` and `ServiceNowITSMClient`.
-- **Remediation & ITSM surfaces**. Exposes `/api/remediation` and `/api/itsm/enrich` REST API endpoints, `generate_remediation_plan` and `enrich_itsm_incident` MCP 2.x server tools, and CLI `ai-log-analyzer remediation` subcommand + `--remediation` flag for `ai-log-analyzer analyze`.
+- **Remediation & ITSM surfaces**. Exposes `/api/remediation` and `/api/itsm/enrich` REST API endpoints, `generate_remediation_plan` and `enrich_itsm_incident` MCP 2.x server tools, Web UI `#remediation-panel` controls, and CLI `ai-log-analyzer remediation` subcommand + `--remediation` flag for `ai-log-analyzer analyze`.
+
+## [1.0.0] - 2026-10-13
+
+### Added
+
 - **Protocol-aware EVPN causality** (`evpn_causal.py`). `EVPNBipartiteCausalEngine` classifies syslog into L1–L5 (physical → LAG/MLAG → underlay → VTEP/NVE → EVPN overlay), picks the lowest-layer root cause, and suppresses higher-layer symptoms on the same or adjacent device inside a 120s window. Opt-in via `analyze(..., evpn_causal=True)`, `--evpn-causal`, or `AI_LOG_ANALYZER_EVPN_CAUSAL=1` — default off. Cytoscape elements (`device:LAYER` nodes, dashed overlay edges, pulsing root-cause style) are exposed for topology overlay.
 - **Optical DOM/DDM and interface telemetry correlation** (`sources/telemetry.py`). `TelemetryCorrelator` and `PrometheusTelemetryBridge` evaluate interface optical budgets, FCS/CRC error deltas, and queue discards to separate physical fiber/transceiver degradation from QoS/CoPP microburst buffer drops or clean remote shutdowns.
 - **MCP causality tool** (`analyze_evpn_causality`). `mcp_server/server.py` exposes site-level bipartite underlay/overlay causal analysis as an MCP tool for automated triage.
-- **Log-line vault anonymizer** (`sanitize_vault.py`). `SanitizeVault.anonymize()` masks IPv4, IPv6, MAC (colon/dash/Cisco-dotted), and ASN so EVPN Type-2 MAC/IP lines are fully redacted before `llm.py`. Distinct from the config sanitizer in `sanitize.py`.
-- **NetBox site manifest** (`build_site_manifest()`). Optional stdlib client builds devices + cable adjacency. Cable terminations whose `device` is `None` (FrontPort/RearPort patch panels, CircuitTermination) are skipped instead of raising `AttributeError`.
+- **EVPN REST & Web UI overlay**. Exposes `/api/causal/evpn` endpoint and Cytoscape.js overlay rendering with L1-L5 dependency edges.
+
+## [0.9.0] - 2026-10-13
+
+### Added
 
 - **Drain-style log deduplication** (`dedup.py`). `NetworkLogDeduplicator` masks IPv4/IPv6, MAC, interface, ASN, hex, PID, and number tokens, clusters identical templates, and emits compact `[DEDUP xN]` lines for LLM prompts. Opt-in via `analyze(..., dedup=True)`, `--dedup`, or `AI_LOG_ANALYZER_DEDUP=1` — default off so classification counts and the streaming memory bound stay unchanged.
+- **Log-line vault anonymizer** (`sanitize_vault.py`). `SanitizeVault.anonymize()` masks IPv4, IPv6, MAC (colon/dash/Cisco-dotted), and ASN so EVPN Type-2 MAC/IP lines are fully redacted before `llm.py`. Distinct from the config sanitizer in `sanitize.py`.
+- **NetBox site manifest & v4.x cable termination fallback** (`sources/netbox.py`, `build_site_manifest()`). Optional stdlib client builds devices + cable adjacency. Cable terminations whose `device` is `None` (FrontPort/RearPort patch panels, CircuitTermination) are skipped instead of raising `AttributeError`. When `NETBOX_URL` and `NETBOX_TOKEN` are set, analysis attaches device site/role/type from the NetBox REST API via stdlib `urllib`. Unset = no-op, no network. The token is never logged.
 - **Ingestion hardening.** File/syslog ingest now replaces bad encodings, strips BOM and control characters, blanks out-of-range timestamps, and caps oversized lines (`AI_LOG_ANALYZER_MAX_LINE_BYTES`, default 64KiB) and files (`AI_LOG_ANALYZER_MAX_FILE_BYTES`, default unlimited for the CLI).
-- **Optional NetBox enrichment** (`netbox.py`). When `NETBOX_URL` and `NETBOX_TOKEN` are set, analysis attaches device site/role/type from the NetBox REST API via stdlib `urllib`. Unset = no-op, no network. The token is never logged.
-
-- **Readable unknowns, shorter VXLAN labels, a local syslog listen button, and an LLM checkbox that stays off.** Unknown-pattern rows wrap and carry a one-line meaning. VXLAN edges show a count instead of every VNI. Live tail can open UDP 5514. Unchecking Use LLM is no longer overwritten by the status poll.
-
-- **Shift brief on the Logs tab.** After an analysis, the UI shows the sanitized
-  brief and the ServiceNow-shaped ticket fields. The ticket is still not posted.
-  Timeline rows include the syslog sample so a commit is not only a category title.
-- **Logs tab guards.** Run Analysis stays disabled until a lab container is selected.
-  The topology map hides when you leave Site. The header version comes from the
-  package, and the LLM chip stays off while the selected provider is unreachable.
-
-- **Work shift.** Every analysis handoff now includes a ServiceNow-shaped ticket
-  (`short_description`, `urgency`, `configuration_item`, `work_notes`) that is
-  not posted, and a one-page shift brief with the epicenter, the change window,
-  and up to three read-only commands. IOS-XE, Aruba, and Meraki lines for an
-  access point down, 802.1X failure, DHCP pool exhaustion, WAN failover, and a
-  non-Meraki VPN down classify on their own. When the incident journal is on,
-  the brief names a host and category seen at least twice in seven days.
 
 ### Fixed
 
 - **Syslog header prefixes.** `dedup._SYSLOG_HEADER_RE` now accepts optional PRI+version (`<134>` / `<134>1 `), Cisco sequence numbers (`004122: `), and a leading asterisk (`*Oct 13`), reconciled with the existing PRI strip from #51. Arista / Junos / FRR / Cisco prefixed lines cluster.
 - **Sanitize vault IPv6/MAC.** EVPN Type-2 MAC/IP advertisements are masked alongside IPv4/ASN before any LLM prompt.
 
-- **Restore auto-detection parsing** (#19). `tfsm-fire` stays off the dependency
-  list — that distribution is still gone from PyPI — and the `parse` extra now
-  installs `textfsm` plus `ntc-templates`. `adapters/tfsm_auto.py` scores those
-  templates in-process. `pip install netlog-ai[parse]` and `[all]` work again,
-  and `tests/test_tfsm_auto.py` runs instead of skipping.
+## [0.8.0] - 2026-10-10
+
+### Added
+
+- **Readable unknowns, shorter VXLAN labels, a local syslog listen button, and an LLM checkbox that stays off.** Unknown-pattern rows wrap and carry a one-line meaning. VXLAN edges show a count instead of every VNI. Live tail can open UDP 5514. Unchecking Use LLM is no longer overwritten by the status poll.
+- **Shift brief on the Logs tab.** After an analysis, the UI shows the sanitized brief and the ServiceNow-shaped ticket fields. The ticket is still not posted. Timeline rows include the syslog sample so a commit is not only a category title.
+- **Logs tab guards.** Run Analysis stays disabled until a lab container is selected. The topology map hides when you leave Site. The header version comes from the package, and the LLM chip stays off while the selected provider is unreachable.
+- **Work shift incident handoff.** Every analysis handoff now includes a ServiceNow-shaped ticket (`short_description`, `urgency`, `configuration_item`, `work_notes`) that is not posted, and a one-page shift brief with the epicenter, the change window, and up to three read-only commands. IOS-XE, Aruba, and Meraki lines for an access point down, 802.1X failure, DHCP pool exhaustion, WAN failover, and a non-Meraki VPN down classify on their own. When the incident journal is on, the brief names a host and category seen at least twice in seven days.
+- **Restore auto-detection parsing** (#19). `tfsm-fire` stays off the dependency list — that distribution is still gone from PyPI — and the `parse` extra now installs `textfsm` plus `ntc-templates`. `adapters/tfsm_auto.py` scores those templates in-process. `pip install netlog-ai[parse]` and `[all]` work again, and `tests/test_tfsm_auto.py` runs instead of skipping.
 
 ### Changed
 
-- **MCP server requires SDK 2.x** (#17). `mcp_server/server.py` constructs
-  `MCPServer` from `mcp.server.mcpserver` — FastMCP was removed in 2.0 with no
-  shim. The `mcp` and `all` extras are `mcp>=2,<3` (the #16 `<2` hotfix is gone).
-  `_build_server()` now reports "SDK not installed" vs "incompatible version"
-  separately, and names the installed version via packaging metadata because
-  2.x does not set `mcp.__version__`. Dual 1.x/2.x support was rejected: both
-  this project and mcp 2.0 require Python >=3.10, and a fallback import would
-  hide the next API move the same way #16 was hidden.
+- **MCP server requires SDK 2.x** (#17). `mcp_server/server.py` constructs `MCPServer` from `mcp.server.mcpserver` — FastMCP was removed in 2.0 with no shim. The `mcp` and `all` extras are `mcp>=2,<3` (the #16 `<2` hotfix is gone). `_build_server()` now reports "SDK not installed" vs "incompatible version" separately, and names the installed version via packaging metadata because 2.x does not set `mcp.__version__`. Dual 1.x/2.x support was rejected: both this project and mcp 2.0 require Python >=3.10, and a fallback import would hide the next API move the same way #16 was hidden.
 
 ### Fixed
 

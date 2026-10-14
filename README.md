@@ -15,9 +15,9 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR, IOS-XE, NX-OS, SR Linux, SONiC, Cumulus), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-423%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-579%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
-> 📓 Recent changes — **0.7.0 incident handoff** (sanitized paste card) on the **0.6.0 causal console** — are in [`CHANGELOG.md`](CHANGELOG.md).
+> 📓 Release **v1.1.0** — **Vendor-Safe Remediation & Two-Way ITSM Integration** on **v1.0.0 EVPN Causality & Telemetry Fusion** — details in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -32,18 +32,14 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
-## What's new — 0.6 causal console
+## What's new in v1.1.0
 
-v0.7.0 adds a sanitized incident handoff: the paste an operator copies into a ticket is built from the score, blast radius, and change window, then run through the same secret gate as an LLM prompt. Raw syslog is not included.
-
-v0.6.0 (2026-08-29) ships the causal console on top of the 0.5.2 security tree:
-
-- **xAI Grok** as a first-class sanitize-first LLM backend (`LLM_PROVIDER=grok`, `XAI_API_KEY`)
-- **Causal timeline**, **blast-radius estimator**, and **change-window correlator** on every `analyze()` — Flask, CLI, and MCP share the same fields
-- **Sanitize-diff** (`POST /api/sanitize-diff` + UI) so you can see exactly what the model is allowed to see
-- **Custom-rule editor** in the Flask UI
-- **SONiC + Cumulus** classifier patterns (orchagent / syncd / SWSS / teamd, clagd / switchd / NVUE / PTMD)
-- Suite **423 tests**. Docs: <https://gesh75.github.io/netlog-ai/>
+- **Vendor-Safe Remediation & Rollback Guardrails** (`remediation.py`): Generates deterministic change plans with transactional auto-rollback timers (`commit confirmed` on Junos, `commit timer` on EOS, `checkpoint` on NX-OS, `revert timer` on IOS-XE, `vtysh` auto-revert daemon on FRR), destructive command blocklists, and post-check assertions.
+- **Two-Way ITSM Integration** (`itsm.py`): Bidirectional Jira Service Management & ServiceNow incident correlation with deterministic `NETLOG-<SHA256>` deduplication keys for zero-duplicate alerting across CLOS fabrics.
+- **Protocol-Aware EVPN Causality & Telemetry Fusion** (`evpn_causal.py`, `sources/telemetry.py`): 5-layer hierarchy bipartite causal engine with 2-hop topological coupling, suppressing downstream overlay symptoms when lower-layer physical/underlay faults occur.
+- **Log Deduplication & Sanitize Vault** (`dedup.py`, `sanitize_vault.py`): Drain-style template clustering with RFC 5424 PRI and sequence number parsing, plus IPv6/MAC redaction for EVPN Type-2 routes.
+- **15 Agent Tools & REST Endpoints**: `/api/remediation`, `/api/itsm/enrich`, `generate_remediation_plan`, and `enrich_itsm_incident`.
+- Full test suite: **579 passing tests**. Docs: <https://gesh75.github.io/netlog-ai/>
 
 ## What's new — connectors + MCP server
 
