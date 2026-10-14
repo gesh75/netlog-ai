@@ -1,48 +1,52 @@
-# LinkedIn Post — netlog-ai launch
+# LinkedIn Post — netlog-ai v1.1.0 Release
 
 ## Recommended post copy (final — body has NO outbound link; URL goes in comment #1)
 
-> Most "AI for networking" tools are a chatbot bolted onto a Cisco-only dashboard. I wanted something different, so I built **netlog-ai** and open-sourced it under MIT.
+> Most "AI for networking" tools are a generic LLM wrapper that hallucinates when a CLOS fabric flaps. When an optical link takes bit errors, they blame EVPN overlay routes or draft unstructured advice without rollback protection.
 >
-> ⚡ It runs entirely on your laptop. Paste syslog from Junos, Arista EOS, or FRR and in under a second you get classified events across 50+ regex patterns, deduplicated severity-ranked action items, and a weighted 0–100 health score with a letter grade.
+> I wanted something built for real production operations, so I built **netlog-ai** v1.1.0 and open-sourced it under MIT.
 >
-> 🛠️ Point it at a single device config and the LLM (your choice: local Docker Model Runner or Anthropic Claude) returns a real audit — copy-pastable patches, rollback steps, verify CLI. Load a multi-device bundle and it infers topology from configs alone, surfaces cross-device gaps in BGP, OSPF, MTU, BFD, and LLDP, and lets you ask grounded questions about the fabric.
+> ⚡ **What it does:** Runs 100% locally on your laptop or bastion. Ingests raw syslog or CLI output across Arista EOS, Juniper Junos, Cisco NX-OS/IOS-XE, Nokia SR Linux, SONiC, and FRR. Classifies events across 80+ regex patterns, compresses syslog storms by 90%+ via Drain clustering, and synthesizes 5-phase root-cause playbooks.
 >
-> Design choices that mattered to me:
+> 🌐 **What’s new in v1.1.0:**
 >
-> 🔒 **Sanitize before LLM** — passwords, public IPs, SSH keys all redacted before any outbound call.
-> 🚀 **No telemetry, no SaaS** — configs never leave the host.
-> 🎯 **Multi-vendor from day one** — Junos, Arista, and FRR are all first-class. Not a chatbot retrofit.
-> ♿ **WCAG-AA accessible** — axe-core verified across every UI state. Full keyboard nav, ARIA, reduced-motion, dark color-scheme.
-> 🧪 **237 tests passing** across 8 review rounds — classifier, sanitizer, topology inference, LLM providers, site analysis.
+> 🧠 **5-Layer EVPN-VXLAN Causal Engine** — models physical (L1), LAG/MLAG (L2), underlay IGP/BGP (L3), VTEP NVE (L4), and EVPN overlay (L5) CLOS dependencies. When a spine link or underlay neighbor flaps, it suppresses thousands of downstream Type-2/Type-5 route withdrawals to pinpoint the true root cause.
+> 🔬 **Optical DOM vs. QoS Discard Fusion** — separates dirty transceivers (low Rx dBm + rising FCS/CRC errors) from clean dark-fiber cuts (hard Rx LOS, 0 CRC) and control-plane microburst buffer drops (healthy optics, 0 CRC, high queue discards).
+> 🗺️ **NetBox v4.x Auto-Discovery** — pulls device roles, sites, and multi-hop patch panel cabling into an instant topology manifest.
+> 🛡️ **Vendor-Safe Remediation with Auto-Rollback** — generates transactional change plans guarded by auto-reverting commit timers (`commit confirmed` on Junos, `commit timer` on EOS, `checkpoint` on NX-OS, `revert timer` on IOS-XE) and a destructive command blocklist.
+> 🎫 **Two-Way Jira & ServiceNow Enrichment** — deterministic `NETLOG-<SHA256>` incident fingerprinting eliminates duplicate alert storms across CLOS fabrics.
+> 🤖 **15 MCP Tools** — stdio / streamable-HTTP server exposing fabric triage, EVPN causality, remediation, and telemetry directly to Claude Code and AI agents.
 >
-> 📦 Bundled with two synthetic demo sites (11 devices total, mixed Junos + Arista EOS) so every feature runs end-to-end the moment you clone.
+> Design invariants:
+> 🔒 **Sanitize before LLM** — stateful token vault masks IPv4/IPv6, MAC, and ASNs before any external model sees it.
+> 🚀 **No telemetry, no SaaS** — runs air-gapped on your Mac or Linux host.
+> 🧪 **579+ tests passing** — hermetic unit, integration, and MCP test suites.
 >
-> Built solo over a few weeks of nights and weekends. AI starts earning its keep in networking when it outputs something you can paste straight into a CLI — not when it explains what your config probably does.
+> Built solo over nights and weekends for senior network architects and NetOps engineers who need deterministic verification, not AI hallucination.
 >
-> 🎬 2-minute silent demo below.
+> 🎬 Demo video and docs in the first comment.
 >
-> #NetworkEngineering #NetworkAutomation #OpenSource #LLM #Python #Junos #Arista #BGP #SASE
+> #NetworkEngineering #NetOps #EVPN #BGP #Junos #Arista #Cisco #OpenSource #MCP #Python
 
 ---
 
 ## First comment (paste IMMEDIATELY after publishing the post)
 
-> Repo (clean public release, no internal references):
+> Repo & Live Documentation:
 > 👉 https://github.com/gesh75/netlog-ai
+> 📖 https://gesh75.github.io/netlog-ai/
 >
-> MIT licensed. Star ⭐ if useful — and let me know what's missing for your environment.
+> MIT licensed. Star ⭐ if useful — and let me know what vendor logs or ITSM workflows you'd like to see next!
 
 ---
 
-## Why this version (vs the first draft)
+## Why this version (vs previous drafts)
 
-- **Contrarian opener** ("Most AI for networking tools are a chatbot bolted onto a Cisco-only dashboard…") replaces "Just open-sourced…". Gives readers a reason to keep reading.
-- **No `Repo:` line in the body** → matches your previous post's 7.3k-impression pattern. The URL lives only in comment #1.
-- **WCAG-AA claim is now empirically verified** with `@axe-core/playwright` against every UI state (idle, LOGS populated, DEVICE populated, SITE populated, topology) — **0 critical, 0 serious violations** under wcag2a/wcag2aa/wcag21a/wcag21aa rule sets. Receipts in commit history.
-- **5 carefully chosen accent emojis** (⚡🛠️🔒🚀🎯♿🧪📦🎬) — visual rhythm without becoming cartoonish.
-- **Closing jab at hallucination** ("…not when it explains what your config probably does") — credible to senior engineers.
-- **Hashtags trimmed** to the ones that actually surface tech/infra discovery on LinkedIn.
+- **Contrarian operator opener** ("Most AI for networking tools are a generic LLM wrapper that hallucinates when a CLOS fabric flaps…") establishes immediate credibility with principal/architect peers.
+- **No outbound link in the post body** → keeps LinkedIn algorithmic distribution high. The repo and docs URLs live exclusively in comment #1.
+- **Concrete technical depth** — calls out 5-layer EVPN-VXLAN hierarchy, 90%+ syslog storm compression, optical DOM vs QoS discard correlation, NetBox v4.x manifest resolution, and vendor-safe commit rollback timers.
+- **15 MCP Tools + 579+ tests passing** — concrete empirical proof of software rigor.
+- **Visual rhythm** with professional emojis (⚡🌐🧠🔬🗺️🛡️🎫🤖🔒🚀🧪🎬) without fluff.
 
 ---
 

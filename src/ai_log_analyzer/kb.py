@@ -1508,25 +1508,762 @@ _NTP_LOST = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Optical Transceiver Degradation (Low Rx dBm + Rising FCS/CRC Errors)
+# ─────────────────────────────────────────────────────────────────────────────
+_OPTICAL_DEGRADATION = {
+    "match": r"optical.*(?:pwr|power|low|degra)|transceiver.*(?:fault|warn|pwr)|rx_los.*crc|fcs.*crc.*optic|optic.*(?:alarm|warn)",
+    "root_cause": (
+        "Optical physical layer degradation. Optical receive power (Rx dBm) has dropped below "
+        "the receiver sensitivity threshold due to laser aging, dirty fiber end-faces, or macro-bending. "
+        "Attenuated light levels generate frame check sequence (FCS) / cyclic redundancy check (CRC) "
+        "errors and symbol errors across the physical interface. Distinct from hard loss of signal (LOS), "
+        "the link remains up while corrupting transit frames."
+    ),
+    "risk": (
+        "Silent data corruption, TCP retransmissions, degraded throughput, ECMP packet blackholing, "
+        "and intermittent BFD/LACP control session drops causing routing flaps."
+    ),
+    "timeline": "P1 — Inspect DOM/DDM optical power and clean or replace fiber/optic within 2 hours.",
+    "rca": {
+        "root_cause": (
+            "Transceiver laser degradation, dirty LC connector end-face, or bent optical patch cord "
+            "causing optical attenuation (Rx dBm < -15 dBm to -20 dBm) with correlated incrementing FCS/CRC counters."
+        ),
+        "risk": "Silent packet loss, ECMP hash polarization to degraded link, and intermittent BFD/LACP session drops.",
+        "resolution_steps": [
+            "Check Digital Optical Monitoring (DOM/DDM) Rx/Tx optical power levels against transceiver thresholds",
+            "Verify correlated incrementing FCS, CRC, symbol, or alignment errors on the physical port",
+            "Differentiate from clean dark-fiber cut (hard Rx LOS with 0 CRC) vs dirty/degraded optic (low Rx with high CRC)",
+            "Inspect and clean fiber LC ferrule using an optical fiber scope and dry-cleaner cartridge",
+            "Reseat or replace the optical transceiver module (SFP+/SFP28/QSFP28/QSFP-DD)",
+            "Verify link error counters cease incrementing post-remediation",
+        ],
+        "cli_junos": [
+            "show interfaces diagnostics optics <intf>",
+            "show interfaces <intf> extensive | match \"error|crc|fcs|bytes\"",
+            "show interfaces <intf> media",
+            "set interfaces <intf> disable",
+            "delete interfaces <intf> disable",
+            "commit confirmed 5",
+        ],
+        "cli_eos": [
+            "show interfaces <intf> transceiver detail",
+            "show interfaces <intf> counters errors",
+            "show interfaces <intf> phy detail",
+            "interface <intf>",
+            "  shutdown",
+            "  no shutdown",
+        ],
+        "timeline": "P1 — Inspect DOM/DDM and replace optic/cable immediately.",
+    },
+    "phases": [
+        {
+            "name": "Diagnose",
+            "goal": "Verify low optical power and correlate with incrementing CRC/FCS error counters.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "ethtool -m <intf> && ethtool -S <intf> | grep -iE 'rx.*pwr|crc|fcs|err'",
+                        "junos": "show interfaces diagnostics optics <intf>",
+                        "eos": "show interfaces <intf> transceiver detail",
+                    },
+                    "expected": "Rx Optical Power below receiver sensitivity (< -15 dBm) with alert/warning flag",
+                    "note": "Compare against vendor low-alarm and low-warning thresholds",
+                },
+                {
+                    "cli": {
+                        "frr": "ethtool -S <intf> | grep -iE 'crc|fcs|symbol'",
+                        "junos": "show interfaces <intf> extensive | match \"Input errors|CRC|FCS\"",
+                        "eos": "show interfaces <intf> counters errors",
+                    },
+                    "expected": "Actively incrementing FCS/CRC error count while interface state is UP",
+                    "note": "Rising CRC with low Rx confirms optical/physical attenuation rather than remote shutdown",
+                },
+            ],
+        },
+        {
+            "name": "Mitigate",
+            "goal": "Drain traffic away from the degraded link to eliminate transit packet loss.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'configure' -c 'interface <intf>' -c 'ip ospf cost 65535'",
+                        "junos": "set interfaces <intf> disable",
+                        "eos": "interface <intf>\n  shutdown",
+                    },
+                    "expected": "Traffic diverts across redundant CLOS ECMP uplinks without drops",
+                    "note": "Use graceful drain or interface disable while dispatching datacenter hands-and-eyes",
+                },
+            ],
+        },
+        {
+            "name": "Remediate",
+            "goal": "Clean optical ferrule, reseat patch cable, or replace defective optical module.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "ip link set <intf> down && echo 'Replace SFP/fiber' && ip link set <intf> up",
+                        "junos": "delete interfaces <intf> disable\ncommit confirmed 5",
+                        "eos": "interface <intf>\n  no shutdown",
+                    },
+                    "expected": "Link returns UP with optical Rx power restored to nominal range (-8 to -2 dBm)",
+                    "note": "Clean LC connectors using optical cleaner before inserting new optic",
+                },
+            ],
+        },
+        {
+            "name": "Verify",
+            "goal": "Confirm optical power levels and verify error counters remain flat.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "ethtool -S <intf> | grep -iE 'crc|fcs'",
+                        "junos": "show interfaces diagnostics optics <intf>",
+                        "eos": "show interfaces <intf> counters errors",
+                    },
+                    "expected": "DOM Rx/Tx power within normal operating margins; zero CRC/FCS increments over 10 min",
+                    "note": "Clear interface error counters if supported to monitor delta cleanly",
+                },
+            ],
+        },
+        {
+            "name": "Optimize",
+            "goal": "Establish automated optical telemetry alerting before threshold breach.",
+            "actions": [
+                {
+                    "cli": {
+                        "junos": "set interfaces <intf> opt-warning-alert enable",
+                        "eos": "transceiver ddm alert enable",
+                        "frr": "# Configure Prometheus node_exporter / network telemetry scraper",
+                    },
+                    "expected": "Proactive telemetry alert when Rx optical power drops within 2 dB of threshold",
+                    "note": "Catches degrading optics before user-visible packet corruption begins",
+                },
+            ],
+        },
+    ],
+    "preventive_config": [
+        "# Set optical DDM threshold monitoring on Junos:",
+        "  set chassis fpc <slot> pic <pic> port <port> optics-diagnostics-thresholds ...",
+        "# EOS transceiver alert tuning:",
+        "  transceiver ddm alert enable",
+    ],
+    "monitoring": [
+        "Poll DOM Rx/Tx power every 30s via streaming telemetry / Prometheus",
+        "Alert when optical Rx power drops by > 3 dBm over a 24-hour window",
+        "Alert on rate(fcs_errors_total[2m]) > 0",
+    ],
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Clean Dark-Fiber Cut / Remote Transceiver Administrative Shutdown
+# ─────────────────────────────────────────────────────────────────────────────
+_OPTICAL_CLEAN_SHUTDOWN = {
+    "match": r"clean.*(?:shutdown|dark.?fiber)|hard.*rx.?los|rx_los.*(?:zero|0).*crc|remote.*admin.*down",
+    "root_cause": (
+        "Clean physical carrier loss without prior optical degradation. Optical receive power dropped "
+        "instantaneously to hard Loss of Signal (Rx LOS, < -40 dBm) with exactly zero preceding FCS or CRC errors. "
+        "Characteristic of an abrupt dark-fiber conduit cut, unpatched jumper, or remote peer administrative "
+        "shutdown (laser shut off cleanly)."
+    ),
+    "risk": "Immediate loss of link capacity and LAG member detachment; failover to alternate CLOS paths.",
+    "timeline": "P1 — Check remote peer maintenance status or fiber provider OTDR trace.",
+    "rca": {
+        "root_cause": (
+            "Complete physical dark-fiber severance or clean remote administrative interface shutdown. "
+            "Laser power dropped to hard LOS with 0 CRC frame check errors."
+        ),
+        "risk": "Reduced CLOS bisection bandwidth, potential ECMP congestion on remaining links.",
+        "resolution_steps": [
+            "Verify optical DOM Rx power is at hard LOS floor (< -30 dBm to -40 dBm)",
+            "Confirm FCS/CRC error deltas are zero (differentiating from dirty/degrading optics)",
+            "Check remote peer change calendar / maintenance schedule for planned maintenance",
+            "Dispatch dark-fiber provider / colocation cross-connect technician for OTDR trace test",
+            "Verify alternate CLOS ECMP paths have sufficient capacity",
+        ],
+        "cli_junos": [
+            "show interfaces diagnostics optics <intf>",
+            "show interfaces <intf> extensive | match \"Physical|Carrier|LOS\"",
+            "show log messages | match <intf> | last 20",
+        ],
+        "cli_eos": [
+            "show interfaces <intf> transceiver detail",
+            "show interfaces <intf> status",
+            "show logging | grep <intf>",
+        ],
+        "timeline": "P1 — Verify remote peer state and open dark-fiber provider ticket.",
+    },
+    "phases": [
+        {
+            "name": "Diagnose",
+            "goal": "Confirm hard Rx LOS with zero preceding CRC errors.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "ethtool <intf> && ethtool -m <intf>",
+                        "junos": "show interfaces diagnostics optics <intf>",
+                        "eos": "show interfaces <intf> transceiver detail",
+                    },
+                    "expected": "Receiver power: -40.0 dBm / Loss of Signal (LOS) alarm active; 0 CRC errors",
+                    "note": "Indicates no light reaching receiver; laser transmitter at remote end is off or cable is severed",
+                },
+            ],
+        },
+        {
+            "name": "Mitigate",
+            "goal": "Confirm LAG or routing protocol convergence and isolate administrative state.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'show ip route summary'",
+                        "junos": "show route summary",
+                        "eos": "show ip route summary",
+                    },
+                    "expected": "Underlay routing reconverged around severed link without route flapping",
+                    "note": "Verify ECMP member balancing across remaining active paths",
+                },
+            ],
+        },
+        {
+            "name": "Remediate",
+            "goal": "Restore physical dark-fiber continuity or lift remote administrative shutdown.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "# Await fiber splice / cross-connect completion",
+                        "junos": "show interfaces <intf> | match \"Physical link\"",
+                        "eos": "show interfaces <intf> status",
+                    },
+                    "expected": "Physical link transitions to Up upon fiber reconnection",
+                    "note": "Verify bi-directional light levels once remote laser is restored",
+                },
+            ],
+        },
+        {
+            "name": "Verify",
+            "goal": "Verify link stability and protocol adjacency reconstitution.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'show ip bgp summary'",
+                        "junos": "show bfd session interface <intf>",
+                        "eos": "show bfd neighbors interface <intf>",
+                    },
+                    "expected": "BFD and BGP sessions Established; optical power restored to normal dBm range",
+                    "note": "Ensure zero packet loss during initial link reintegration",
+                },
+            ],
+        },
+        {
+            "name": "Optimize",
+            "goal": "Verify diverse physical conduits for redundant CLOS links.",
+            "actions": [
+                {
+                    "cli": {
+                        "junos": "show lldp neighbors interface <intf>",
+                        "eos": "show lldp neighbors <intf>",
+                        "frr": "lldpctl <intf>",
+                    },
+                    "expected": "Redundant links traverse separate conduit paths / distinct linecards",
+                    "note": "Audit fiber routing to ensure no shared risk link group (SRLG) colocation",
+                },
+            ],
+        },
+    ],
+    "preventive_config": [
+        "# SRLG and diverse conduit mapping:",
+        "  set protocols mpls path-srlg ...",
+    ],
+    "monitoring": [
+        "Immediate alert on interface carrier loss with 0 prior CRC delta",
+        "Correlate carrier loss across multiple ports on same physical fiber bundle",
+    ],
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Control-Plane Microburst Congestion & CoPP Protection
+# ─────────────────────────────────────────────────────────────────────────────
+_CONTROL_PLANE_CONGESTION = {
+    "match": r"microburst|copp.*(?:drop|discard|boost)|queue.*discard.*(?:bfd|bgp)|control.?plane.*(?:congestion|queue)|buffer.*exhaust",
+    "root_cause": (
+        "Control-plane microburst congestion. Egress output queue buffer exhaustion or inadequate "
+        "Control Plane Policing (CoPP) rate limits causing tail-drops of network control packets (BFD, BGP, LACP). "
+        "Optical health is nominal and CRC frame errors are zero, confirming that drops are caused by "
+        "data-plane microbursts starving control queues rather than physical link failure."
+    ),
+    "risk": (
+        "False-positive BFD/BGP hold-timer expiries, flapping underlay/overlay routing sessions, "
+        "unnecessary route reconvergence storms, and cascading CLOS fabric instability."
+    ),
+    "timeline": "P1 — Elevate CoPP thresholds and assign strict-priority queueing (Queue 6/7) to control traffic.",
+    "rca": {
+        "root_cause": (
+            "High-volume data plane traffic burst oversubscribed shared packet buffer or inadequate Control Plane Policing (CoPP) rate limits, "
+            "causing control-plane packet drops (BFD, BGP, LACP) and hold-timer timeouts."
+        ),
+        "risk": "Underlay and overlay control session flaps, fabric reconvergence storms, route oscillation.",
+        "resolution_steps": [
+            "Verify optical DOM power is nominal and CRC/FCS counter delta is 0 (rules out physical fault)",
+            "Inspect hardware queue drop counters and CPU-bound packet drop statistics",
+            "Identify congested egress queues and check whether control traffic shares buffers with best-effort data",
+            "Assign BFD (UDP 3784/4784) and BGP (TCP 179) to strict-priority queues (Queue 6/7 / strict-high)",
+            "Tune CoPP rate-limit policers to prevent control-plane starvation during peak burst periods",
+            "Verify BFD session stability under microburst load",
+        ],
+        "cli_junos": [
+            "show interfaces queue <intf>",
+            "show class-of-service interface <intf>",
+            "show firewall filter __cos_classifier__",
+            "show system statistics icmp",
+            "set class-of-service queues network-control priority strict-high",
+            "commit confirmed 5",
+        ],
+        "cli_eos": [
+            "show interfaces <intf> queue",
+            "show cpu counters queue",
+            "show qos maps",
+            "show platform fap counters qos drops",
+            "qos map cos 6 to queue 6",
+        ],
+        "timeline": "P1 — Elevate CoPP thresholds and verify strict-priority control queue within 1 hour.",
+    },
+    "phases": [
+        {
+            "name": "Diagnose",
+            "goal": "Verify output queue drops or CoPP drops while physical optics are healthy.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "tc -s qdisc show dev <intf> && ethtool -S <intf> | grep -i discard",
+                        "junos": "show interfaces queue <intf>",
+                        "eos": "show interfaces <intf> queue",
+                    },
+                    "expected": "Incrementing dropped/discarded packet count on output queue while CRC error count is 0",
+                    "note": "High drops with zero CRC confirms buffer congestion rather than physical degradation",
+                },
+                {
+                    "cli": {
+                        "frr": "cat /proc/net/snmp | grep -iE 'udp|tcp'",
+                        "junos": "show policer",
+                        "eos": "show cpu counters queue",
+                    },
+                    "expected": "CPU protection / CoPP drop counters incrementing for BFD/BGP classes",
+                    "note": "Points to aggressive policer rate limiting or lack of strict-priority scheduling",
+                },
+            ],
+        },
+        {
+            "name": "Mitigate",
+            "goal": "Temporarily elevate BFD hold timers or relax CoPP burst limits.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'configure' -c 'router bgp <ASN>' -c 'timers bgp 10 30'",
+                        "junos": "set protocols bfd session-mode automatic multiplier 5",
+                        "eos": "control-plane\n  service-policy input COPP-HIGH-PERF",
+                    },
+                    "expected": "Control session flaps cease as timers tolerate microburst buffer delays",
+                    "note": "Stabilizes protocol adjacencies while queue scheduling is reconfigured",
+                },
+            ],
+        },
+        {
+            "name": "Remediate",
+            "goal": "Reclassify control packets to strict-priority Queue 6/7 with dedicated buffer allocation.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "# Configure tc qdisc strict priority for control plane packets",
+                        "junos": "set class-of-service interfaces <intf> unit 0 forward-class network-control\nset class-of-service queues network-control priority strict-high\ncommit confirmed 5",
+                        "eos": "qos profile CONTROL-PLANE\n  tx-queue 6\n    priority strict\ninterface <intf>\n  qos profile CONTROL-PLANE",
+                    },
+                    "expected": "Control packets serviced with strict-priority; zero queue discards for Queue 6/7",
+                    "note": "Ensures data microbursts in best-effort queues cannot starve BFD/BGP packets",
+                },
+            ],
+        },
+        {
+            "name": "Verify",
+            "goal": "Verify zero control queue drops during peak burst traffic.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'show bfd peers'",
+                        "junos": "show bfd session extensive",
+                        "eos": "show bfd neighbors detail",
+                    },
+                    "expected": "BFD packets received continuously with 0 lost packets and no state flaps",
+                    "note": "Monitor jitter and min/avg/max round-trip interval",
+                },
+            ],
+        },
+        {
+            "name": "Optimize",
+            "goal": "Deploy queue buffer telemetry and Explicit Congestion Notification (ECN).",
+            "actions": [
+                {
+                    "cli": {
+                        "junos": "set class-of-service congestion-notification-profile ECN-PROFILE ...",
+                        "eos": "qos ecn enable",
+                        "frr": "# Enable ECN in Linux kernel sysctl net.ipv4.tcp_ecn = 1",
+                    },
+                    "expected": "ECN marking signals data-plane senders to throttle before buffer exhaustion",
+                    "note": "Maintains low queue latency and prevents deep buffer microbursts",
+                },
+            ],
+        },
+    ],
+    "preventive_config": [
+        "# Strict-priority queue 6/7 mapping on Arista EOS:",
+        "  qos map cos 6 to queue 6",
+        "  qos map dscp 48 to queue 6",
+        "  tx-queue 6 priority strict",
+        "# Junos network-control queue priority:",
+        "  set class-of-service queues network-control priority strict-high",
+    ],
+    "monitoring": [
+        "Alert on rate(interface_queue_discards_total{queue=\"control\"}[1m]) > 0",
+        "Alert when buffer headroom utilization exceeds 80%",
+        "Monitor BFD packet latency jitter > 10ms",
+    ],
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EVPN-VXLAN Underlay-to-Overlay Failure Cascade
+# ─────────────────────────────────────────────────────────────────────────────
+_EVPN_UNDERLAY_CASCADE = {
+    "match": r"evpn.*(?:cascade|underlay|suppress)|vtep.*nve.*(?:down|flap)|overlay.*(?:withdraw|route.*fail)|underlay.*cascade",
+    "root_cause": (
+        "Bipartite EVPN-VXLAN underlay-to-overlay failure cascade. An underlying L1 physical link or L3 underlay "
+        "(IGP/BGP/BFD) failure on a CLOS spine or leaf caused loopback reachability loss to remote VTEP endpoints. "
+        "As a downstream consequence, L4 VTEP NVE tunnels flap and the MP-BGP EVPN control plane withdraws "
+        "L5 Type-2 (MAC/IP) and Type-5 (IP Prefix) overlay routes. Lower-layer root cause must be remediated "
+        "first; overlay symptoms are suppressed as secondary."
+    ),
+    "risk": (
+        "Multi-tenant overlay blackholing, VXLAN tunnel collapse across CLOS leafs, and misdirected "
+        "troubleshooting of EVPN configuration when the true defect is underlay transport."
+    ),
+    "timeline": "P1 — Triage underlay physical/IGP link on spine/leaf; suppress overlay symptom tickets.",
+    "rca": {
+        "root_cause": (
+            "Underlay transport failure (L1 cable drop, optical fault, or L3 BGP/OSPF/IS-IS neighbor down) "
+            "disconnecting VTEP loopback IPs, triggering mass overlay EVPN route withdrawal."
+        ),
+        "risk": "Loss of multi-tenant VXLAN tunnel encapsulation, overlay partition between CLOS leafs.",
+        "resolution_steps": [
+            "Identify underlay physical or IGP/underlay-BGP failure on adjacent spine/leaf",
+            "Suppress downstream overlay symptom tickets (L4 VTEP NVE / L5 EVPN route flaps)",
+            "Verify underlay loopback route reachability via alternate CLOS ECMP paths",
+            "Restore failed underlay link or BGP neighbor session",
+            "Confirm VTEP tunnel reconstitution and EVPN Type-2/Type-5 route relearning",
+        ],
+        "cli_junos": [
+            "show evpn instance",
+            "show route table <vrf>.evpn.0",
+            "show ethernet-switching vxlan-tunnel-end-point remote",
+            "show bfd session",
+            "show bgp summary group UNDERLAY",
+            "show bgp summary group OVERLAY-EVPN",
+        ],
+        "cli_eos": [
+            "show bgp evpn summary",
+            "show vxlan vtep",
+            "show vxlan address-table",
+            "show ip bgp summary",
+            "show ip route vrf default",
+        ],
+        "timeline": "P1 — Fix underlay link or neighbor; overlay auto-recovers.",
+    },
+    "phases": [
+        {
+            "name": "Diagnose",
+            "goal": "Identify the underlying L1/L3 failure causing loopback reachability loss.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'show ip route' | grep -iE 'ospf|bgp'",
+                        "junos": "show route table inet.0 protocol bgp",
+                        "eos": "show ip route vrf default",
+                    },
+                    "expected": "VTEP Loopback IP (/32) route is missing or flapping in the underlay table",
+                    "note": "Check underlay IGP/BGP reachability to remote VTEP IP before inspecting EVPN",
+                },
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'show bgp evpn summary'",
+                        "junos": "show bgp summary group OVERLAY-EVPN",
+                        "eos": "show bgp evpn summary",
+                    },
+                    "expected": "Overlay EVPN sessions in Active/Connect state due to missing underlay next-hop",
+                    "note": "Confirms overlay withdrawal is a downstream symptom of the underlay outage",
+                },
+            ],
+        },
+        {
+            "name": "Mitigate",
+            "goal": "Divert traffic through redundant spines via ECMP or activate secondary underlay path.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'configure' -c 'interface <intf>' -c 'shutdown'",
+                        "junos": "set interfaces <intf> disable",
+                        "eos": "interface <intf>\n  shutdown",
+                    },
+                    "expected": "Traffic reroutes across surviving spine uplinks; underlay loopback restored",
+                    "note": "Eliminates ECMP blackholing on partially failing underlay link",
+                },
+            ],
+        },
+        {
+            "name": "Remediate",
+            "goal": "Restore failed underlay link, transceiver, or IGP adjacency.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'clear ip bgp <underlay-peer>'",
+                        "junos": "clear bgp neighbor <underlay-peer>",
+                        "eos": "clear ip bgp <underlay-peer>",
+                    },
+                    "expected": "Underlay neighbor session transitions to Established; loopbacks learned",
+                    "note": "L4 VTEP NVE tunnels and L5 EVPN routes automatically reconstitute",
+                },
+            ],
+        },
+        {
+            "name": "Verify",
+            "goal": "Confirm VTEP tunnel operational status and EVPN Type-2 route exchange.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'show evpn vni'",
+                        "junos": "show ethernet-switching vxlan-tunnel-end-point remote",
+                        "eos": "show vxlan vtep detail",
+                    },
+                    "expected": "All remote VTEP tunnels show Status: Up and learning active MAC/IP bindings",
+                    "note": "Check ping between overlay VMs/hosts across the fabric",
+                },
+            ],
+        },
+        {
+            "name": "Optimize",
+            "goal": "Implement BFD for sub-second underlay failure detection and BGP PIC Edge.",
+            "actions": [
+                {
+                    "cli": {
+                        "junos": "set protocols bgp group UNDERLAY neighbor <ip> bfd-liveness-detection minimum-interval 300",
+                        "eos": "router bgp <ASN>\n  neighbor UNDERLAY bfd\n  bgp additional-paths install",
+                        "frr": "router bgp <ASN>\n  neighbor <peer> bfd",
+                    },
+                    "expected": "Sub-second failover on underlay loss before overlay TCP sessions time out",
+                    "note": "BGP Prefix-Independent Convergence (PIC) pre-programs alternate paths",
+                },
+            ],
+        },
+    ],
+    "preventive_config": [
+        "# Underlay BFD and BGP PIC on Arista EOS:",
+        "  router bgp <ASN>",
+        "    neighbor UNDERLAY bfd",
+        "    bgp additional-paths install",
+        "# Junos underlay BFD configuration:",
+        "  set protocols bgp group UNDERLAY neighbor <ip> bfd-liveness-detection minimum-interval 300",
+    ],
+    "monitoring": [
+        "Correlate L1/L3 underlay alarms with L4/L5 overlay flaps inside 120s window",
+        "Alert if VTEP tunnel count drops while underlay interface is down",
+    ],
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EVPN MAC Mobility & Duplicate MAC Freeze Recovery
+# ─────────────────────────────────────────────────────────────────────────────
+_EVPN_MAC_MOBILITY = {
+    "match": r"mac.*(?:mobility|duplicate|freeze|move.*limit)|evpn.*duplicate.*mac|mac.*flapping",
+    "root_cause": (
+        "EVPN duplicate MAC detection / MAC mobility freeze. A host MAC address moved between different "
+        "VTEP leafs or Ethernet Segment Identifiers (ESI) more frequently than the configured mobility threshold "
+        "(e.g., > 5 moves within 180 seconds). The leaf switch froze the MAC to protect the EVPN control plane "
+        "and prevent Layer 2 bridging loops, blackholing frames for the affected host."
+    ),
+    "risk": (
+        "Complete network connectivity loss for the frozen host or VM; intermittent communication across "
+        "dual-homed servers during live migration or misconfigured active-active NIC teaming."
+    ),
+    "timeline": "P2 — Identify duplicate MAC origin, clear freeze lock, and resolve VM/bonding misconfiguration.",
+    "rca": {
+        "root_cause": (
+            "Virtual machine live migration loop, duplicate NIC MAC address assignment, or L2 spanning-tree / "
+            "bridging loop across EVPN-VXLAN multi-homing leaf pairs."
+        ),
+        "risk": "Affected MAC address blackholed by defensive control-plane freeze, intermittent packet drops across VTEPs.",
+        "resolution_steps": [
+            "Identify frozen MAC address and the source VTEP/interfaces reporting moves",
+            "Check if VM migration loop occurred between hypervisor hosts",
+            "Verify Server dual-homing bonding mode (LACP active-active vs active-backup without ESI)",
+            "Clear duplicate MAC freeze state on leaf switches",
+            "Tune MAC mobility dampening timer and max-movement count",
+        ],
+        "cli_junos": [
+            "show evpn mac-table",
+            "show ethernet-switching table | match <mac>",
+            "clear evpn duplicate-mac",
+            "show interfaces extensive | match esi",
+            "set protocols evpn duplicate-mac-detection mobility-threshold 10",
+            "commit confirmed 5",
+        ],
+        "cli_eos": [
+            "show bgp evpn host-flap",
+            "show mac address-table | grep <mac>",
+            "clear bgp evpn host-flap",
+            "show vxlan address-table",
+            "mac address-table loop-protection",
+        ],
+        "timeline": "P2 — Clear host flap freeze and fix VM or dual-homing misconfiguration within 4 hours.",
+    },
+    "phases": [
+        {
+            "name": "Diagnose",
+            "goal": "Identify the frozen MAC address and the leaf switches reporting moves.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'show evpn mac vni all' | grep -iE 'duplicate|freeze'",
+                        "junos": "show evpn duplicate-mac",
+                        "eos": "show bgp evpn host-flap",
+                    },
+                    "expected": "Lists MAC address, VNI, sequence number, and Freeze: True / State: Duplicate",
+                    "note": "Note the timestamp of moves and reporting VTEP leaf IPs",
+                },
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'show mac address-table'",
+                        "junos": "show ethernet-switching table | match <mac>",
+                        "eos": "show mac address-table address <mac>",
+                    },
+                    "expected": "Identifies which local port or remote VTEP claims the MAC",
+                    "note": "Check if two different hypervisors or server NICs are broadcasting the same MAC",
+                },
+            ],
+        },
+        {
+            "name": "Mitigate",
+            "goal": "Clear the frozen state to restore traffic while root-cause troubleshooting proceeds.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'clear evpn mac vni all'",
+                        "junos": "clear evpn duplicate-mac",
+                        "eos": "clear bgp evpn host-flap",
+                    },
+                    "expected": "Frozen MAC entry is unblocked; traffic resumes to active location",
+                    "note": "If the loop or duplicate MAC is still active, the MAC will refreeze",
+                },
+            ],
+        },
+        {
+            "name": "Remediate",
+            "goal": "Isolate duplicate MAC or correct hypervisor/server multi-homing configuration.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "# Shutdown duplicate port or fix server bonding config",
+                        "junos": "set protocols evpn duplicate-mac-detection auto-recovery-time 10\ncommit confirmed 5",
+                        "eos": "mac address-table loop-protection\nclear mac address-table dynamic",
+                    },
+                    "expected": "Single authoritative VTEP claims the MAC; sequence number increments stop",
+                    "note": "Ensure servers use standard LACP (mode 4) when connected to ESI multi-homing pairs",
+                },
+            ],
+        },
+        {
+            "name": "Verify",
+            "goal": "Verify MAC table stability and absence of host flap alerts.",
+            "actions": [
+                {
+                    "cli": {
+                        "frr": "vtysh -c 'show evpn mac vni all'",
+                        "junos": "show evpn mac-table | match <mac>",
+                        "eos": "show bgp evpn host-flap",
+                    },
+                    "expected": "Host flap table is empty; MAC address mapped to single active interface/VTEP",
+                    "note": "Confirm bidirectional ping to host across the EVPN fabric",
+                },
+            ],
+        },
+        {
+            "name": "Optimize",
+            "goal": "Configure auto-recovery timer and tune duplicate MAC threshold parameters.",
+            "actions": [
+                {
+                    "cli": {
+                        "junos": "set protocols evpn duplicate-mac-detection auto-recovery-time 15",
+                        "eos": "mac address-table loop-protection action log",
+                        "frr": "# Configure EVPN duplicate MAC detection thresholds",
+                    },
+                    "expected": "Transient VM vMotion events do not permanently freeze host MAC",
+                    "note": "Allows auto-unfreezing after cooldown period if movement stops",
+                },
+            ],
+        },
+    ],
+    "preventive_config": [
+        "# Junos EVPN duplicate MAC auto-recovery:",
+        "  set protocols evpn duplicate-mac-detection mobility-threshold 5",
+        "  set protocols evpn duplicate-mac-detection auto-recovery-time 15",
+        "# Arista EOS host-flap configuration:",
+        "  router bgp <ASN>",
+        "    address-family evpn",
+        "      host-flap detection window 180 threshold 5",
+    ],
+    "monitoring": [
+        "Alert when host MAC move count exceeds 3 in 60 seconds",
+        "Alert on EVPN duplicate MAC freeze trap or syslog event",
+    ],
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Final registry
 # ─────────────────────────────────────────────────────────────────────────────
 KB: dict[str, dict[str, dict[str, Any]]] = {
     "routing": {
         "bgp_down": _BGP_DOWN,
         "ospf":     _OSPF_ADJ,
+        "evpn_cascade": _EVPN_UNDERLAY_CASCADE,
+        "control_plane_congestion": _CONTROL_PLANE_CONGESTION,
+        "mac_mobility": _EVPN_MAC_MOBILITY,
         "_default": _BGP_DOWN,
     },
-    "interface":  {"link_down":   _INT_DOWN,    "_default": _INT_DOWN},
+    "interface": {
+        "link_down":   _INT_DOWN,
+        "optical_degradation": _OPTICAL_DEGRADATION,
+        "optical_clean_shutdown": _OPTICAL_CLEAN_SHUTDOWN,
+        "mac_mobility": _EVPN_MAC_MOBILITY,
+        "_default": _INT_DOWN,
+    },
     "lag":        {"_default":    _LAG_DOWN},
     "hardware": {
         "parity":  _ASIC_PARITY,
         "fpc":     _FPC_ERR,
         "chassis": _CHASSIS_ENV,
+        "optical_degradation": _OPTICAL_DEGRADATION,
         "_default": _ASIC_PARITY,
+    },
+    "qos": {
+        "microburst": _CONTROL_PLANE_CONGESTION,
+        "_default": _CONTROL_PLANE_CONGESTION,
+    },
+    "evpn": {
+        "cascade": _EVPN_UNDERLAY_CASCADE,
+        "mac_mobility": _EVPN_MAC_MOBILITY,
+        "_default": _EVPN_UNDERLAY_CASCADE,
     },
     "compliance": {"license":     _LICENSE,     "_default": _LICENSE},
     "security":   {"auth_fail":   _AUTH_FAIL,   "_default": _AUTH_FAIL},
-    "system":     {"_default":    _KERNEL_PANIC},
+    "system": {
+        "microburst": _CONTROL_PLANE_CONGESTION,
+        "_default":    _KERNEL_PANIC,
+    },
     "ntp":        {"_default":    _NTP_LOST},
     "vpn":        {"tunnel_down": _VPN_DOWN,    "_default": _VPN_DOWN},
     "redundancy": {"failover":    _REDUNDANCY,  "_default": _REDUNDANCY},

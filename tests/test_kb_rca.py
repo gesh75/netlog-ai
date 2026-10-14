@@ -94,3 +94,89 @@ def test_resolution_steps_are_strings() -> None:
     rca = e["rca"]
     for step in rca["resolution_steps"]:
         assert isinstance(step, str), f"resolution_steps must contain strings, got {type(step)}: {step!r}"
+
+
+@pytest.mark.unit
+def test_optical_transceiver_degradation_rca() -> None:
+    """Optical degradation entry must identify low Rx power + rising CRC and prescribe transceiver checks."""
+    e = kb.lookup("interface", "optical transceiver degradation low rx power rising fcs crc errors")
+    assert "rca" in e, "Optical degradation must have an 'rca' block"
+    rca = e["rca"]
+    root = rca["root_cause"].lower()
+    assert "optical" in root or "transceiver" in root or "crc" in root, (
+        f"Unexpected root cause: {rca['root_cause']}"
+    )
+    assert any("clean" in s.lower() and "crc" in s.lower() for s in rca["resolution_steps"]), (
+        "Resolution steps must differentiate low-power CRC degradation from clean dark-fiber cut"
+    )
+    assert any("optics" in c.lower() for c in rca["cli_junos"])
+    assert any("transceiver" in c.lower() for c in rca["cli_eos"])
+
+
+@pytest.mark.unit
+def test_optical_clean_dark_fiber_shutdown_rca() -> None:
+    """Clean dark-fiber cut entry must identify hard Rx LOS with 0 CRC errors."""
+    e = kb.lookup("interface", "clean dark-fiber cut hard rx los zero crc")
+    assert "rca" in e, "Clean shutdown entry must have an 'rca' block"
+    rca = e["rca"]
+    root = rca["root_cause"].lower()
+    assert "dark" in root or "fiber" in root or "shutdown" in root, (
+        f"Unexpected root cause: {rca['root_cause']}"
+    )
+    assert any("otdr" in s.lower() or "provider" in s.lower() for s in rca["resolution_steps"])
+
+
+@pytest.mark.unit
+def test_control_plane_microburst_congestion_copp_rca() -> None:
+    """Microburst congestion entry must prescribe strict-priority queue 6/7 or CoPP boost."""
+    e = kb.lookup("routing", "control-plane microburst congestion output queue discard bfd drop")
+    assert "rca" in e, "Microburst congestion entry must have an 'rca' block"
+    rca = e["rca"]
+    root = rca["root_cause"].lower()
+    assert "buffer" in root or "copp" in root or "queue" in root or "burst" in root, (
+        f"Unexpected root cause: {rca['root_cause']}"
+    )
+    assert any("strict-priority" in s.lower() or "copp" in s.lower() for s in rca["resolution_steps"])
+    assert any("queue" in c.lower() or "class-of-service" in c.lower() for c in rca["cli_junos"])
+    assert any("queue" in c.lower() or "qos" in c.lower() for c in rca["cli_eos"])
+
+    # Also verifiable under qos category
+    e_qos = kb.lookup("qos", "output queue discards bfd timeout")
+    assert e_qos.get("match") == e.get("match")
+
+
+@pytest.mark.unit
+def test_evpn_underlay_to_overlay_failure_cascade_rca() -> None:
+    """EVPN cascade entry must emphasize suppressing overlay symptoms for underlay root causes."""
+    e = kb.lookup("evpn", "underlay failure cascade suppressing overlay route withdrawals")
+    assert "rca" in e, "EVPN cascade entry must have an 'rca' block"
+    rca = e["rca"]
+    root = rca["root_cause"].lower()
+    assert "underlay" in root and "overlay" in root, (
+        f"Unexpected root cause: {rca['root_cause']}"
+    )
+    assert any("suppress" in s.lower() for s in rca["resolution_steps"]), (
+        "Resolution steps must instruct operators to suppress downstream overlay tickets"
+    )
+    assert any("evpn" in c.lower() for c in rca["cli_junos"])
+    assert any("evpn" in c.lower() for c in rca["cli_eos"])
+
+    # Also verifiable under routing category
+    e_routing = kb.lookup("routing", "evpn underlay failure cascade vtep flap")
+    assert e_routing.get("match") == e.get("match")
+
+
+@pytest.mark.unit
+def test_evpn_mac_mobility_duplicate_freeze_rca() -> None:
+    """EVPN MAC mobility entry must identify freeze condition and prescribe clearing host flaps."""
+    e = kb.lookup("evpn", "evpn duplicate mac mobility freeze detection")
+    assert "rca" in e, "EVPN MAC mobility entry must have an 'rca' block"
+    rca = e["rca"]
+    root = rca["root_cause"].lower()
+    assert "mac" in root or "mobility" in root or "loop" in root, (
+        f"Unexpected root cause: {rca['root_cause']}"
+    )
+    assert any("freeze" in s.lower() or "migration" in s.lower() for s in rca["resolution_steps"])
+    assert any("duplicate-mac" in c.lower() for c in rca["cli_junos"])
+    assert any("host-flap" in c.lower() for c in rca["cli_eos"])
+

@@ -15,7 +15,7 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR, IOS-XE, NX-OS, SR Linux, SONiC, Cumulus), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-579%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-584%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
 > 📓 Release **v1.1.0** — **Vendor-Safe Remediation & Two-Way ITSM Integration** on **v1.0.0 EVPN Causality & Telemetry Fusion** — details in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -39,7 +39,7 @@ If you have ever watched an AI dashboard hallucinate a "root cause" with no acti
 - **Protocol-Aware EVPN Causality & Telemetry Fusion** (`evpn_causal.py`, `sources/telemetry.py`): 5-layer hierarchy bipartite causal engine with 2-hop topological coupling, suppressing downstream overlay symptoms when lower-layer physical/underlay faults occur.
 - **Log Deduplication & Sanitize Vault** (`dedup.py`, `sanitize_vault.py`): Drain-style template clustering with RFC 5424 PRI and sequence number parsing, plus IPv6/MAC redaction for EVPN Type-2 routes.
 - **15 Agent Tools & REST Endpoints**: `/api/remediation`, `/api/itsm/enrich`, `generate_remediation_plan`, and `enrich_itsm_incident`.
-- Full test suite: **579 passing tests**. Docs: <https://gesh75.github.io/netlog-ai/>
+- Full test suite: **584 passing tests**. Docs: <https://gesh75.github.io/netlog-ai/>
 
 ## What's new — connectors + MCP server
 
