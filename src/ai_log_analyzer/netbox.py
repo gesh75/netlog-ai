@@ -181,6 +181,186 @@ class NetBoxClient:
                 record["interface"] = iface
         return record
 
+    def _iter_results(
+        self, path: str, params: dict[str, str] | None = None,
+    ) -> Iterable[dict[str, Any]]:
+        """Yield every result page. Stops when NetBox omits ``next``."""
+        query = dict(params or {})
+        query.setdefault("limit", "200")
+        offset = 0
+        while True:
+            query["offset"] = str(offset)
+            payload = self._request(path, query)
+            results = payload.get("results") or []
+            yielded = 0
+            for item in results:
+                if isinstance(item, dict):
+                    yielded += 1
+                    yield item
+            if not payload.get("next") or yielded == 0:
+                return
+            offset += yielded
+
+    def build_site_manifest(self, site: str | None = None) -> dict[str, Any]:
+        """Devices + cable adjacency for one site (or the whole inventory).
+
+        Cable terminations whose ``device`` is ``None`` — FrontPort / RearPort
+        on an unbound patch panel, CircuitTermination — are skipped so they
+        cannot raise ``AttributeError``.
+        """
+        if not self.configured:
+            return _empty_manifest(site, configured=False)
+
+        device_params: dict[str, str] = {}
+        if site:
+            device_params["site"] = site
+        devices: list[dict[str, Any]] = []
+        for raw in self._iter_results("/api/dcim/devices/", device_params):
+            name = str(raw.get("name") or "")
+            if not name:
+                continue
+            devices.append({
+                "hostname": name,
+                "site": _nested_name(raw, "site") or (site or ""),
+                "role": _nested_name(raw, "role", "device_role"),
+                "status": _nested_name(raw, "status") or str(raw.get("status") or ""),
+                "device_type": _nested_name(raw, "device_type"),
+                "id": raw.get("id"),
+            })
+
+        cable_params: dict[str, str] = {}
+        if site:
+            cable_params["site"] = site
+        links: list[dict[str, str]] = []
+        adjacency: dict[str, list[str]] = {}
+        skipped = 0
+        for cable in self._iter_results("/api/dcim/cables/", cable_params):
+            ends = _cable_device_ends(cable)
+            skipped += ends["skipped"]
+            left, right = ends["devices"]
+            if not left or not right or left == right:
+                continue
+            a_if, b_if = ends["interfaces"]
+            links.append({
+                "a": left, "b": right,
+                "a_iface": a_if, "b_iface": b_if,
+            })
+            adjacency.setdefault(left, [])
+            adjacency.setdefault(right, [])
+            if right not in adjacency[left]:
+                adjacency[left].append(right)
+            if left not in adjacency[right]:
+                adjacency[right].append(left)
+
+        return {
+            "site": site or _first_device_site(devices),
+            "source": "netbox",
+            "configured": True,
+            "devices": devices,
+            "links": links,
+            "adjacency": adjacency,
+            "skipped_terminations": skipped,
+        }
+
+
+def _empty_manifest(site: str | None, *, configured: bool) -> dict[str, Any]:
+    return {
+        "site": site or "",
+        "source": "netbox",
+        "configured": configured,
+        "devices": [],
+        "links": [],
+        "adjacency": {},
+        "skipped_terminations": 0,
+    }
+
+
+def _first_device_site(devices: list[dict[str, Any]]) -> str:
+    for device in devices:
+        site = device.get("site")
+        if site:
+            return str(site)
+    return ""
+
+
+def _attr(obj: Any, key: str, default: Any = None) -> Any:
+    """Dict-or-object field access. ``None`` object → default (no AttributeError)."""
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _termination_device_name(term: Any) -> str | None:
+    """Return the device hostname on a cable termination, or None to skip.
+
+    FrontPort / RearPort patch panels and CircuitTermination often have
+    ``device is None``. Calling ``.device.name`` on those must not raise.
+    """
+    if term is None:
+        return None
+    obj = _attr(term, "object", term)
+    device = _attr(obj, "device")
+    if device is None:
+        return None
+    name = _attr(device, "name") or _attr(device, "display") or device
+    if not name or not isinstance(name, str):
+        return None
+    return name
+
+
+def _termination_iface_name(term: Any) -> str:
+    if term is None:
+        return ""
+    obj = _attr(term, "object", term)
+    return str(_attr(obj, "name") or _attr(obj, "label") or "")
+
+
+def _iter_terminations(cable: Any, side: str) -> list[Any]:
+    """NetBox 3.3+ uses ``a_terminations`` lists; older uses ``termination_a``."""
+    plural = _attr(cable, f"{side}_terminations")
+    if isinstance(plural, list):
+        return [t for t in plural if t is not None]
+    if plural:
+        return [plural]
+    single = _attr(cable, f"termination_{side}")
+    return [single] if single is not None else []
+
+
+def _cable_device_ends(cable: Any) -> dict[str, Any]:
+    """Collect up to two device names from a cable; count skipped terms."""
+    names: list[str] = []
+    ifaces: list[str] = []
+    skipped = 0
+    for side in ("a", "b"):
+        for term in _iter_terminations(cable, side):
+            host = _termination_device_name(term)
+            if host is None:
+                skipped += 1
+                continue
+            names.append(host)
+            ifaces.append(_termination_iface_name(term))
+    # First two named devices become the link endpoints.
+    devices = (names[0] if names else "", names[1] if len(names) > 1 else "")
+    interfaces = (ifaces[0] if ifaces else "", ifaces[1] if len(ifaces) > 1 else "")
+    return {"devices": devices, "interfaces": interfaces, "skipped": skipped}
+
+
+def build_site_manifest(
+    site: str | None = None,
+    client: NetBoxClient | None = None,
+) -> dict[str, Any]:
+    """Build a site manifest (devices + adjacency) from NetBox.
+
+    No-op empty manifest when NetBox is unset — no network.
+    """
+    if client is None:
+        if not is_enabled():
+            return _empty_manifest(site, configured=False)
+        client = NetBoxClient()
+    return client.build_site_manifest(site)
+
 
 def enrich_host(hostname: str, interface: str | None = None) -> dict[str, Any]:
     """Enrich one hostname. No-op dict when NetBox is unset."""

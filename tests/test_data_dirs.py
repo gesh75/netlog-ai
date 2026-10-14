@@ -67,3 +67,11 @@ def test_index_html_has_no_cdn_scripts():
     html = (STATIC_DIR / "index.html").read_text()
     external = re.findall(r'<script[^>]+src="(https?://[^"]+)"', html)
     assert not external, f"external scripts found: {external}"
+
+
+@pytest.mark.unit
+def test_index_evpn_causal_overlay_is_off_by_default():
+    html = (STATIC_DIR / "index.html").read_text()
+    assert 'id="topo-show-causal"' in html
+    assert "checked" not in html.split('id="topo-show-causal"', 1)[1][:80]
+    assert 'id="evpn-causal-panel" style="display:none;"' in html

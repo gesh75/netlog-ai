@@ -5,6 +5,7 @@ import json
 import urllib.error
 import urllib.request
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,8 @@ from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.netbox import (
     NetBoxClient,
     NetBoxError,
+    _termination_device_name,
+    build_site_manifest,
     enrich_host,
     enrich_hosts,
     is_enabled,
@@ -164,6 +167,82 @@ def test_analyze_stays_offline_when_netbox_unset(monkeypatch):
     ], use_llm=False)
     assert result.netbox == {}
     assert result.to_dict()["netbox"] == {}
+
+
+def _cable(a_dev, b_dev, a_if="Ethernet1", b_if="Ethernet49"):
+    def _term(dev, name, object_type="dcim.interface"):
+        device = None if dev is None else {"name": dev}
+        return {"object_type": object_type, "object": {"name": name, "device": device}}
+
+    return {
+        "a_terminations": [_term(*a_dev) if isinstance(a_dev, tuple) else a_dev],
+        "b_terminations": [_term(*b_dev) if isinstance(b_dev, tuple) else b_dev],
+    }
+
+
+@pytest.mark.unit
+def test_termination_device_none_is_skipped_without_error():
+    front = SimpleNamespace(
+        object=SimpleNamespace(name="Front-1", device=None),
+    )
+    rear = {"object_type": "dcim.rearport", "object": {"name": "Rear-1", "device": None}}
+    circuit = {
+        "object_type": "circuits.circuittermination",
+        "object": {"circuit": {"cid": "CIR-1"}, "device": None},
+    }
+    assert _termination_device_name(front) is None
+    assert _termination_device_name(rear) is None
+    assert _termination_device_name(circuit) is None
+    assert _termination_device_name(None) is None
+
+
+@pytest.mark.unit
+def test_build_site_manifest_skips_null_device_cables(netbox_env):
+    calls: list[str] = []
+
+    def opener(request, timeout=None):
+        calls.append(request.full_url)
+        if "/api/dcim/devices/" in request.full_url:
+            return _FakeResponse({
+                "results": [
+                    _device_payload("leaf1")["results"][0],
+                    _device_payload("spine1")["results"][0],
+                ],
+            })
+        if "/api/dcim/cables/" in request.full_url:
+            return _FakeResponse({
+                "results": [
+                    _cable(("leaf1", "Ethernet1"), (None, "Front-1", "dcim.frontport")),
+                    _cable(("leaf1", "Ethernet2"), (None, "CIR-1", "circuits.circuittermination")),
+                    _cable(("leaf1", "Ethernet49"), ("spine1", "Ethernet1")),
+                ],
+            })
+        raise AssertionError(request.full_url)
+
+    client = NetBoxClient(opener=opener)
+    manifest = client.build_site_manifest("AMS1")
+    assert manifest["configured"] is True
+    assert {d["hostname"] for d in manifest["devices"]} == {"leaf1", "spine1"}
+    assert manifest["skipped_terminations"] >= 2
+    assert any({link["a"], link["b"]} == {"leaf1", "spine1"} for link in manifest["links"])
+    assert "spine1" in manifest["adjacency"]["leaf1"]
+    assert "leaf1" in manifest["adjacency"]["spine1"]
+    assert not any("None" in (link["a"], link["b"]) for link in manifest["links"])
+
+
+@pytest.mark.unit
+def test_build_site_manifest_noop_when_unset(monkeypatch):
+    monkeypatch.delenv("NETBOX_URL", raising=False)
+    monkeypatch.delenv("NETBOX_TOKEN", raising=False)
+
+    def boom(*_a, **_k):
+        raise AssertionError("must not call NetBox when unset")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    manifest = build_site_manifest("AMS1")
+    assert manifest["configured"] is False
+    assert manifest["devices"] == []
+    assert manifest["adjacency"] == {}
 
 
 @pytest.mark.unit

@@ -41,6 +41,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         itertools.chain([first], event_iter),
         use_llm=not args.no_llm,
         dedup=getattr(args, "dedup", False),
+        evpn_causal=getattr(args, "evpn_causal", False) or None,
     )
     print(json.dumps(result.to_dict(), indent=2))
     return 0
@@ -180,6 +181,11 @@ def main() -> None:
         "--dedup",
         action="store_true",
         help="Compress repeated syslog templates before classification (off by default)",
+    )
+    ap.add_argument(
+        "--evpn-causal",
+        action="store_true",
+        help="Run protocol-aware EVPN causality (off by default)",
     )
     ap.set_defaults(func=cmd_analyze)
 

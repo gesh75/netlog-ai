@@ -741,6 +741,7 @@ function unknownHint(template) {
 }
 
 function render(r) {
+  lastAnalyzeResult = r;
   // Hide the idle welcome panel once we have a real result
   const idle = $("idle-state");
   if (idle) idle.style.display = "none";
@@ -955,6 +956,34 @@ function render(r) {
       (cw.samples || []).forEach((s) => samples.appendChild(el("li", { className: "row-msg", text: s })));
     } else {
       cwPanel.style.display = "none";
+    }
+  }
+
+  // EVPN causal overlay (opt-in analysis field; hidden when empty / off)
+  const evpn = r.evpn_causal || {};
+  const evpnPanel = $("evpn-causal-panel");
+  if (evpnPanel) {
+    const hyps = evpn.hypotheses || [];
+    if (hyps.length) {
+      evpnPanel.style.display = "block";
+      const count = $("evpn-causal-count");
+      if (count) count.textContent = `(${hyps.length})`;
+      const list = $("evpn-causal-list");
+      if (list) {
+        clear(list);
+        hyps.forEach((h) => {
+          const root = h.root_cause || {};
+          const suppressed = (h.suppressed_symptoms || []).length;
+          const ratio = Number(h.symptom_suppression_ratio || 0);
+          list.appendChild(el("li", {
+            text: `${root.device || "unknown"} · ${root.summary || ""} · `
+              + `suppressed ${suppressed} · ratio ${ratio.toFixed(2)} · `
+              + `conf ${(Number(h.confidence) || 0).toFixed(2)} — ${h.rationale || ""}`,
+          }));
+        });
+      }
+    } else {
+      evpnPanel.style.display = "none";
     }
   }
 
@@ -1692,6 +1721,7 @@ function renderTriage(r) {
 
 // ── Last site analysis result (for report exports) ────────────────────────────
 let lastSiteResult = null;
+let lastAnalyzeResult = null;
 
 // ── Topology rendering (cytoscape + ELK layered layout) ──────────────────────
 //
@@ -1705,6 +1735,7 @@ let _topoState = {
   cy: null,           // cytoscape instance (null until first render)
   groupByPop: true,   // POP compound nodes on/off
   showIps: false,     // PHYSICAL: hide IPs by default — toggle to reveal
+  showCausal: false,  // EVPN causal overlay — off by default
 };
 const TOPO_LAYERS = ["physical", "bgp", "ospf", "vxlan"];
 
@@ -1827,6 +1858,11 @@ function _wireTopoChipsOnce() {
   const ipToggle = $("topo-show-ips");
   if (ipToggle) ipToggle.addEventListener("change", async () => {
     _topoState.showIps = ipToggle.checked;
+    await _renderCytoscape();
+  });
+  const causalToggle = $("topo-show-causal");
+  if (causalToggle) causalToggle.addEventListener("change", async () => {
+    _topoState.showCausal = causalToggle.checked;
     await _renderCytoscape();
   });
 }
@@ -2110,6 +2146,18 @@ async function _renderCytoscape() {
     });
   });
 
+  // Opt-in EVPN causal overlay (off by default). Elements use id
+  // `device:LAYER` so they never collide with topology node ids.
+  if (_topoState.showCausal) {
+    const causal = (
+      (lastAnalyzeResult && lastAnalyzeResult.evpn_causal)
+      || (lastSiteResult && lastSiteResult.evpn_causal)
+      || {}
+    );
+    const extra = causal.cytoscape_elements || topo.evpn_causal_elements || [];
+    extra.forEach((elmt) => elements.push(elmt));
+  }
+
   // Destroy any prior instance so we don't leak listeners / canvases.
   if (_topoState.cy) {
     try { _topoState.cy.destroy(); } catch { /* */ }
@@ -2233,6 +2281,23 @@ async function _renderCytoscape() {
       {
         selector: "edge.layer-vxlan",
         style: { "line-color": "#ff7b72", "line-style": "dashed", "width": 2 },
+      },
+      {
+        selector: "node.causal-node",
+        style: {
+          "shape": "diamond",
+          "width": 22,
+          "height": 22,
+          "background-color": "#d29922",
+        },
+      },
+      {
+        selector: "edge.causal_propagation",
+        style: { "line-color": "#d29922", "width": 1.4, "target-arrow-shape": "triangle" },
+      },
+      {
+        selector: "edge.causal-dashed",
+        style: { "line-style": "dashed" },
       },
       {
         selector: "edge:active",

@@ -21,6 +21,7 @@ from collections.abc import Callable
 import requests
 
 from ai_log_analyzer.dedup import deduplicate_logs, is_dedup_enabled
+from ai_log_analyzer.sanitize_vault import anonymize as vault_anonymize
 
 # Single shared HTTP session — connection pooling reduces per-call overhead
 _SESSION = requests.Session()
@@ -134,10 +135,12 @@ def prepare_log_samples(messages: list[str]) -> str:
     """
     if not messages:
         return "  (no samples)"
+    # Vault-mask IPv4/IPv6/MAC/ASN so EVPN Type-2 MAC/IP lines never leave raw.
+    safe = [vault_anonymize(m) for m in messages]
     if is_dedup_enabled():
-        compact = deduplicate_logs(messages).format_for_llm()
+        compact = deduplicate_logs(safe).format_for_llm()
         return compact or "  (no samples)"
-    return "\n".join(f"  - {m}" for m in messages)
+    return "\n".join(f"  - {m}" for m in safe)
 
 
 def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | None:
