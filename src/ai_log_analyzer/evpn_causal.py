@@ -1,13 +1,12 @@
-"""Protocol-aware EVPN causality — bipartite underlay/overlay suppression.
+"""Protocol-aware Bipartite Causal Inference Engine for CLOS / EVPN-VXLAN fabrics.
 
-Classifies fabric syslog into OSI-ish layers (physical → LAG → underlay →
-VTEP → EVPN overlay), picks the lowest-layer root causes, and suppresses
-higher-layer symptoms on the same or adjacent device inside a propagation
-window. Cytoscape elements are opt-in for the topology overlay.
+Maps syslog events across the 5-tier network protocol hierarchy:
+  L1_PHYSICAL -> L2_LAG_MLAG -> L3_UNDERLAY -> L4_VTEP_NVE -> L5_OVERLAY_EVPN
 
-Telemetry fusion (optical / counter interlocking) is a follow-up — no
-optical or interface-counter sources are present in-tree yet.
+Automatically suppresses downstream overlay symptoms when a lower-layer
+root cause occurs on the same device or a topologically adjacent spine/leaf.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -30,6 +29,8 @@ _RFC3164_MONTHS = {
 
 
 class ProtocolLayer(IntEnum):
+    """Strict bottom-up protocol dependency hierarchy."""
+
     L1_PHYSICAL = 1
     L2_LAG_MLAG = 2
     L3_UNDERLAY = 3
@@ -38,7 +39,7 @@ class ProtocolLayer(IntEnum):
     UNKNOWN = 99
 
 
-_LAYER_SIGNATURES: tuple[tuple[ProtocolLayer, re.Pattern[str], str], ...] = (
+_LAYER_SIGNATURES: list[tuple[ProtocolLayer, re.Pattern[str], str]] = [
     (
         ProtocolLayer.L1_PHYSICAL,
         re.compile(
@@ -46,147 +47,92 @@ _LAYER_SIGNATURES: tuple[tuple[ProtocolLayer, re.Pattern[str], str], ...] = (
             r"OPTICAL_PWR_LOW|RX_LOS|FCS_ERR|CRC_ERR|TRANSCEIVER_FAULT|carrier\s+down",
             re.IGNORECASE,
         ),
-        "Physical / link-down",
+        "Physical link or optical transceiver fault",
     ),
     (
         ProtocolLayer.L2_LAG_MLAG,
         re.compile(
-            r"LACP.*(down|suspended|detached|timeout)|MLAG.*(inactive|down|peer-link)|"
+            r"LACP.*(?:down|suspended|detached|timeout)|MLAG.*(?:inactive|down|peer-link)|"
             r"BUNDLE_MEMBER_DOWN|AE_BUNDLE_DOWN",
             re.IGNORECASE,
         ),
-        "LAG / MLAG member down",
+        "Link aggregation (LACP/MLAG/ESI) degradation",
     ),
     (
         ProtocolLayer.L3_UNDERLAY,
         re.compile(
-            r"BFDD_TRAP_SHOP_DOWN|BFD.*(Down|Expired|Timeout)|"
-            r"OSPF.*(DOWN|NbrDown)|ISIS.*(ADJDOWN|Lost)|"
-            r"(BGP-5-ADJCHANGE|RPD_BGP_NEIGHBOR_STATE_CHANGED|bgpd)"
-            r"(?!.*EVPN).*(Down|Idle|Active|Notification)",
+            r"BFDD_TRAP_SHOP_DOWN|BFD.*(?:Down|Expired|Timeout)|"
+            r"OSPF.*(?:DOWN|NbrDown)|ISIS.*(?:ADJDOWN|Lost)|"
+            r"(?:BGP-5-ADJCHANGE|RPD_BGP_NEIGHBOR_STATE_CHANGED|bgpd(?!.*EVPN)).*(?:Down|Idle|Active|Notification)",
             re.IGNORECASE,
         ),
-        "Underlay routing / BFD / IGP / BGP",
+        "Underlay routing or BFD session failure",
     ),
     (
         ProtocolLayer.L4_VTEP_NVE,
         re.compile(
-            r"VTEP.*(down|unreachable)|VXLAN_TUNNEL_DOWN|"
-            r"NVE.*(down|peer\s+lost)|ENCAP_NEXTHOP_UNREACHABLE",
+            r"VTEP.*(?:down|unreachable)|VXLAN_TUNNEL_DOWN|NVE.*(?:down|peer\s+lost)|"
+            r"ENCAP_NEXTHOP_UNREACHABLE",
             re.IGNORECASE,
         ),
-        "VTEP / NVE / VXLAN tunnel down",
+        "VTEP NVE data-plane tunnel loss",
     ),
     (
         ProtocolLayer.L5_OVERLAY_EVPN,
         re.compile(
-            r"EVPN.*(withdraw|down|mac-move|duplicate|flap)|"
-            r"TYPE[-_]?[2345].*(withdraw|unreachable)|"
-            r"MAC_MOVE_LIMIT|DUPLICATE_MAC|"
-            r"BGP.*EVPN.*(Down|Notification)",
+            r"EVPN.*(?:withdraw|down|mac-move|duplicate|flap)|"
+            r"TYPE[-_]?[2345].*(?:withdraw|unreachable)|"
+            r"MAC_MOVE_LIMIT|DUPLICATE_MAC|BGP.*EVPN.*(?:Down|Notification)",
             re.IGNORECASE,
         ),
-        "EVPN overlay withdraw / MAC-move",
+        "Overlay EVPN control-plane symptom",
     ),
+]
+
+_INTF_EXTRACT_RE = re.compile(
+    r"\b((?:TenGigabitEthernet|GigabitEthernet|FastEthernet|FortyGigE|HundredGigE|"
+    r"Port-Channel|Management|Loopback|Ethernet|Vxlan|Vlan|"
+    r"eth|swp|po|ae|vlan|"
+    r"xe-|et-|ge-|"
+    r"irb\.|lo0\.|nve)\d+(?:[/.:]\d+)*)\b",
+    re.IGNORECASE,
+)
+_VNI_EXTRACT_RE = re.compile(
+    r"\b(?:VNI|vni|vnid|vxlan)[=\s:#]*(\d{1,8})\b",
+    re.IGNORECASE,
 )
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
 def is_evpn_causal_enabled() -> bool:
-    """True when ``AI_LOG_ANALYZER_EVPN_CAUSAL`` is set. Default off."""
+    """True when AI_LOG_ANALYZER_EVPN_CAUSAL is set. Default off."""
     return os.environ.get("AI_LOG_ANALYZER_EVPN_CAUSAL", "").strip().lower() in _TRUTHY
 
 
-_INTF_EXTRACT_RE = re.compile(
-    r"\b(?:"
-    r"TenGigabitEthernet|GigabitEthernet|FastEthernet|FortyGigE|HundredGigE|"
-    r"Port-Channel|Management|Loopback|Ethernet|Vxlan|Vlan|"
-    r"eth|swp|po|ae|vlan|"
-    r"xe-|et-|ge-|"
-    r"irb\.|lo0\."
-    r")\d+(?:[/.:]\d+)*\b",
-    re.IGNORECASE,
-)
-_VNI_EXTRACT_RE = re.compile(
-    r"\b(?:vni|vxlan)[-:\s#]*(\d{2,8})\b",
-    re.IGNORECASE,
-)
-
-
-def classify_message(message: str) -> tuple[ProtocolLayer, str]:
-    """Return (layer, human summary) for a raw syslog body.
-
-    Overlay EVPN (L5) is checked before underlay BGP (L3) so
-    ``bgpd: BGP EVPN neighbor Down`` is not stolen by the L3 signature.
-    """
-    text = message or ""
-    overlay_first = (
-        ProtocolLayer.L1_PHYSICAL,
-        ProtocolLayer.L2_LAG_MLAG,
-        ProtocolLayer.L4_VTEP_NVE,
-        ProtocolLayer.L5_OVERLAY_EVPN,
-        ProtocolLayer.L3_UNDERLAY,
-    )
-    by_layer = {layer: (pattern, summary) for layer, pattern, summary in _LAYER_SIGNATURES}
-    for layer in overlay_first:
-        pattern, summary = by_layer[layer]
-        if pattern.search(text):
-            return layer, summary
-    return ProtocolLayer.UNKNOWN, "Unclassified fabric event"
-
-
-def extract_interface(message: str) -> str:
-    match = _INTF_EXTRACT_RE.search(message or "")
-    return match.group(0) if match else ""
-
-
-def extract_vni(message: str) -> str:
-    match = _VNI_EXTRACT_RE.search(message or "")
-    return match.group(1) if match else ""
-
-
-def _plane(layer: ProtocolLayer) -> str:
-    """underlay (L1–L3) vs overlay (L4–L5). Exhaustive over ProtocolLayer."""
-    if layer in (
-        ProtocolLayer.L1_PHYSICAL,
-        ProtocolLayer.L2_LAG_MLAG,
-        ProtocolLayer.L3_UNDERLAY,
-    ):
-        return "underlay"
-    if layer in (ProtocolLayer.L4_VTEP_NVE, ProtocolLayer.L5_OVERLAY_EVPN):
-        return "overlay"
-    if layer is ProtocolLayer.UNKNOWN:
-        return "unknown"
-    raise AssertionError(f"unhandled ProtocolLayer: {layer}")
-
-
-def _layer_label(layer: ProtocolLayer) -> str:
-    return layer.name
-
-
-def _event_id(timestamp: str, device: str, raw_message: str) -> str:
-    raw = f"{timestamp}|{device}|{raw_message}".encode()
-    return hashlib.sha1(raw).hexdigest()[:12]
-
-
-def _as_datetime(stamp: str) -> datetime | None:
-    """ISO / RFC5424, FRR, and RFC3164 (yearless → 2026 sentinel)."""
-    if not stamp:
+def _as_datetime(stamp: Any) -> datetime | None:
+    """Parse ISO, RFC5424, FRR, and RFC3164 timestamps into datetime."""
+    if stamp is None:
         return None
+    if isinstance(stamp, datetime):
+        return stamp
+    if not isinstance(stamp, str):
+        stamp = str(stamp)
     text = stamp.strip()
+    if not text:
+        return None
     iso = text.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(iso)
         if parsed.tzinfo is not None:
-            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
-        return parsed
+            return parsed
+        return parsed.replace(tzinfo=timezone.utc)
     except ValueError:
         pass
     collapsed = " ".join(text.split())
     for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
         try:
-            return datetime.strptime(collapsed, fmt)
+            return datetime.strptime(collapsed, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
     parts = collapsed.split()
@@ -196,105 +142,172 @@ def _as_datetime(stamp: str) -> datetime | None:
             time_part = parts[2].split(".")[0]
             hour, minute, sec = (int(p) for p in time_part.split(":"))
             return datetime(
-                2026, _RFC3164_MONTHS[parts[0][:3]], day, hour, minute, sec,
+                2026, _RFC3164_MONTHS[parts[0][:3]], day, hour, minute, sec, tzinfo=timezone.utc
             )
         except ValueError:
             return None
     return None
 
 
+def _event_id(timestamp: Any, device: str, raw_message: str) -> str:
+    raw = f"{timestamp}|{device}|{raw_message}".encode()
+    return hashlib.sha1(raw).hexdigest()[:12]
+
+
+def classify_message(message: str) -> tuple[ProtocolLayer, str]:
+    """Return (layer, human summary) for a raw syslog body."""
+    text = message or ""
+    # Check L5 before L3 to avoid underlay BGP taking EVPN routes
+    ordered = [
+        ProtocolLayer.L1_PHYSICAL,
+        ProtocolLayer.L2_LAG_MLAG,
+        ProtocolLayer.L4_VTEP_NVE,
+        ProtocolLayer.L5_OVERLAY_EVPN,
+        ProtocolLayer.L3_UNDERLAY,
+    ]
+    by_layer = {layer: (pattern, desc) for layer, pattern, desc in _LAYER_SIGNATURES}
+    for layer in ordered:
+        pattern, desc = by_layer[layer]
+        if pattern.search(text):
+            return layer, desc
+    return ProtocolLayer.UNKNOWN, "Unclassified network event"
+
+
+def extract_interface(message: str) -> str:
+    match = _INTF_EXTRACT_RE.search(message or "")
+    return match.group(1) if match else ""
+
+
+def extract_vni(message: str) -> str:
+    match = _VNI_EXTRACT_RE.search(message or "")
+    return match.group(1) if match else ""
+
+
 @dataclass
 class FabricEvent:
+    """Normalized network event enriched with protocol layer metadata."""
+
     event_id: str
-    timestamp: str
+    timestamp: datetime
     device: str
     raw_message: str
-    layer: ProtocolLayer
-    summary: str
-    interface: str = ""
-    vni: str = ""
+    layer: ProtocolLayer = ProtocolLayer.UNKNOWN
+    summary: str = ""
+    interface: str | None = None
+    vni: int | None = None
+
+    @property
+    def instant(self) -> datetime | None:
+        if isinstance(self.timestamp, datetime):
+            return self.timestamp
+        return _as_datetime(self.timestamp)
 
     def to_dict(self) -> dict[str, Any]:
+        ts = self.timestamp.isoformat() if isinstance(self.timestamp, datetime) else str(self.timestamp)
         return {
             "event_id": self.event_id,
-            "timestamp": self.timestamp,
+            "timestamp": ts,
             "device": self.device,
             "raw_message": self.raw_message,
             "layer": self.layer.name,
             "layer_value": int(self.layer),
             "summary": self.summary,
-            "interface": self.interface,
-            "vni": self.vni,
+            "interface": self.interface or "",
+            "vni": str(self.vni) if self.vni is not None else "",
         }
 
-    @property
-    def instant(self) -> datetime | None:
-        return _as_datetime(self.timestamp)
+
+def fabric_event_from_raw(
+    raw_message: str,
+    *,
+    timestamp: str | datetime = "",
+    device: str = "",
+) -> FabricEvent:
+    layer, summary = classify_message(raw_message)
+    intf = extract_interface(raw_message) or None
+    vni_str = extract_vni(raw_message)
+    vni_val = int(vni_str) if vni_str else None
+    ts_dt = _as_datetime(timestamp) or datetime.now(timezone.utc)
+    return FabricEvent(
+        event_id=_event_id(timestamp, device, raw_message),
+        timestamp=ts_dt,
+        device=device,
+        raw_message=raw_message,
+        layer=layer,
+        summary=summary,
+        interface=intf,
+        vni=vni_val,
+    )
 
 
 @dataclass
 class CausalHypothesis:
+    """Represents a resolved root-cause chain across underlay and overlay tiers."""
+
     root_cause: FabricEvent
     suppressed_symptoms: list[FabricEvent] = field(default_factory=list)
-    affected_devices: list[str] = field(default_factory=list)
-    affected_vnis: list[str] = field(default_factory=list)
+    affected_devices: set[str] = field(default_factory=set)
+    affected_vnis: set[int] = field(default_factory=set)
     confidence: float = 0.0
     rationale: str = ""
 
     @property
     def symptom_suppression_ratio(self) -> float:
-        total = len(self.suppressed_symptoms) + 1
-        return len(self.suppressed_symptoms) / total
+        total = 1 + len(self.suppressed_symptoms)
+        return len(self.suppressed_symptoms) / total if total > 1 else 0.0
 
     def to_cytoscape_elements(self) -> list[dict[str, Any]]:
-        """Cytoscape elements: nodes ``device:LAYER``, causal_propagation edges.
-
-        Overlay-plane edges (target layer ≥ L4) are dashed.
-        """
+        """Serialize causal chain into Cytoscape.js elements for web/static/app.js."""
         elements: list[dict[str, Any]] = []
-        seen: set[str] = set()
+        seen_nodes: set[str] = set()
 
-        def _add_node(event: FabricEvent, role: str) -> str:
-            node_id = f"{event.device}:{_layer_label(event.layer)}"
-            if node_id not in seen:
-                seen.add(node_id)
-                elements.append({
-                    "data": {
-                        "id": node_id,
-                        "label": f"{event.device} {_layer_label(event.layer)}",
-                        "device": event.device,
-                        "layer": _plane(event.layer),
-                        "causal_role": role,
-                        "summary": event.summary,
-                    },
-                    "classes": f"causal-node causal-{role} plane-{_plane(event.layer)}",
-                })
-            return node_id
+        def _add_node(ev: FabricEvent, role: str) -> None:
+            node_id = f"{ev.device}:{ev.layer.name}"
+            if node_id not in seen_nodes:
+                seen_nodes.add(node_id)
+                elements.append(
+                    {
+                        "data": {
+                            "id": node_id,
+                            "label": f"{ev.device}\n({ev.layer.name})",
+                            "device": ev.device,
+                            "layer": "underlay" if ev.layer <= ProtocolLayer.L3_UNDERLAY else "overlay",
+                            "causal_role": role,
+                            "summary": ev.summary,
+                        },
+                        "classes": f"causal-node causal-{role} plane-{'underlay' if ev.layer <= ProtocolLayer.L3_UNDERLAY else 'overlay'}",
+                    }
+                )
 
-        root_id = _add_node(self.root_cause, "root_cause")
-        for idx, symptom in enumerate(self.suppressed_symptoms):
-            dest = _add_node(symptom, "suppressed_symptom")
-            dashed = symptom.layer >= ProtocolLayer.L4_VTEP_NVE
-            elements.append({
-                "data": {
-                    "id": f"{root_id}->{dest}:{idx}",
-                    "source": root_id,
-                    "target": dest,
-                    "kind": "causal_propagation",
-                },
-                "classes": (
-                    "causal_propagation causal-dashed" if dashed
-                    else "causal_propagation"
-                ),
-            })
+        _add_node(self.root_cause, "root_cause")
+        root_node_id = f"{self.root_cause.device}:{self.root_cause.layer.name}"
+
+        for sym in self.suppressed_symptoms:
+            _add_node(sym, "symptom")
+            sym_node_id = f"{sym.device}:{sym.layer.name}"
+            if sym_node_id != root_node_id:
+                elements.append(
+                    {
+                        "data": {
+                            "id": f"edge-{root_node_id}->{sym_node_id}",
+                            "source": root_node_id,
+                            "target": sym_node_id,
+                            "edge_type": "causal_propagation",
+                            "line_style": "dashed" if sym.layer >= ProtocolLayer.L4_VTEP_NVE else "solid",
+                        },
+                        "classes": "causal_propagation causal-dashed" if sym.layer >= ProtocolLayer.L4_VTEP_NVE else "causal_propagation",
+                    }
+                )
         return elements
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "root_cause": self.root_cause.to_dict(),
-            "suppressed_symptoms": [s.to_dict() for s in self.suppressed_symptoms],
-            "affected_devices": list(self.affected_devices),
-            "affected_vnis": list(self.affected_vnis),
+            "root_cause": self.root_cause.to_dict() if hasattr(self.root_cause, "to_dict") else self.root_cause,
+            "suppressed_symptoms": [
+                s.to_dict() if hasattr(s, "to_dict") else s for s in self.suppressed_symptoms
+            ],
+            "affected_devices": sorted(list(self.affected_devices)),
+            "affected_vnis": sorted(list(str(v) for v in self.affected_vnis)),
             "confidence": self.confidence,
             "rationale": self.rationale,
             "symptom_suppression_ratio": self.symptom_suppression_ratio,
@@ -302,22 +315,30 @@ class CausalHypothesis:
         }
 
 
-def _normalize_adjacency(
-    adjacency_map: Mapping[str, Iterable[str]] | None,
-) -> dict[str, set[str]]:
-    adj: dict[str, set[str]] = {}
-    if not adjacency_map:
-        return adj
-    for src, neighbors in adjacency_map.items():
-        if not src:
-            continue
-        adj.setdefault(src, set())
-        for dst in neighbors or []:
-            if not dst or dst == src:
-                continue
-            adj.setdefault(src, set()).add(dst)
-            adj.setdefault(dst, set()).add(src)
-    return adj
+def _coerce_fabric_event(item: Any) -> FabricEvent | None:
+    if isinstance(item, FabricEvent):
+        if not isinstance(item.timestamp, datetime):
+            item.timestamp = _as_datetime(item.timestamp) or datetime.now(timezone.utc)
+        return item
+    if isinstance(item, str):
+        line = item.strip()
+        if not line:
+            return None
+        return fabric_event_from_raw(line)
+    if item is None:
+        return None
+    timestamp = getattr(item, "timestamp", None) or getattr(item, "t", None) or ""
+    device = getattr(item, "hostname", None) or getattr(item, "device", None) or getattr(item, "host", None) or ""
+    message = (
+        getattr(item, "message", None)
+        or getattr(item, "raw_message", None)
+        or getattr(item, "sample_message", None)
+        or getattr(item, "description", None)
+        or ""
+    )
+    if not message:
+        return None
+    return fabric_event_from_raw(message, timestamp=timestamp, device=device)
 
 
 def _link_ends(link: Any) -> tuple[str, str]:
@@ -325,24 +346,28 @@ def _link_ends(link: Any) -> tuple[str, str]:
         return str(link[0] or ""), str(link[1] or "")
     if not isinstance(link, dict):
         return "", ""
-    a = link.get("a") or link.get("source") or link.get("src") or link.get("left") or ""
-    b = link.get("b") or link.get("target") or link.get("dst") or link.get("right") or ""
+    a = link.get("source") or link.get("src") or link.get("a") or link.get("left") or ""
+    b = link.get("target") or link.get("dst") or link.get("b") or link.get("right") or ""
     return str(a), str(b)
 
 
 def adjacency_from_manifest(manifest: Mapping[str, Any] | None) -> dict[str, set[str]]:
-    """Build an undirected adjacency map from a site / NetBox manifest.
-
-    Preference: explicit ``adjacency`` → ``links`` / ``cables`` → Clos
-    heuristic (every spine adjacent to every leaf) from ``devices``.
-    """
+    """Build an undirected adjacency map from a site / NetBox manifest."""
+    adj: dict[str, set[str]] = {}
     if not manifest:
-        return {}
+        return adj
     raw_adj = manifest.get("adjacency")
     if isinstance(raw_adj, dict) and raw_adj:
-        return _normalize_adjacency(raw_adj)
+        for src, neighbors in raw_adj.items():
+            if not src:
+                continue
+            adj.setdefault(src, set())
+            for dst in neighbors or []:
+                if dst and dst != src:
+                    adj.setdefault(src, set()).add(dst)
+                    adj.setdefault(dst, set()).add(src)
+        return adj
 
-    adj: dict[str, set[str]] = {}
     for key in ("links", "cables"):
         for link in manifest.get(key) or []:
             left, right = _link_ends(link)
@@ -372,224 +397,207 @@ def adjacency_from_manifest(manifest: Mapping[str, Any] | None) -> dict[str, set
     return adj
 
 
-def fabric_event_from_raw(
-    raw_message: str,
-    *,
-    timestamp: str = "",
-    device: str = "",
-) -> FabricEvent:
-    layer, summary = classify_message(raw_message)
-    return FabricEvent(
-        event_id=_event_id(timestamp, device, raw_message),
-        timestamp=timestamp,
-        device=device,
-        raw_message=raw_message,
-        layer=layer,
-        summary=summary,
-        interface=extract_interface(raw_message),
-        vni=extract_vni(raw_message),
-    )
-
-
-def _coerce_event(item: Any) -> FabricEvent | None:
-    if isinstance(item, FabricEvent):
-        return item
-    if isinstance(item, str):
-        line = item.strip()
-        if not line:
-            return None
-        return fabric_event_from_raw(line)
-    if item is None:
-        return None
-    timestamp = str(
-        getattr(item, "timestamp", None)
-        or getattr(item, "t", None)
-        or ""
-    )
-    device = str(
-        getattr(item, "hostname", None)
-        or getattr(item, "device", None)
-        or getattr(item, "host", None)
-        or ""
-    )
-    message = str(
-        getattr(item, "message", None)
-        or getattr(item, "raw_message", None)
-        or getattr(item, "sample_message", None)
-        or getattr(item, "description", None)
-        or ""
-    )
-    if not message:
-        return None
-    return fabric_event_from_raw(message, timestamp=timestamp, device=device)
-
-
-def _seconds_apart(a: FabricEvent, b: FabricEvent) -> float | None:
-    ta, tb = a.instant, b.instant
-    if ta is None or tb is None:
-        return None
-    if ta.tzinfo is not None:
-        ta = ta.astimezone(timezone.utc).replace(tzinfo=None)
-    if tb.tzinfo is not None:
-        tb = tb.astimezone(timezone.utc).replace(tzinfo=None)
-    return abs((tb - ta).total_seconds())
-
-
-def _score_hypothesis(
-    root: FabricEvent,
-    symptoms: Sequence[FabricEvent],
-    adjacent_hits: int,
-    window: float,
-) -> tuple[float, str]:
-    confidence = 0.40
-    if root.layer is not ProtocolLayer.UNKNOWN:
-        confidence += 0.15
-    if symptoms:
-        confidence += min(0.30, 0.06 * len(symptoms))
-    if adjacent_hits:
-        confidence += 0.10
-    if symptoms:
-        max_gap = max((s.layer - root.layer for s in symptoms), default=0)
-        if max_gap >= 2:
-            confidence += 0.10
-    confidence = min(0.95, round(confidence, 3))
-
-    names = ", ".join(sorted({s.device for s in symptoms})) or "none"
-    rationale = (
-        f"{root.device or 'unknown'} {root.summary} "
-        f"({_layer_label(root.layer)}) is the lowest-layer event; "
-        f"{len(symptoms)} higher-layer symptom(s) on {names} "
-        f"within {int(window)}s were suppressed."
-    )
-    return confidence, rationale
-
-
 class EVPNBipartiteCausalEngine:
-    """Suppress overlay symptoms that follow an underlay root cause."""
+    """Evaluates fabric events against L1-L5 dependencies and site topology."""
 
     def __init__(
         self,
-        adjacency_map: Mapping[str, Iterable[str]] | None = None,
-        max_propagation_window_sec: float = 120,
+        adjacency_map: dict[str, set[str]] | Mapping[str, Iterable[str]] | None = None,
+        max_propagation_window_sec: float = 120.0,
     ) -> None:
-        self.adjacency_map = _normalize_adjacency(adjacency_map)
+        adj: dict[str, set[str]] = {}
+        if adjacency_map:
+            for k, vs in adjacency_map.items():
+                adj.setdefault(k, set())
+                for v in vs or []:
+                    if v and v != k:
+                        adj[k].add(v)
+                        adj.setdefault(v, set()).add(k)
+        self.adjacency_map: dict[str, set[str]] = adj
         self.max_propagation_window_sec = float(max_propagation_window_sec)
+        self.max_window = float(max_propagation_window_sec)
 
     @classmethod
     def from_site_manifest(
         cls,
         manifest: Mapping[str, Any] | None,
         adjacency_map: Mapping[str, Iterable[str]] | None = None,
-        max_propagation_window_sec: float = 120,
+        max_propagation_window_sec: float = 120.0,
     ) -> EVPNBipartiteCausalEngine:
-        """Build an engine from a site / NetBox manifest.
-
-        ``adjacency_map`` wins when provided; otherwise the manifest's
-        ``adjacency`` / ``links`` / Clos roles are used. An empty manifest
-        still produces a working engine (same-device suppression only).
-        """
-        adj = (
-            _normalize_adjacency(adjacency_map)
-            if adjacency_map
-            else adjacency_from_manifest(manifest)
-        )
-        return cls(adj, max_propagation_window_sec=max_propagation_window_sec)
-
-    def neighbors(self, device: str) -> set[str]:
-        return set(self.adjacency_map.get(device, ()))
+        """Build adjacency graph directly from a netlog-ai site manifest."""
+        if adjacency_map:
+            return cls(adjacency_map=adjacency_map, max_propagation_window_sec=max_propagation_window_sec)
+        adj = adjacency_from_manifest(manifest)
+        return cls(adjacency_map=adj, max_propagation_window_sec=max_propagation_window_sec)
 
     def is_adjacent(self, a: str, b: str) -> bool:
         if not a or not b:
             return False
         if a == b:
             return True
-        return b in self.adjacency_map.get(a, ())
+        return b in self.adjacency_map.get(a, set())
+
+    def neighbors(self, device: str) -> set[str]:
+        return set(self.adjacency_map.get(device, set()))
 
     def classify(self, message: str) -> tuple[ProtocolLayer, str]:
         return classify_message(message)
 
+    @staticmethod
+    def classify_event(
+        event_id: str, timestamp: datetime | str, device: str, raw_message: str
+    ) -> FabricEvent:
+        """Classify a log line into its protocol layer and extract interface/VNI metadata."""
+        matched_layer = ProtocolLayer.UNKNOWN
+        summary = "Unclassified network event"
+
+        # Check L5 before L3 to avoid underlay BGP taking EVPN routes
+        ordered = [
+            ProtocolLayer.L1_PHYSICAL,
+            ProtocolLayer.L2_LAG_MLAG,
+            ProtocolLayer.L4_VTEP_NVE,
+            ProtocolLayer.L5_OVERLAY_EVPN,
+            ProtocolLayer.L3_UNDERLAY,
+        ]
+        by_layer = {layer: (pattern, desc) for layer, pattern, desc in _LAYER_SIGNATURES}
+        for layer in ordered:
+            pattern, desc = by_layer[layer]
+            if pattern.search(raw_message):
+                matched_layer = layer
+                summary = desc
+                break
+
+        intf_match = _INTF_EXTRACT_RE.search(raw_message)
+        vni_match = _VNI_EXTRACT_RE.search(raw_message)
+
+        ts_dt = _as_datetime(timestamp) or datetime.now(timezone.utc)
+
+        return FabricEvent(
+            event_id=event_id,
+            timestamp=ts_dt,
+            device=device,
+            raw_message=raw_message,
+            layer=matched_layer,
+            summary=summary,
+            interface=intf_match.group(1) if intf_match else None,
+            vni=int(vni_match.group(1)) if vni_match else None,
+        )
+
+    def _is_topologically_coupled(self, root_dev: str, sym_dev: str, sym_layer: ProtocolLayer) -> bool:
+        if root_dev == sym_dev:
+            return True
+        if sym_dev in self.adjacency_map.get(root_dev, set()):
+            return True
+        # VTEP and EVPN overlay events can propagate 2 hops across a Spine-Leaf CLOS fabric
+        if sym_layer >= ProtocolLayer.L4_VTEP_NVE:
+            root_neighbors = self.adjacency_map.get(root_dev, set())
+            for intermediate in root_neighbors:
+                if sym_dev in self.adjacency_map.get(intermediate, set()):
+                    return True
+        return False
+
     def ingest(self, events: Iterable[Any]) -> list[FabricEvent]:
         out: list[FabricEvent] = []
         for item in events:
-            coerced = _coerce_event(item)
+            coerced = _coerce_fabric_event(item)
             if coerced is not None:
                 out.append(coerced)
         return out
 
     def analyze(self, events: Iterable[Any]) -> list[CausalHypothesis]:
-        """Classify, pick lowest-layer roots, suppress higher-layer symptoms."""
-        fabric = self.ingest(events)
+        """Group fabric events into root-cause hypotheses ordered by confidence."""
+        fabric: list[FabricEvent] = []
+        for e in events:
+            coerced = _coerce_fabric_event(e)
+            if coerced is not None and coerced.layer != ProtocolLayer.UNKNOWN:
+                fabric.append(coerced)
+
         if not fabric:
             return []
 
-        fabric.sort(key=lambda e: (e.instant or datetime.max, e.layer, e.device))
-        claimed: set[str] = set()
+        # Sort primarily by timestamp, secondarily by lowest protocol layer (L1 before L3)
+        ordered = sorted(
+            fabric,
+            key=lambda e: (
+                e.timestamp if isinstance(e.timestamp, datetime) else (_as_datetime(e.timestamp) or datetime.max),
+                int(e.layer),
+            ),
+        )
+        claimed_symptom_ids: set[str] = set()
         hypotheses: list[CausalHypothesis] = []
 
-        candidates = [
-            e for e in fabric
-            if e.layer is not ProtocolLayer.UNKNOWN
-        ]
-        candidates.sort(key=lambda e: (int(e.layer), e.instant or datetime.max, e.device))
-
-        for root in candidates:
-            if root.event_id in claimed:
+        for idx, candidate in enumerate(ordered):
+            if candidate.event_id in claimed_symptom_ids:
                 continue
+
             symptoms: list[FabricEvent] = []
-            adjacent_hits = 0
-            for other in fabric:
-                if other.event_id == root.event_id or other.event_id in claimed:
+            affected_devs: set[str] = {candidate.device}
+            affected_vnis: set[int] = {candidate.vni} if candidate.vni else set()
+
+            cand_dt = candidate.timestamp if isinstance(candidate.timestamp, datetime) else _as_datetime(candidate.timestamp)
+
+            for later in ordered[idx + 1 :]:
+                if later.event_id in claimed_symptom_ids:
                     continue
-                if other.layer is ProtocolLayer.UNKNOWN:
-                    continue
-                if other.layer <= root.layer:
-                    continue
-                if not self.is_adjacent(root.device, other.device) and other.device != root.device:
-                    continue
-                gap = _seconds_apart(root, other)
-                if gap is None:
-                    # Unparseable stamps: still suppress same-device higher layers.
-                    if other.device != root.device:
+
+                later_dt = later.timestamp if isinstance(later.timestamp, datetime) else _as_datetime(later.timestamp)
+                delta_sec = 0.0
+                if cand_dt and later_dt:
+                    delta_sec = (later_dt - cand_dt).total_seconds()
+                    if delta_sec < 0 or delta_sec > self.max_window:
                         continue
-                elif gap > self.max_propagation_window_sec:
-                    continue
-                symptoms.append(other)
-                if other.device != root.device:
-                    adjacent_hits += 1
 
-            if not symptoms and root.layer is ProtocolLayer.UNKNOWN:
-                continue
+                # A lower-layer failure (e.g. L1) explains strictly higher-layer events (L2..L5)
+                # or peer L1/L3 events on the opposite end of the same link
+                is_higher_layer = later.layer > candidate.layer
+                is_peer_link_drop = (
+                    later.layer == candidate.layer
+                    and later.device in self.adjacency_map.get(candidate.device, set())
+                    and delta_sec <= 5.0
+                )
 
-            claimed.add(root.event_id)
-            for symptom in symptoms:
-                claimed.add(symptom.event_id)
+                if (is_higher_layer or is_peer_link_drop) and self._is_topologically_coupled(
+                    candidate.device, later.device, later.layer
+                ):
+                    symptoms.append(later)
+                    claimed_symptom_ids.add(later.event_id)
+                    affected_devs.add(later.device)
+                    if later.vni:
+                        affected_vnis.add(later.vni)
 
-            devices: list[str] = []
-            seen_dev: set[str] = set()
-            vnis: list[str] = []
-            seen_vni: set[str] = set()
-            for event in (root, *symptoms):
-                if event.device and event.device not in seen_dev:
-                    seen_dev.add(event.device)
-                    devices.append(event.device)
-                if event.vni and event.vni not in seen_vni:
-                    seen_vni.add(event.vni)
-                    vnis.append(event.vni)
-
-            confidence, rationale = _score_hypothesis(
-                root, symptoms, adjacent_hits, self.max_propagation_window_sec,
+            # Calculate confidence based on layer depth and corroborated downstream symptoms
+            base_conf = 0.65 if candidate.layer == ProtocolLayer.L1_PHYSICAL else 0.55
+            symptom_boost = min(0.30, len(symptoms) * 0.08)
+            layer_span_boost = (
+                0.05
+                if any(s.layer >= ProtocolLayer.L4_VTEP_NVE for s in symptoms)
+                else 0.0
             )
-            hypotheses.append(CausalHypothesis(
-                root_cause=root,
-                suppressed_symptoms=symptoms,
-                affected_devices=devices,
-                affected_vnis=vnis,
-                confidence=confidence,
-                rationale=rationale,
-            ))
+            confidence = round(min(0.99, base_conf + symptom_boost + layer_span_boost), 2)
 
-        hypotheses.sort(key=lambda h: (-h.confidence, int(h.root_cause.layer)))
-        return hypotheses
+            rationale = (
+                f"{candidate.layer.name} event on {candidate.device}"
+                + (f" ({candidate.interface})" if candidate.interface else "")
+                + f" triggered {len(symptoms)} downstream symptom(s) across "
+                f"{len(affected_devs)} device(s)."
+            )
+
+            hypotheses.append(
+                CausalHypothesis(
+                    root_cause=candidate,
+                    suppressed_symptoms=symptoms,
+                    affected_devices=affected_devs,
+                    affected_vnis=affected_vnis,
+                    confidence=confidence,
+                    rationale=rationale,
+                )
+            )
+
+        return sorted(
+            hypotheses,
+            key=lambda h: (h.confidence, len(h.suppressed_symptoms)),
+            reverse=True,
+        )
 
 
 def hypotheses_payload(hypotheses: Sequence[CausalHypothesis]) -> dict[str, Any]:

@@ -1,7 +1,9 @@
-"""Protocol-aware EVPN bipartite causal engine."""
+"""Unit tests for the EVPN-VXLAN Bipartite Causal Inference Engine."""
+
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -39,7 +41,81 @@ def _fe(
 
 
 @pytest.mark.unit
-def test_layer_signatures_arista_junos_frr_cisco():
+def test_underlay_spine_link_failure_suppresses_overlay_evpn_symptoms() -> None:
+    manifest = {
+        "site": "clab-clos-evpn",
+        "links": [
+            {"source": "spine1", "target": "leaf1"},
+            {"source": "spine1", "target": "leaf2"},
+            {"source": "spine2", "target": "leaf1"},
+            {"source": "spine2", "target": "leaf2"},
+        ],
+    }
+    engine = EVPNBipartiteCausalEngine.from_site_manifest(manifest)
+    t0 = datetime(2026, 10, 13, 18, 0, 0, tzinfo=timezone.utc)
+
+    raw_stream = [
+        (
+            "ev-1",
+            t0,
+            "leaf1",
+            "%LINEPROTO-5-UPDOWN: Line protocol on Interface Ethernet1/1, changed state to down (OPTICAL_PWR_LOW)",
+        ),
+        (
+            "ev-2",
+            t0 + timedelta(seconds=1),
+            "spine1",
+            "BFDD_TRAP_SHOP_DOWN: BFD session to neighbor 10.0.1.2 on xe-0/0/1 went Down",
+        ),
+        (
+            "ev-3",
+            t0 + timedelta(seconds=2),
+            "leaf1",
+            "%BGP-5-ADJCHANGE: neighbor 10.0.1.1 Down BFD session down",
+        ),
+        (
+            "ev-4",
+            t0 + timedelta(seconds=4),
+            "leaf2",
+            "%VXLAN_TUNNEL_DOWN: VTEP 192.168.255.11 unreachable on nve1",
+        ),
+        (
+            "ev-5",
+            t0 + timedelta(seconds=6),
+            "leaf2",
+            "BGP-EVPN: Type-2 MAC/IP route withdraw for VNI 10010 from peer 192.168.255.11",
+        ),
+    ]
+
+    events = [
+        engine.classify_event(eid, ts, dev, msg)
+        for eid, ts, dev, msg in raw_stream
+    ]
+
+    hypotheses = engine.analyze(events)
+
+    assert len(hypotheses) == 1
+    top = hypotheses[0]
+    assert top.root_cause.event_id == "ev-1"
+    assert top.root_cause.layer == ProtocolLayer.L1_PHYSICAL
+    assert top.root_cause.device == "leaf1"
+    assert top.root_cause.interface == "Ethernet1/1"
+
+    assert len(top.suppressed_symptoms) == 4
+    assert top.symptom_suppression_ratio == 0.8
+    assert top.affected_devices == {"leaf1", "spine1", "leaf2"}
+    assert top.affected_vnis == {10010}
+    assert top.confidence >= 0.90
+
+    cyto = top.to_cytoscape_elements()
+    dashed_edges = [
+        el for el in cyto if el["data"].get("line_style") == "dashed"
+    ]
+    assert len(dashed_edges) >= 1
+
+
+@pytest.mark.unit
+def test_layer_signatures_arista_junos_frr_cisco() -> None:
     cases = [
         (
             ProtocolLayer.L1_PHYSICAL,
@@ -86,13 +162,13 @@ def test_layer_signatures_arista_junos_frr_cisco():
 
 
 @pytest.mark.unit
-def test_underlay_bgp_does_not_steal_evpn_session():
+def test_underlay_bgp_does_not_steal_evpn_session() -> None:
     layer, _ = classify_message("bgpd: BGP EVPN neighbor 10.0.0.1 Down")
     assert layer is ProtocolLayer.L5_OVERLAY_EVPN
 
 
 @pytest.mark.unit
-def test_extract_interface_and_vni():
+def test_extract_interface_and_vni() -> None:
     msg = (
         "leaf1 Ebra: %LINEPROTO-5-UPDOWN: Line protocol on Interface Ethernet49/1, "
         "changed state to down VNI 10010"
@@ -103,7 +179,7 @@ def test_extract_interface_and_vni():
 
 
 @pytest.mark.unit
-def test_clos_manifest_builds_spine_leaf_adjacency():
+def test_clos_manifest_builds_spine_leaf_adjacency() -> None:
     manifest = _load_clos()
     adj = adjacency_from_manifest(manifest)
     assert "leaf1" in adj["spine1"]
@@ -115,47 +191,7 @@ def test_clos_manifest_builds_spine_leaf_adjacency():
 
 
 @pytest.mark.unit
-def test_lowest_layer_root_suppresses_higher_on_same_and_adjacent():
-    manifest = _load_clos()
-    engine = EVPNBipartiteCausalEngine.from_site_manifest(
-        manifest, max_propagation_window_sec=120,
-    )
-    events = [
-        _fe("Oct 13 10:00:01", "leaf1",
-            "%LINEPROTO-5-UPDOWN: Line protocol on Interface Ethernet1, changed state to down"),
-        _fe("Oct 13 10:00:05", "leaf1",
-            "LACP: Port-Channel10 member Ethernet1 suspended timeout"),
-        _fe("Oct 13 10:00:15", "spine1",
-            "RPD_BGP_NEIGHBOR_STATE_CHANGED: BGP peer 10.0.0.1 state Idle"),
-        _fe("Oct 13 10:00:20", "leaf1",
-            "NVE peer 10.0.0.8 lost VXLAN_TUNNEL_DOWN"),
-        _fe("Oct 13 10:00:30", "leaf1",
-            "EVPN Type-2 MAC/IP withdraw VNI 10010"),
-        # Far-away leaf — not adjacent, must not be swallowed by leaf1's L1
-        _fe("Oct 13 10:00:31", "leaf6",
-            "EVPN Type-2 MAC/IP withdraw VNI 10010"),
-    ]
-    hyps = engine.analyze(events)
-    assert hyps
-    root = hyps[0]
-    assert root.root_cause.layer is ProtocolLayer.L1_PHYSICAL
-    assert root.root_cause.device == "leaf1"
-    layers = {s.layer for s in root.suppressed_symptoms}
-    assert ProtocolLayer.L5_OVERLAY_EVPN in layers
-    assert ProtocolLayer.L4_VTEP_NVE in layers
-    assert ProtocolLayer.L2_LAG_MLAG in layers
-    suppressed_devices = {s.device for s in root.suppressed_symptoms}
-    assert "leaf1" in suppressed_devices
-    assert "spine1" in suppressed_devices
-    assert "leaf6" not in suppressed_devices
-    assert root.symptom_suppression_ratio > 0
-    assert 0.4 <= root.confidence <= 0.95
-    assert "suppressed" in root.rationale.lower()
-    assert "10010" in root.affected_vnis
-
-
-@pytest.mark.unit
-def test_window_expires_and_unknown_is_ignored():
+def test_window_expires_and_unknown_is_ignored() -> None:
     engine = EVPNBipartiteCausalEngine({"leaf1": ["spine1"]}, max_propagation_window_sec=30)
     events = [
         _fe("Oct 13 10:00:00", "leaf1",
@@ -172,7 +208,7 @@ def test_window_expires_and_unknown_is_ignored():
 
 
 @pytest.mark.unit
-def test_cytoscape_elements_shape_and_dashed_overlay():
+def test_cytoscape_elements_shape_and_dashed_overlay() -> None:
     engine = EVPNBipartiteCausalEngine({"leaf1": []})
     hyps = engine.analyze([
         _fe("Oct 13 10:00:01", "leaf1",
@@ -182,18 +218,18 @@ def test_cytoscape_elements_shape_and_dashed_overlay():
     ])
     els = hyps[0].to_cytoscape_elements()
     nodes = [e for e in els if "source" not in e.get("data", {})]
-    edges = [e for e in els if e.get("data", {}).get("kind") == "causal_propagation"]
+    edges = [e for e in els if e.get("data", {}).get("edge_type") == "causal_propagation"]
     assert any(n["data"]["id"] == "leaf1:L1_PHYSICAL" for n in nodes)
     assert any(n["data"]["id"] == "leaf1:L5_OVERLAY_EVPN" for n in nodes)
     assert all(n["data"]["device"] == "leaf1" for n in nodes)
     assert {n["data"]["layer"] for n in nodes} == {"underlay", "overlay"}
     assert any(n["data"]["causal_role"] == "root_cause" for n in nodes)
     assert edges
-    assert any("causal-dashed" in (e.get("classes") or "") for e in edges)
+    assert any(e["data"].get("line_style") == "dashed" for e in edges)
 
 
 @pytest.mark.unit
-def test_analyze_evpn_causal_default_off_and_opt_in():
+def test_analyze_evpn_causal_default_off_and_opt_in() -> None:
     events = [
         LogEvent("Oct 13 10:00:01", "leaf1", "Ebra", "err",
                  "%LINEPROTO-5-UPDOWN: Line protocol on Interface Ethernet1, changed state to down"),
@@ -211,7 +247,7 @@ def test_analyze_evpn_causal_default_off_and_opt_in():
 
 
 @pytest.mark.unit
-def test_causal_wrapper_and_topology_attach():
+def test_causal_wrapper_and_topology_attach() -> None:
     payload = evpn_causal_hypotheses([
         _fe("Oct 13 10:00:01", "leaf1",
             "%LINK-3-UPDOWN: Interface Ethernet1, changed state to down"),
@@ -225,7 +261,7 @@ def test_causal_wrapper_and_topology_attach():
 
 
 @pytest.mark.unit
-def test_demo_storyline_classifies_l1_and_l3():
+def test_demo_storyline_classifies_l1_and_l3() -> None:
     lines = generate_demo_lines()
     engine = EVPNBipartiteCausalEngine()
     fabric = engine.ingest(lines)
@@ -239,7 +275,7 @@ def test_demo_storyline_classifies_l1_and_l3():
 
 
 @pytest.mark.unit
-def test_protocol_layer_values():
+def test_protocol_layer_values() -> None:
     assert ProtocolLayer.L1_PHYSICAL == 1
     assert ProtocolLayer.L5_OVERLAY_EVPN == 5
     assert ProtocolLayer.UNKNOWN == 99

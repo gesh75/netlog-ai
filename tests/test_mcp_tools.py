@@ -29,6 +29,7 @@ EXPECTED_TOOLS = {
     "analyze_device",
     "list_sites",
     "analyze_site",
+    "analyze_evpn_causality",
 }
 
 
@@ -157,3 +158,18 @@ def test_server_source_uses_mcpserver_not_fastmcp():
     assert "from mcp.server.mcpserver import MCPServer" in text
     assert "from mcp.server.fastmcp" not in text
     assert "import FastMCP" not in text
+
+
+@pytest.mark.unit
+def test_mcp_analyze_evpn_causality():
+    pytest.importorskip("mcp")
+    from ai_log_analyzer.mcp_server.server import _build_server
+
+    srv = _build_server()
+    res = asyncio.run(srv.call_tool("analyze_evpn_causality", {"site_name": "clab-clos-evpn"}))
+    assert res.is_error is False
+    data = res.structured_content or {}
+    assert data.get("ok") is True
+    assert data.get("site") == "CLAB-CLOS-EVPN"
+    assert "hypotheses" in data
+

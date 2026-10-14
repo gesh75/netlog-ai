@@ -2303,6 +2303,23 @@ async function _renderCytoscape() {
         selector: "edge:active",
         style: { "line-color": "#58a6ff", "width": 3 },
       },
+      {
+        selector: 'node[causal_role = "root_cause"]',
+        style: {
+          "border-width": 4,
+          "border-color": "#ef4444",
+          "background-color": "#7f1d1d",
+        },
+      },
+      {
+        selector: 'edge[line_style = "dashed"]',
+        style: {
+          "line-style": "dashed",
+          "line-color": "#a855f7",
+          "target-arrow-color": "#a855f7",
+          "width": 2,
+        },
+      },
     ],
   });
 
