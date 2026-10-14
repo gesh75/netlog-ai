@@ -446,6 +446,217 @@ def _build_server():
             "cytoscape_elements": [el for h in hypotheses for el in h.to_cytoscape_elements()],
         }
 
+    # ── remediation & itsm ───────────────────────────────────────────────────
+    @mcp.tool()
+    def generate_remediation_plan(
+        device: str,
+        vendor: str,
+        action: str = "drain",
+        interface: str = "Ethernet1",
+        bgp_neighbor_ip: str = "",
+        commands: list[str] | None = None,
+        pre_checks: list[str] | None = None,
+        post_checks: list[str] | None = None,
+        rollback_minutes: int = 5,
+        rationale: str = "",
+    ) -> dict[str, Any]:
+        """Generate vendor-safe configuration change plan with rollback guardrails.
+
+        Supported vendors: 'arista_eos', 'juniper_junos', 'cisco_nxos', 'cisco_ios', 'frr'.
+        Supported actions: 'drain' (graceful link drain), 'copp' (control-plane QoS boost), 'custom'.
+        """
+        from ai_log_analyzer.remediation import (
+            RemediationActionType,
+            RemediationGenerator,
+            SafetyViolationError,
+            VendorOS,
+        )
+
+        try:
+            vendor_os = VendorOS(vendor.lower().strip())
+        except ValueError:
+            return {
+                "ok": False,
+                "error": f"Unsupported vendor OS: {vendor!r}",
+                "valid_vendors": [v.value for v in VendorOS],
+            }
+
+        gen = RemediationGenerator(default_rollback_minutes=rollback_minutes)
+        act = action.lower().strip()
+        try:
+            if act in ("drain", RemediationActionType.GRACEFUL_LINK_DRAIN.value):
+                plan = gen.build_graceful_link_drain(
+                    device=device,
+                    vendor=vendor_os,
+                    interface=interface,
+                    bgp_neighbor_ip=bgp_neighbor_ip or None,
+                    rollback_minutes=rollback_minutes,
+                    rationale=rationale or "Drain traffic gracefully prior to physical maintenance.",
+                )
+            elif act in ("copp", "qos", RemediationActionType.QOS_COPP_CONTROL_PLANE_BOOST.value):
+                plan = gen.build_qos_copp_remediation(
+                    device=device,
+                    vendor=vendor_os,
+                    interface=interface,
+                    rollback_minutes=rollback_minutes,
+                    rationale=rationale or "Prioritize BFD/BGP control plane traffic.",
+                )
+            elif act in ("custom", RemediationActionType.CUSTOM_SAFE_CONFIG.value):
+                if not commands:
+                    return {"ok": False, "error": "commands list required for custom action"}
+                plan = gen.build_custom_safe_plan(
+                    device=device,
+                    vendor=vendor_os,
+                    commands=commands,
+                    pre_checks=pre_checks or [],
+                    post_checks=post_checks or [],
+                    rationale=rationale or "Custom safe configuration plan.",
+                    rollback_minutes=rollback_minutes,
+                )
+            else:
+                return {"ok": False, "error": f"Unsupported action {action!r}"}
+        except SafetyViolationError as exc:
+            return {"ok": False, "error": f"Safety violation: {exc}"}
+
+        return {
+            "ok": True,
+            "plan_id": plan.plan_id,
+            "device": plan.device,
+            "vendor": plan.vendor.value,
+            "action_type": plan.action_type.value,
+            "rollback_minutes": plan.rollback_minutes,
+            "plan": plan.to_dict(),
+            "markdown_card": plan.to_markdown_card(),
+        }
+
+    @mcp.tool()
+    def enrich_itsm_incident(
+        system: str,
+        device: str,
+        vendor: str,
+        root_cause_summary: str,
+        site: str = "default",
+        layer: str = "L1_PHYSICAL",
+        interface: str = "Ethernet1",
+        confidence: float = 0.95,
+        rollback_minutes: int = 5,
+        pre_checks: list[str] | None = None,
+        config_commands: list[str] | None = None,
+        post_checks: list[str] | None = None,
+        suppressed_symptoms_count: int = 0,
+        affected_devices: list[str] | None = None,
+        affected_vnis: list[int] | None = None,
+        telemetry_summary: str = "",
+        plan_id: str = "",
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        """Format or dispatch two-way ITSM incident enrichment to Jira or ServiceNow.
+
+        Parameters:
+          system: 'jira' or 'servicenow'
+          device: Device hostname
+          vendor: Operating system vendor
+          root_cause_summary: Summary description of diagnosed root cause
+          site: Site / fabric identifier
+          layer: Protocol layer (e.g. L1_PHYSICAL, L3_UNDERLAY, L5_OVERLAY_EVPN)
+          interface: Faulty interface
+          confidence: Causal confidence score (0.0 - 1.0)
+          rollback_minutes: Revert timer duration in minutes
+          pre_checks: Read-only pre-checks
+          config_commands: Applied configuration commands
+          post_checks: Post-check verification commands
+          suppressed_symptoms_count: Number of suppressed symptom events
+          affected_devices: List of impacted hostnames
+          affected_vnis: List of impacted VXLAN VNIs
+          telemetry_summary: Optical/telemetry diagnostics text
+          plan_id: Remediation plan identifier (e.g. REM-1234ABCD)
+          dry_run: When True (default), previews the payload without external API requests
+        """
+        from ai_log_analyzer.itsm import (
+            IncidentEnrichmentPayload,
+            JiraITSMClient,
+            ServiceNowITSMClient,
+        )
+        from ai_log_analyzer.remediation import (
+            RemediationActionType,
+            RemediationPlan,
+            VendorOS,
+        )
+
+        sys_name = system.lower().strip()
+        if sys_name not in ("jira", "servicenow"):
+            return {"ok": False, "error": f"Unsupported ITSM system: {system!r}. Must be 'jira' or 'servicenow'."}
+
+        plan = None
+        if plan_id or config_commands:
+            try:
+                vos = VendorOS(vendor.lower().strip())
+            except ValueError:
+                vos = VendorOS.ARISTA_EOS
+            plan = RemediationPlan(
+                plan_id=plan_id or f"REM-{device.upper()}",
+                device=device,
+                vendor=vos,
+                action_type=RemediationActionType.GRACEFUL_LINK_DRAIN,
+                rollback_minutes=rollback_minutes,
+                rationale=root_cause_summary,
+                pre_checks=pre_checks or [],
+                config_commands=config_commands or [],
+                commit_with_timer_commands=[],
+                post_checks=post_checks or [],
+                confirm_commit_commands=[],
+                manual_rollback_commands=[],
+            )
+
+        payload = IncidentEnrichmentPayload(
+            site=site,
+            root_device=device,
+            root_layer=layer,
+            root_interface=interface or None,
+            summary_title=root_cause_summary,
+            rca_rationale=f"Diagnosed root cause on {device}: {root_cause_summary}",
+            confidence=confidence,
+            affected_devices=affected_devices or [device],
+            affected_vnis=affected_vnis or [],
+            suppressed_symptom_count=suppressed_symptoms_count,
+            telemetry_summary=telemetry_summary or None,
+            remediation_plan=plan,
+        )
+
+        if dry_run:
+            return {
+                "ok": True,
+                "dry_run": True,
+                "system": sys_name,
+                "fingerprint": payload.fingerprint,
+                "markdown_card": payload.to_markdown_body(),
+                "jira_payload": payload.to_jira_issue_fields("NET"),
+                "servicenow_payload": payload.to_servicenow_record(),
+            }
+
+        try:
+            if sys_name == "jira":
+                base_url = os.environ.get("JIRA_URL") or os.environ.get("JIRA_BASE_URL", "")
+                email = os.environ.get("JIRA_EMAIL", "")
+                token = os.environ.get("JIRA_API_TOKEN", "")
+                project = os.environ.get("JIRA_PROJECT_KEY", "NET")
+                if not (base_url and email and token):
+                    return {"ok": False, "error": "Missing Jira credentials in environment (JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN)"}
+                client = JiraITSMClient(base_url, email, token, project_key=project)
+                res = client.enrich_incident(payload)
+                return {"ok": True, "dry_run": False, "system": "jira", "result": res}
+            else:
+                instance_url = os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL", "")
+                user = os.environ.get("SERVICENOW_USER") or os.environ.get("SNOW_USER", "")
+                pwd = os.environ.get("SERVICENOW_PASSWORD") or os.environ.get("SNOW_PASSWORD", "")
+                if not (instance_url and user and pwd):
+                    return {"ok": False, "error": "Missing ServiceNow credentials in environment (SERVICENOW_URL, SERVICENOW_USER, SERVICENOW_PASSWORD)"}
+                client = ServiceNowITSMClient(instance_url, user, pwd)
+                res = client.enrich_incident(payload)
+                return {"ok": True, "dry_run": False, "system": "servicenow", "result": res}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     return mcp
 
 

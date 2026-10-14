@@ -30,6 +30,8 @@ EXPECTED_TOOLS = {
     "list_sites",
     "analyze_site",
     "analyze_evpn_causality",
+    "generate_remediation_plan",
+    "enrich_itsm_incident",
 }
 
 
@@ -172,4 +174,59 @@ def test_mcp_analyze_evpn_causality():
     assert data.get("ok") is True
     assert data.get("site") == "CLAB-CLOS-EVPN"
     assert "hypotheses" in data
+
+
+@pytest.mark.unit
+def test_mcp_generate_remediation_plan():
+    pytest.importorskip("mcp")
+    from ai_log_analyzer.mcp_server.server import _build_server
+
+    srv = _build_server()
+    res = asyncio.run(srv.call_tool(
+        "generate_remediation_plan",
+        {
+            "device": "leaf1",
+            "vendor": "arista_eos",
+            "action": "drain",
+            "interface": "Ethernet1",
+            "rollback_minutes": 5,
+        },
+    ))
+    assert res.is_error is False
+    data = res.structured_content or {}
+    assert data.get("ok") is True
+    assert data.get("device") == "leaf1"
+    assert "plan" in data
+    assert "commit timer 5" in "\n".join(data["plan"]["commit_with_timer_commands"])
+
+
+@pytest.mark.unit
+def test_mcp_enrich_itsm_incident_dry_run():
+    pytest.importorskip("mcp")
+    from ai_log_analyzer.mcp_server.server import _build_server
+
+    srv = _build_server()
+    res = asyncio.run(srv.call_tool(
+        "enrich_itsm_incident",
+        {
+            "system": "jira",
+            "plan_id": "REM-TEST1234",
+            "device": "spine1",
+            "vendor": "juniper_junos",
+            "root_cause_summary": "Optical laser RX power failure",
+            "rollback_minutes": 5,
+            "pre_checks": ["show interfaces terse"],
+            "config_commands": ["set interfaces et-0/0/1 disable"],
+            "post_checks": ["show bgp summary"],
+            "dry_run": True,
+        },
+    ))
+    assert res.is_error is False
+    data = res.structured_content or {}
+    assert data.get("ok") is True
+    assert data.get("dry_run") is True
+    assert "fingerprint" in data
+    assert data.get("fingerprint", "").startswith("NETLOG-")
+    assert "jira_payload" in data
+
 
