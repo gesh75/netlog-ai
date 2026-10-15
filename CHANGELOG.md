@@ -6,9 +6,20 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-15
+
 ### Added
 
-- **SolarWinds Orion + Observability SaaS connector** (`sources/solarwinds.py`). Pulls active alerts via SWIS SWQL (`SELECT AlertMessage, Severity, TriggerTime, EntityNetObjectId FROM Orion.AlertActive` on `/SolarWinds/InformationService/v3/Json/Query`, typically port 17778) with Bearer or Basic auth, and falls back to `GET v1/alerts?status=active` on HTTP/URL errors only — never a bare `except Exception`. Alerts normalize to `{timestamp} {node} SolarWindsAlert[{severity}]: {msg}`. Register as `--source solarwinds` or `NETLOG_SOURCE_*_TYPE=solarwinds`. Credentials are never logged; User-Agent uses the package version.
+- **SolarWinds Orion + Observability SaaS connector** (`sources/solarwinds.py`, #54 plus audit upgrade). SWIS v3 mode POSTs parameterized SWQL (`{"query", "parameters"}` with `@since` / host filters — never string interpolation) to `/SolarWinds/InformationService/v3/Json/Query`. Active alerts join `Orion.AlertActive`, `Orion.AlertObjects`, and `Orion.AlertConfigurations` (`AlertActiveID`, `AlertObjectID`, `TriggeredDateTime`, `TriggeredMessage`, `ac.Severity`, `ac.Name`, `ao.EntityCaption`, `ao.RelatedNodeCaption`). Syslog is read from `Orion.OLM.LogEntry` with fallback to `Orion.SysLog`, both joined to `Orion.Nodes`; network events come from `Orion.Events`. SaaS mode uses Bearer `GET /v1/logs` and `GET /v1/alerts` with cursor or page pagination. Everything normalizes to `<timestamp> <hostname> <program>[<severity>]: <message>`.
+- **`SolarWindsConfig.from_env()`** reads `SOLARWINDS_URL`, `SOLARWINDS_USERNAME`, `SOLARWINDS_PASSWORD`, `SOLARWINDS_TOKEN`, `SOLARWINDS_MODE` (`swis` or `saas`), and `SOLARWINDS_VERIFY_SSL`. `SourceManager.load_from_env()` also registers a `solarwinds` source from those vars.
+- **Topology and telemetry helpers.** `build_site_manifest(site_name)` reads `Orion.Nodes` + `Orion.TopologyConnections` into the NetBox/EVPN manifest shape. `fetch_interface_telemetry(device, interface)` maps `Orion.NPM.Interfaces` `InErrorsToday` / `OutErrorsToday` / `InDiscardsToday` / `OutDiscardsToday` onto `InterfaceTelemetrySnapshot` (`SolarWindsInterfaceTelemetry` carries Orion `Status`, which the base snapshot type has no field for).
+- **Explicit writeback.** `append_alert_note` invokes `Orion.AlertActive/AppendNote`; `acknowledge_alert` invokes `Orion.AlertActive/Acknowledge`. No automatic writes; credentials are never logged.
+- **MCP SolarWinds tools** (`fetch_solarwinds_logs`, `fetch_solarwinds_alerts`, `push_solarwinds_alert_note`). The note push is an explicit tool call only.
+- Wired through `sources/__init__`, the manager, CLI `--source` (kinds + `SOLARWINDS_*` env), `/api/sources`, `/api/analyze`, the web source selector (`index.html` + `app.js`), and CONNECTORS docs.
+
+### Tests
+
+- Mocked SolarWinds coverage: parameterized SWQL, alert join, OLM→`Orion.SysLog` fallback, `Orion.Events`, SaaS pagination, site manifest, NPM telemetry, writeback payloads, `from_env`, manager dispatch, MCP log/alert/note tools, and web `/api/sources`. Full suite: **613 passing**, ruff clean.
 
 ## [1.1.0] - 2026-10-14
 

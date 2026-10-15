@@ -26,7 +26,8 @@ def _events_from_source(kind_or_id: str, limit: int) -> list[LogEvent]:
     if registry.is_registered(kind_or_id):
         raise SourceError(
             f"source type {kind_or_id!r} is registered but not configured "
-            f"(set NETLOG_SOURCE_<id>_TYPE={kind_or_id} and NETLOG_SOURCE_<id>_URL=...)"
+            f"(set NETLOG_SOURCE_<id>_TYPE={kind_or_id} and NETLOG_SOURCE_<id>_URL=..., "
+            "or SOLARWINDS_URL / SOLARWINDS_TOKEN for solarwinds)"
         )
     raise SourceError(f"unknown source {kind_or_id!r}. Known: {registry.known()}")
 
@@ -289,8 +290,14 @@ def main() -> None:
     ap.add_argument(
         "--source",
         default=None,
-        help="Pull events from a registered connector kind or source id "
-        "(e.g. solarwinds). Configure via NETLOG_SOURCE_<id>_* env vars.",
+        metavar="KIND|ID",
+        help=(
+            "Pull events from a registered connector kind or source id "
+            f"(kinds: {', '.join(registry.known())}). "
+            "Configure via NETLOG_SOURCE_<id>_* or, for SolarWinds, "
+            "SOLARWINDS_URL, SOLARWINDS_USERNAME, SOLARWINDS_PASSWORD, "
+            "SOLARWINDS_TOKEN, SOLARWINDS_MODE, SOLARWINDS_VERIFY_SSL."
+        ),
     )
     ap.set_defaults(func=cmd_analyze)
 

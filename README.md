@@ -15,9 +15,9 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR, IOS-XE, NX-OS, SR Linux, SONiC, Cumulus), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-596%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-613%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
-> 📓 Release **v1.1.0** — **Vendor-Safe Remediation & Two-Way ITSM Integration** on **v1.0.0 EVPN Causality & Telemetry Fusion** — details in [`CHANGELOG.md`](CHANGELOG.md).
+> 📓 Release **v1.2.0** — **SolarWinds Orion / Observability SaaS connector** (parameterized SWQL, syslog, events, topology, telemetry, explicit alert writeback) on **v1.1.0 vendor-safe remediation & ITSM** — details in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -32,14 +32,12 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
-## What's new in v1.1.0
+## What's new in v1.2.0
 
-- **Vendor-Safe Remediation & Rollback Guardrails** (`remediation.py`): Generates deterministic change plans with transactional auto-rollback timers (`commit confirmed` on Junos, `commit timer` on EOS, `checkpoint` on NX-OS, `revert timer` on IOS-XE, `vtysh` auto-revert daemon on FRR), destructive command blocklists, and post-check assertions.
-- **Two-Way ITSM Integration** (`itsm.py`): Bidirectional Jira Service Management & ServiceNow incident correlation with deterministic `NETLOG-<SHA256>` deduplication keys for zero-duplicate alerting across CLOS fabrics.
-- **Protocol-Aware EVPN Causality & Telemetry Fusion** (`evpn_causal.py`, `sources/telemetry.py`): 5-layer hierarchy bipartite causal engine with 2-hop topological coupling, suppressing downstream overlay symptoms when lower-layer physical/underlay faults occur.
-- **Log Deduplication & Sanitize Vault** (`dedup.py`, `sanitize_vault.py`): Drain-style template clustering with RFC 5424 PRI and sequence number parsing, plus IPv6/MAC redaction for EVPN Type-2 routes.
-- **15 Agent Tools & REST Endpoints**: `/api/remediation`, `/api/itsm/enrich`, `generate_remediation_plan`, and `enrich_itsm_incident`.
-- Full test suite: **596 passing tests**. Docs: <https://gesh75.github.io/netlog-ai/>
+- **SolarWinds Orion + Observability SaaS connector** (`sources/solarwinds.py`): Parameterized SWQL on SWIS v3 (alert join, OLM syslog with `Orion.SysLog` fallback, `Orion.Events`), SaaS `GET /v1/logs` and `/v1/alerts` with cursor/page pagination, `build_site_manifest` / `fetch_interface_telemetry`, and explicit `AppendNote` / `Acknowledge` writeback. Configure with `SOLARWINDS_*` or `NETLOG_SOURCE_*`.
+- **18 MCP tools**, including `fetch_solarwinds_logs`, `fetch_solarwinds_alerts`, and `push_solarwinds_alert_note` (explicit RCA note push only).
+- **Vendor-Safe Remediation & Two-Way ITSM** from v1.1.0, **EVPN causality & telemetry fusion** from v1.0.0.
+- Full test suite: **613 passing tests**. Docs: <https://gesh75.github.io/netlog-ai/>
 
 ## What's new — connectors + MCP server
 
@@ -65,10 +63,11 @@ pip install 'netlog-ai[mcp]'
 netlog-ai mcp        # stdio transport — wire into Claude Code, Cursor, Continue
 ```
 
-15 agent tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
+18 agent tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
 `analyze_logs`, `get_top_offenders`, `correlate_sources`, `analyze_device`,
 `list_sites`, `analyze_site`, `analyze_evpn_causality`, `generate_remediation_plan`,
-`enrich_itsm_incident`, plus healthcheck + connector inventory. See
+`enrich_itsm_incident`, `fetch_solarwinds_logs`, `fetch_solarwinds_alerts`,
+`push_solarwinds_alert_note`, plus healthcheck + connector inventory. See
 [docs/CONNECTORS.md](docs/CONNECTORS.md) for the full reference.
 
 ## Features
@@ -76,7 +75,7 @@ netlog-ai mcp        # stdio transport — wire into Claude Code, Cursor, Contin
 | | |
 |---|---|
 | 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, SolarWinds Orion/SaaS, NetBox v4.x, Prometheus telemetry, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
-| 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly via 15 agent tools |
+| 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly via 18 agent tools |
 | 🌐 **EVPN Causal Engine** | 5-layer bipartite graph (L1 Physical → L2 Link → L3 Underlay → L4 Overlay → L5 Services) with 2-hop topological symptom suppression and root-cause isolation |
 | 🔒 **Safe Remediation** | Vendor-safe change plan generation (`remediation.py`) with auto-revert timers (`commit confirmed`, `commit timer`, `checkpoint`, `revert timer`), destructive command blocklist, and post-check assertions |
 | 🎫 **Two-Way ITSM** | Bi-directional Jira Service Management and ServiceNow incident enrichment with deterministic `NETLOG-<SHA256>` deduplication keys |
@@ -323,7 +322,7 @@ flowchart TB
   <img src="docs/architecture.svg" alt="netlog-ai animated architecture diagram — Sources → Adapters → Pipeline → Intelligence → Outputs" width="100%">
 </p>
 
-> **Flow:** any source (Kibana, Splunk, Loki, syslog, LibreNMS, FRR, file) → `SourceManager` adapter → **sanitize → classify → prioritize → deep-analyze → score** → outputs (Web UI, MCP server, reports, topology, copy-pastable CLI). Every byte that touches the LLM is scrubbed first.
+> **Flow:** any source (Kibana, Splunk, Loki, syslog, LibreNMS, SolarWinds, FRR, file) → `SourceManager` adapter → **sanitize → classify → prioritize → deep-analyze → score** → outputs (Web UI, MCP server, reports, topology, copy-pastable CLI). Every byte that touches the LLM is scrubbed first.
 
 <details>
 <summary>ASCII fallback (for terminals / RSS readers)</summary>
@@ -440,7 +439,7 @@ src/ai_log_analyzer/
 
 ## Tested & accessible
 
-- **423 unit + integration tests** (pytest)
+- **613 unit + integration tests** (pytest)
 - Frontend audited across 8 review rounds:
   - WCAG-AA: `:focus-visible` rings, `aria-live` regions, `role=tablist/tab/tabpanel`, skip-to-main link, `prefers-reduced-motion` fallback
   - Responsive ≤ 1100px, PWA-ready (`theme-color`, `mobile-web-app-capable`, SVG favicon)

@@ -21,6 +21,7 @@ import threading
 
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.sources.base import LogSource, SourceConfig, SourceError, registry
+from ai_log_analyzer.sources.solarwinds import SolarWindsConfig
 
 log = logging.getLogger(__name__)
 
@@ -160,7 +161,43 @@ class SourceManager:
                 added.append(src_id)
             except Exception as exc:
                 log.warning("failed to add env-configured source %s: %s", src_id, exc)
+        added.extend(self._load_solarwinds_native_env())
         return added
+
+    def _load_solarwinds_native_env(self) -> list[str]:
+        """Register ``solarwinds`` from SOLARWINDS_* when no NETLOG_SOURCE block exists."""
+        if not os.environ.get("SOLARWINDS_URL", "").strip():
+            return []
+        if any(cfg.type == "solarwinds" for cfg in self._configs.values()):
+            return []
+        try:
+            sw = SolarWindsConfig.from_env()
+        except SourceError as exc:
+            log.warning("SOLARWINDS_* env present but invalid: %s", exc)
+            return []
+        auth: tuple[str, ...] = ()
+        if sw.api_token:
+            auth = ("api_token",)
+        elif sw.username and sw.password:
+            auth = ("basic",)
+        cfg = SourceConfig(
+            id="solarwinds",
+            type="solarwinds",
+            url=sw.endpoint_url,
+            auth_methods=auth,
+            api_token=sw.api_token,
+            username=sw.username,
+            password=sw.password,
+            verify_tls=sw.verify_ssl,
+            timeout_seconds=float(sw.timeout),
+            extra={"mode": sw.mode},
+        )
+        try:
+            self.add(cfg)
+            return ["solarwinds"]
+        except Exception as exc:
+            log.warning("failed to add SOLARWINDS_* source: %s", exc)
+            return []
 
 
 # Module-level singleton used by both Flask + MCP server
