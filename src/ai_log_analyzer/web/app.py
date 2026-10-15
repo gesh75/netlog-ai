@@ -955,7 +955,7 @@ def create_app() -> Flask:
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
-    # ── External log sources (Kibana, Splunk, Loki, syslog, LibreNMS, ...) ────
+    # ── External log sources (Kibana, Splunk, Loki, syslog, LibreNMS, SolarWinds, ...) ────
     @app.route("/api/sources", methods=["GET"])
     def api_sources_list():
         """List configured sources + the connector kinds the registry knows."""

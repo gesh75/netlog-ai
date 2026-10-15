@@ -15,7 +15,7 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR, IOS-XE, NX-OS, SR Linux, SONiC, Cumulus), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-584%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-596%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
 > 📓 Release **v1.1.0** — **Vendor-Safe Remediation & Two-Way ITSM Integration** on **v1.0.0 EVPN Causality & Telemetry Fusion** — details in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -39,7 +39,7 @@ If you have ever watched an AI dashboard hallucinate a "root cause" with no acti
 - **Protocol-Aware EVPN Causality & Telemetry Fusion** (`evpn_causal.py`, `sources/telemetry.py`): 5-layer hierarchy bipartite causal engine with 2-hop topological coupling, suppressing downstream overlay symptoms when lower-layer physical/underlay faults occur.
 - **Log Deduplication & Sanitize Vault** (`dedup.py`, `sanitize_vault.py`): Drain-style template clustering with RFC 5424 PRI and sequence number parsing, plus IPv6/MAC redaction for EVPN Type-2 routes.
 - **15 Agent Tools & REST Endpoints**: `/api/remediation`, `/api/itsm/enrich`, `generate_remediation_plan`, and `enrich_itsm_incident`.
-- Full test suite: **584 passing tests**. Docs: <https://gesh75.github.io/netlog-ai/>
+- Full test suite: **596 passing tests**. Docs: <https://gesh75.github.io/netlog-ai/>
 
 ## What's new — connectors + MCP server
 
@@ -54,6 +54,7 @@ pasted logs — it pulls from any common log source (full guide:
 | `loki`      | Grafana Loki           | `NETLOG_SOURCE_loki_URL=… NETLOG_SOURCE_loki_API_TOKEN=…` |
 | `syslog`    | UDP/TCP listener       | Zero-config — point any device at port 5514 |
 | `librenms`  | LibreNMS REST          | `NETLOG_SOURCE_librenms_URL=… NETLOG_SOURCE_librenms_API_TOKEN=…` |
+| `solarwinds`| SolarWinds Orion / Observability SaaS | `NETLOG_SOURCE_orion_TYPE=solarwinds NETLOG_SOURCE_orion_URL=https://orion.example:17778` |
 | `netbox`    | NetBox v4.x REST / DCIM| `NETLOG_SOURCE_netbox_URL=… NETLOG_SOURCE_netbox_API_TOKEN=…` |
 | `telemetry` | Prometheus REST        | `NETLOG_SOURCE_telemetry_PROMETHEUS_URL=…` |
 
@@ -74,7 +75,7 @@ netlog-ai mcp        # stdio transport — wire into Claude Code, Cursor, Contin
 
 | | |
 |---|---|
-| 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, NetBox v4.x, Prometheus telemetry, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
+| 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, SolarWinds Orion/SaaS, NetBox v4.x, Prometheus telemetry, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
 | 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly via 15 agent tools |
 | 🌐 **EVPN Causal Engine** | 5-layer bipartite graph (L1 Physical → L2 Link → L3 Underlay → L4 Overlay → L5 Services) with 2-hop topological symptom suppression and root-cause isolation |
 | 🔒 **Safe Remediation** | Vendor-safe change plan generation (`remediation.py`) with auto-revert timers (`commit confirmed`, `commit timer`, `checkpoint`, `revert timer`), destructive command blocklist, and post-check assertions |

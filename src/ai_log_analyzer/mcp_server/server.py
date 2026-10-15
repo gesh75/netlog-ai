@@ -108,7 +108,7 @@ def _build_server():
     # ── inventory ────────────────────────────────────────────────────────────
     @mcp.tool()
     def list_connector_kinds() -> dict[str, Any]:
-        """List all built-in connector types (kibana, splunk, loki, syslog, librenms)."""
+        """List all built-in connector types (kibana, splunk, loki, syslog, librenms, solarwinds)."""
         return {"kinds": registry.known()}
 
     @mcp.tool()

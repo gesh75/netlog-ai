@@ -4,6 +4,12 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- **SolarWinds Orion + Observability SaaS connector** (`sources/solarwinds.py`). Pulls active alerts via SWIS SWQL (`SELECT AlertMessage, Severity, TriggerTime, EntityNetObjectId FROM Orion.AlertActive` on `/SolarWinds/InformationService/v3/Json/Query`, typically port 17778) with Bearer or Basic auth, and falls back to `GET v1/alerts?status=active` on HTTP/URL errors only — never a bare `except Exception`. Alerts normalize to `{timestamp} {node} SolarWindsAlert[{severity}]: {msg}`. Register as `--source solarwinds` or `NETLOG_SOURCE_*_TYPE=solarwinds`. Credentials are never logged; User-Agent uses the package version.
+
 ## [1.1.0] - 2026-10-14
 
 ### Added
