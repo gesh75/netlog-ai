@@ -13,6 +13,7 @@ The same engine that processes `--file` and pasted text now also drives:
 | `loki`     | Grafana Loki   | `api_token` · `basic` · `cookie`      | LogQL via `query_range` |
 | `syslog`   | UDP/TCP listener | n/a                                 | Zero-config, perfect for laptop demos |
 | `librenms`  | LibreNMS REST    | `api_token`                           | Eventlog via `/api/v0/logs/eventlog` |
+| `solarwinds`| SolarWinds Orion / Observability SaaS | `api_token` · `basic`          | SWIS SWQL on :17778, SaaS `v1/alerts` fallback |
 | `netbox`    | NetBox REST      | `api_token`                           | Device role/site/platform enrichment & v4.x cable topology manifest |
 | `telemetry` | Prometheus REST  | `api_token` · `basic`                 | Optical DOM/DDM (dBm), FCS/CRC error deltas, and queue drop fusion |
 | `itsm`      | Jira / ServiceNow| `api_token` · `basic`                 | Two-way incident enrichment, closed-loop triage, and rollback plans |
@@ -82,6 +83,17 @@ export NETLOG_SOURCE_loki_QUERY='{job=~"network"}'
 export NETLOG_SOURCE_librenms_TYPE=librenms
 export NETLOG_SOURCE_librenms_URL=https://librenms.example.com
 export NETLOG_SOURCE_librenms_API_TOKEN=...
+
+# SolarWinds Orion (SWIS, typically :17778) or Observability SaaS
+export NETLOG_SOURCE_orion_TYPE=solarwinds
+export NETLOG_SOURCE_orion_URL=https://orion.example.com:17778
+export NETLOG_SOURCE_orion_API_TOKEN=...
+# or: NETLOG_SOURCE_orion_USERNAME=... NETLOG_SOURCE_orion_PASSWORD=...
+```
+
+```bash
+# CLI — same env block, then:
+ai-log-analyzer analyze --source solarwinds --no-llm
 ```
 
 ---

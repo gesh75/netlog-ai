@@ -45,7 +45,7 @@ flowchart TB
     OP["NOC Operator - browser and CLI"]
     AGENT["AI Agents - Claude Code and Cursor"]
     NET(["netlog-ai analyzer core"])
-    LOGS["Log Platforms - Kibana, Splunk, Loki, LibreNMS, syslog"]
+    LOGS["Log Platforms - Kibana, Splunk, Loki, LibreNMS, SolarWinds, syslog"]
     LLM["LLM Runtimes - Ollama, Docker Model Runner, Claude, Grok"]
     DEV["Network Devices - Junos, EOS, SR Linux, FRR, SONiC, Cumulus"]
 
@@ -87,7 +87,7 @@ flowchart TB
     end
 
     subgraph INGEST["Ingest"]
-        SRC["sources/ - connectors kibana, splunk, loki, syslog, librenms"]
+        SRC["sources/ - connectors kibana, splunk, loki, syslog, librenms, solarwinds"]
         ADP["adapters/ - local frr, file, network_tool, tfsm"]
     end
 
