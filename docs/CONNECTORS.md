@@ -2,7 +2,8 @@
 
 netlog-ai ships with a pluggable connector layer (`src/ai_log_analyzer/sources/`)
 that lets it pull events from any common log source, plus an **MCP server**
-that exposes the analyzer as agent-callable tools.
+that exposes the analyzer as **18 agent-callable tools** (v1.2.0). The
+hermetic pytest suite is **613 passing**.
 
 The same engine that processes `--file` and pasted text now also drives:
 
@@ -13,10 +14,14 @@ The same engine that processes `--file` and pasted text now also drives:
 | `loki`     | Grafana Loki   | `api_token` · `basic` · `cookie`      | LogQL via `query_range` |
 | `syslog`   | UDP/TCP listener | n/a                                 | Zero-config, perfect for laptop demos |
 | `librenms`  | LibreNMS REST    | `api_token`                           | Eventlog via `/api/v0/logs/eventlog` |
-| `solarwinds`| SolarWinds Orion / Observability SaaS | `api_token` · `basic`          | SWIS SWQL on :17778, SaaS `v1/alerts` fallback |
+| `solarwinds`| SolarWinds Orion / Observability SaaS | `api_token` · `basic`          | Parameterized SWIS SWQL (alerts join, OLM→SysLog, Events); SaaS `/v1/logs` + `/v1/alerts` pagination; explicit alert writeback |
 | `netbox`    | NetBox REST      | `api_token`                           | Device role/site/platform enrichment & v4.x cable topology manifest |
 | `telemetry` | Prometheus REST  | `api_token` · `basic`                 | Optical DOM/DDM (dBm), FCS/CRC error deltas, and queue drop fusion |
 | `itsm`      | Jira / ServiceNow| `api_token` · `basic`                 | Two-way incident enrichment, closed-loop triage, and rollback plans |
+
+**LogSource registry count:** 7 kinds (`kibana`, `elasticsearch` alias, `splunk`,
+`loki`, `syslog`, `librenms`, `solarwinds`). NetBox, Prometheus telemetry, and
+ITSM are adjacent integrations, not `LogSource` registry entries.
 
 Every connector implements the same Python `Protocol` (`LogSource`) so the
 classifier, dedup, ranking, and LLM layers don't change — adding a new source
@@ -85,6 +90,11 @@ export NETLOG_SOURCE_librenms_URL=https://librenms.example.com
 export NETLOG_SOURCE_librenms_API_TOKEN=...
 
 # SolarWinds Orion (SWIS, typically :17778) or Observability SaaS
+export SOLARWINDS_URL=https://orion.example.com:17778
+export SOLARWINDS_TOKEN=...
+export SOLARWINDS_MODE=swis          # or saas
+export SOLARWINDS_VERIFY_SSL=true
+# or a NETLOG_SOURCE_* block:
 export NETLOG_SOURCE_orion_TYPE=solarwinds
 export NETLOG_SOURCE_orion_URL=https://orion.example.com:17778
 export NETLOG_SOURCE_orion_API_TOKEN=...
@@ -130,7 +140,7 @@ netlog-ai mcp                       # stdio transport (default)
 netlog-ai mcp --transport streamable-http
 ```
 
-### Tools exposed
+### Tools exposed (18)
 
 | Tool                   | Purpose                                                                              |
 |------------------------|--------------------------------------------------------------------------------------|
@@ -149,6 +159,9 @@ netlog-ai mcp --transport streamable-http
 | `analyze_evpn_causality`   | Protocol-aware bipartite CLOS causality; suppresses overlay symptoms from underlay   |
 | `generate_remediation_plan`| Generate vendor-safe remediation plan with rollback timer (EOS/Junos/NX-OS/IOS/FRR) |
 | `enrich_itsm_incident`     | Two-way Jira Service Management / ServiceNow incident correlation & enrichment card  |
+| `fetch_solarwinds_logs`    | Pull SolarWinds syslog / OLM / SaaS log lines (read-only)                            |
+| `fetch_solarwinds_alerts`  | Pull SolarWinds active alerts (SWIS join query or SaaS `/v1/alerts`)                 |
+| `push_solarwinds_alert_note` | Explicit `Orion.AlertActive/AppendNote` RCA writeback — never automatic            |
 
 ### Hook into Claude Code
 

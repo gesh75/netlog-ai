@@ -95,6 +95,24 @@ FILE_ROOTS: list[Path] = [
 MAX_FILE_MB: float = float(os.environ.get("AI_LOG_ANALYZER_MAX_FILE_MB", "200"))
 
 
+def _events_from_registered_source(kind_or_id: str, *, limit: int) -> list[LogEvent]:
+    """Pull events from a live SourceManager entry (kind or configured id)."""
+    source_manager.load_from_env()
+    for sid in source_manager.list_ids():
+        src = source_manager.get(sid)
+        if sid == kind_or_id or getattr(src, "kind", None) == kind_or_id:
+            return source_manager.fetch(sid, limit=limit)
+    if registry.is_registered(kind_or_id):
+        extra = ""
+        if kind_or_id == "solarwinds":
+            extra = ", or SOLARWINDS_URL / SOLARWINDS_TOKEN"
+        raise SourceError(
+            f"source type {kind_or_id!r} is registered but not configured "
+            f"(set NETLOG_SOURCE_<id>_TYPE={kind_or_id} and NETLOG_SOURCE_<id>_URL=...{extra})"
+        )
+    raise SourceError(f"Unknown source: {kind_or_id}")
+
+
 def _path_allowed(p: Path) -> bool:
     """True when the resolved path sits under one of FILE_ROOTS."""
     try:
@@ -756,7 +774,11 @@ def create_app() -> Flask:
                 return jsonify({"error": f"Path is neither file nor dir: {path}"}), 400
 
         else:
-            return jsonify({"error": f"Unknown source: {source}"}), 400
+            # Registered LogSource kind or id (kibana, splunk, solarwinds, …).
+            try:
+                events = _events_from_registered_source(source, limit=tail)
+            except SourceError as exc:
+                return jsonify({"error": str(exc)}), 400
 
         # Empty check that works for lists and generators alike: pull the
         # first event, then chain it back in front of the stream.

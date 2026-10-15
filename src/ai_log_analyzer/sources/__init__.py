@@ -10,7 +10,7 @@ Built-in connectors (each registers itself on import):
   - loki                    Grafana Loki query_range API
   - syslog                  UDP/TCP syslog listener with ring buffer
   - librenms                LibreNMS REST API eventlog
-  - solarwinds              SolarWinds Orion SWIS + Observability SaaS alerts
+  - solarwinds              SolarWinds Orion SWIS (parameterized SWQL) + Observability SaaS logs/alerts
 
 Custom connectors register themselves with `registry.register(kind, factory)`.
 """

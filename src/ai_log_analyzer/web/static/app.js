@@ -294,9 +294,13 @@ function selectedContainerCount() {
 function syncRunButton() {
   const btn = $("run-btn");
   if (!btn || btn.classList.contains("running")) return;
-  const needsContainer = $("source") && $("source").value === "frr" && selectedContainerCount() === 0;
-  btn.disabled = needsContainer;
-  btn.textContent = needsContainer ? "Select a container" : "▶ Run Analysis";
+  const src = $("source") ? $("source").value : "";
+  const needsContainer = src === "frr" && selectedContainerCount() === 0;
+  const needsConnector = src === "connector" && !($("connector-source") && $("connector-source").value);
+  btn.disabled = needsContainer || needsConnector;
+  if (needsContainer) btn.textContent = "Select a container";
+  else if (needsConnector) btn.textContent = "Select a connector";
+  else btn.textContent = "▶ Run Analysis";
 }
 
 function refreshChipsCount() {
@@ -543,10 +547,12 @@ function showSourceControls() {
   // and keyboard nav skip them while collapsed. All three must be toggled in
   // sync — otherwise the input stays uneditable when revealed.
   const panels = [
-    { id: "frr-controls",  active: src === "frr"  },
-    { id: "raw-controls",  active: src === "raw"  },
-    { id: "file-controls", active: src === "file" },
+    { id: "frr-controls",       active: src === "frr"  },
+    { id: "raw-controls",       active: src === "raw"  },
+    { id: "file-controls",      active: src === "file" },
+    { id: "connector-controls", active: src === "connector" },
   ];
+  if (src === "connector") loadConnectorSources();
   for (const { id, active } of panels) {
     const el = $(id);
     if (!el) continue;
@@ -566,6 +572,12 @@ async function runAnalysis() {
   if ($("source").value === "frr" && selectedContainerCount() === 0) {
     setStatus("Select at least one container");
     toast("Select at least one lab container", "error");
+    syncRunButton();
+    return;
+  }
+  if ($("source").value === "connector" && !($("connector-source") && $("connector-source").value)) {
+    setStatus("Select a registered connector");
+    toast("Select a registered connector source", "error");
     syncRunButton();
     return;
   }
@@ -589,6 +601,8 @@ async function runAnalysis() {
     body.hostname = $("raw-host").value;
   } else if (source === "file") {
     body.path = $("file-path").value;
+  } else if (source === "connector") {
+    body.source = $("connector-source").value;
   }
 
   try {
@@ -758,6 +772,9 @@ function render(r) {
     ctxParts.push(h ? `Raw logs · ${h}` : "Raw logs");
   } else if (source === "file") {
     ctxParts.push(`File: ${$("file-path").value || "(unspecified)"}`);
+  } else if (source === "connector") {
+    const id = ($("connector-source") && $("connector-source").value) || "";
+    ctxParts.push(id ? `Connector: ${id}` : "Registered connector");
   }
   ctxParts.push(`${r.classified_events.length} events`);
   setContext(ctxParts.join("  ·  "));
@@ -2927,6 +2944,42 @@ function hideIdleStateIfAnyPanelVisible() {
 let _tailES = null;
 let _tailCount = 0;
 
+async function loadConnectorSources() {
+  const sel = $("connector-source");
+  if (!sel) return;
+  try {
+    const data = await fetchJSON("/api/sources");
+    const previous = sel.value;
+    clear(sel);
+    const registered = data.sources || [];
+    registered.forEach((s) => {
+      const opt = el("option", { text: `${s.id} (${s.type})` });
+      opt.value = s.id;
+      sel.appendChild(opt);
+    });
+    if (!registered.length) {
+      (data.known_kinds || []).forEach((k) => {
+        const opt = el("option", { text: `${k} (not configured)` });
+        opt.value = k;
+        sel.appendChild(opt);
+      });
+    }
+    if (previous && Array.from(sel.options).some((o) => o.value === previous)) {
+      sel.value = previous;
+    }
+    if (!sel.options.length) {
+      sel.appendChild(el("option", { text: "(no connectors registered)" }));
+      sel.lastChild.value = "";
+    }
+  } catch {
+    if (!sel.options.length) {
+      sel.appendChild(el("option", { text: "(sources API unavailable)" }));
+      sel.lastChild.value = "";
+    }
+  }
+  syncRunButton();
+}
+
 async function loadTailSources() {
   const sel = $("tail-source");
   if (!sel) return;
@@ -3076,6 +3129,9 @@ document.addEventListener("DOMContentLoaded", () => {
   setInterval(hideIdleStateIfAnyPanelVisible, 1000);
 
   $("source").addEventListener("change", showSourceControls);
+  const _connectorSel = $("connector-source");
+  if (_connectorSel) _connectorSel.addEventListener("change", syncRunButton);
+  loadConnectorSources();
   $("provider").addEventListener("change", changeProvider);
   $("run-btn").addEventListener("click", runAnalysis);
   $("opt-btn").addEventListener("click", runOptimize);

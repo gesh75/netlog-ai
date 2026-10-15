@@ -32,6 +32,9 @@ EXPECTED_TOOLS = {
     "analyze_evpn_causality",
     "generate_remediation_plan",
     "enrich_itsm_incident",
+    "fetch_solarwinds_logs",
+    "fetch_solarwinds_alerts",
+    "push_solarwinds_alert_note",
 }
 
 

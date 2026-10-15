@@ -17,6 +17,11 @@ Tools exposed:
   - list_sites            : enumerate site bundles available locally
   - analyze_site          : run full site-wide analysis on a bundle
   - analyze_evpn_causality: bipartite underlay/overlay causal inference for a site
+  - generate_remediation_plan : vendor-safe change plan with rollback timer
+  - enrich_itsm_incident  : two-way Jira / ServiceNow enrichment
+  - fetch_solarwinds_logs : SolarWinds syslog / OLM / SaaS logs (read-only)
+  - fetch_solarwinds_alerts : SolarWinds active alerts (read-only)
+  - push_solarwinds_alert_note : explicit Orion.AlertActive/AppendNote writeback
 
 The MCP SDK is an optional dependency — install with
 `pip install netlog-ai[mcp]` or `pip install 'mcp>=2,<3'`.
@@ -34,6 +39,7 @@ from typing import Any
 from ai_log_analyzer.analyzer import analyze
 from ai_log_analyzer.sources import SourceConfig, SourceError, registry
 from ai_log_analyzer.sources.manager import manager as source_manager
+from ai_log_analyzer.sources.solarwinds import SolarWindsConnector
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +58,25 @@ def _resolve_sites_dir() -> Path:
 
 
 _SITES_DIR = _resolve_sites_dir()
+
+
+def _solarwinds_connector(source_id: str = "") -> SolarWindsConnector:
+    """Resolve a live SolarWinds connector by id, kind, or SOLARWINDS_* env."""
+    if source_id:
+        src = source_manager.get(source_id)
+        if src is None:
+            raise SourceError(f"unknown source {source_id!r}")
+        if getattr(src, "kind", None) != "solarwinds":
+            raise SourceError(
+                f"source {source_id!r} is not solarwinds "
+                f"(got {getattr(src, 'kind', None)!r})"
+            )
+        return src  # type: ignore[return-value]
+    for sid in source_manager.list_ids():
+        src = source_manager.get(sid)
+        if getattr(src, "kind", None) == "solarwinds":
+            return src  # type: ignore[return-value]
+    return SolarWindsConnector.from_env()
 
 
 def _mcp_package_version() -> str | None:
@@ -134,6 +159,7 @@ def _build_server():
           - splunk:  {"search": "index=network"}
           - loki:    {"query": "{job=\"network\"}"}
           - syslog:  {"port": "5514", "proto": "udp"}
+          - solarwinds: {"mode": "swis"}
         """
         if not registry.is_registered(source_type):
             return {"ok": False, "error": f"unknown source type {source_type!r}",
@@ -656,6 +682,59 @@ def _build_server():
                 return {"ok": True, "dry_run": False, "system": "servicenow", "result": res}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    @mcp.tool()
+    def fetch_solarwinds_logs(
+        source_id: str = "",
+        since_seconds: int = 3600,
+        limit: int = 500,
+        host_filter: str = "",
+    ) -> dict[str, Any]:
+        """Pull SolarWinds syslog / OLM / SaaS log lines. Read-only; no alert writeback."""
+        try:
+            conn = _solarwinds_connector(source_id)
+            lines = conn.pull_logs(
+                limit=limit,
+                since_seconds=since_seconds,
+                host_filter=host_filter,
+                include_alerts=False,
+            )
+        except SourceError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "count": len(lines), "lines": lines}
+
+    @mcp.tool()
+    def fetch_solarwinds_alerts(
+        source_id: str = "",
+        since_seconds: int = 3600,
+        host_filter: str = "",
+    ) -> dict[str, Any]:
+        """Pull SolarWinds active alerts (SWIS join query or SaaS GET /v1/alerts). Read-only."""
+        try:
+            conn = _solarwinds_connector(source_id)
+            alerts = conn.fetch_active_alerts(
+                since_seconds=since_seconds, host_filter=host_filter,
+            )
+        except SourceError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "count": len(alerts), "alerts": alerts}
+
+    @mcp.tool()
+    def push_solarwinds_alert_note(
+        alert_object_id: int,
+        note: str,
+        source_id: str = "",
+    ) -> dict[str, Any]:
+        """Explicit writeback: invoke Orion.AlertActive/AppendNote with an RCA note.
+
+        Never runs automatically — callers must invoke this tool.
+        """
+        try:
+            conn = _solarwinds_connector(source_id)
+            result = conn.append_alert_note(int(alert_object_id), note)
+        except SourceError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "alert_object_id": int(alert_object_id), "result": result}
 
     return mcp
 
