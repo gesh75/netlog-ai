@@ -140,13 +140,13 @@ def test_all_extra_is_superset_of_named_extras():
         assert not missing, f"extra `{name}` has requirements missing from `all`: {missing}"
 
 
-def test_package_version_is_1_1_0():
-    """Verify package version is 1.1.0 across pyproject.toml and __init__.__version__."""
+def test_package_version_is_1_1_1():
+    """Verify package version is 1.1.1 across pyproject.toml and __init__.__version__."""
     import ai_log_analyzer
 
     ver = _project().get("version")
-    assert ver == "1.1.0", f"pyproject.toml version must be 1.1.0, found {ver}"
-    assert ai_log_analyzer.__version__ in ("1.1.0", ver), (
-        f"__version__ must match 1.1.0, found {ai_log_analyzer.__version__}"
+    assert ver == "1.1.1", f"pyproject.toml version must be 1.1.1, found {ver}"
+    assert ai_log_analyzer.__version__ in ("1.1.1", ver), (
+        f"__version__ must match 1.1.1, found {ai_log_analyzer.__version__}"
     )
 

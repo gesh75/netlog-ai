@@ -351,14 +351,14 @@
   <section class="hero" id="hero" aria-label="Introduction">
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <span class="tagchip"><span class="spark" aria-hidden="true"></span>v1.1.0 · EVPN causality · vendor-safe remediation · ITSM</span>
+        <span class="tagchip"><span class="spark" aria-hidden="true"></span>v1.1.1 · SolarWinds connector · vendor-safe remediation · ITSM</span>
         <h1 class="hero-title">netlog-ai</h1>
         <p class="hero-tag">Network logs in. <b>Ranked actions out.</b> A local, sanitize-first, multi-vendor AI log analyzer that turns raw syslog and CLI output into prioritized, copy-pastable root-cause playbooks.</p>
 
         <div class="chips" id="chips" role="list" aria-label="Project statistics">
-          <div class="chip" role="listitem"><div class="num" data-count="584">584</div><div class="lbl">tests collected</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="596">596</div><div class="lbl">tests collected</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="80">80</div><div class="lbl">regex patterns</div></div>
-          <div class="chip" role="listitem"><div class="num" data-count="7">7</div><div class="lbl">log connectors</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="8">8</div><div class="lbl">log connectors</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="30">30</div><div class="lbl">demo devices</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="15">15</div><div class="lbl">MCP tools</div></div>
         </div>
@@ -826,12 +826,12 @@ pytest --cov=src --cov-report=term-missing</pre>
   <section id="roadmap" aria-labelledby="road-h">
     <div class="wrap">
       <p class="eyebrow">Status + plan</p>
-      <h2 class="title" id="road-h">1.1.0 safe remediation & ITSM</h2>
-      <p class="lead" style="margin-bottom:30px">v1.1.0 adds rollback-protected multi-vendor remediation change plans with auto-revert timers and two-way Jira / ServiceNow incident enrichment on top of v1.0.0 protocol-aware EVPN causality and v0.9.0 log deduplication.</p>
+      <h2 class="title" id="road-h">1.1.1 SolarWinds connector</h2>
+      <p class="lead" style="margin-bottom:30px">v1.1.1 adds a SolarWinds Orion + Observability SaaS connector on top of v1.1.0 vendor-safe remediation and two-way Jira / ServiceNow incident enrichment, and v1.0.0 protocol-aware EVPN causality.</p>
       <div class="grid features">
-        <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>0.9.0 — log dedup & vault</h3><p>Drain-style syslog deduplication, RFC 5424 PRI and Cisco sequence prefix parsing, IPv6/MAC redaction in SanitizeVault, and NetBox v4.x manifest enrichment.</p></article>
         <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>1.0.0 — EVPN causality</h3><p>5-tier CLOS fabric bipartite causal inference, optical DOM/DDM and interface counter telemetry fusion, Cytoscape EVPN overlay edges, and MCP causality tool.</p></article>
         <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>1.1.0 — remediation & ITSM</h3><p>Vendor-safe remediation plans with rollback timers (Junos commit confirmed, EOS commit timer, NX-OS checkpoint, IOS-XE revert timer), safety blocklist, and two-way Jira/ServiceNow enrichment.</p></article>
+        <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>1.1.1 — SolarWinds connector</h3><p>SolarWinds Orion SWIS SWQL alert ingest with Observability SaaS <code>v1/alerts</code> fallback, Bearer or Basic auth, and package-version User-Agent. Register as <code>--source solarwinds</code>.</p></article>
       </div>
     </div>
   </section>
@@ -864,7 +864,7 @@ pytest --cov=src --cov-report=term-missing</pre>
   /* ---------- Data ---------- */
   const features = [
     { icon: "🛡️", title: "Sanitize-before-LLM gate", desc: "Every config/log payload is scrubbed of shadow hashes, Junos $9$, SSH keys, SNMP/RADIUS/TACACS+/IPsec keys, and public IPs (replaced with stable PUB-&lt;hash&gt; pseudonym tokens — a public IP is never sent to the LLM in clear text) before any outbound LLM call." },
-    { icon: "🔌", title: "Pluggable log sources", desc: "Kibana, Splunk, Loki, LibreNMS, and a zero-config syslog UDP/TCP listener on port 5514 — one LogSource Protocol, one config dict, hot-pluggable." },
+    { icon: "🔌", title: "Pluggable log sources", desc: "Kibana, Splunk, Loki, LibreNMS, SolarWinds Orion/Observability SaaS, and a zero-config syslog UDP/TCP listener on port 5514 — one LogSource Protocol, one config dict, hot-pluggable." },
     { icon: "🤖", title: "MCP server mode", desc: "The analyzer core is agent-callable over stdio from Claude Code / Cursor / Continue, exposing analyze_logs, fetch_logs, get_top_offenders, correlate_sources, analyze_device, and analyze_site." },
     { icon: "🔗", title: "Cross-source correlation", desc: "The Device tab's Correlate Sources view scans every registered source and tags each host confirmed (flagged by ≥ 2 independent sources) or suspected (1 only) in a sortable, severity-coded table — single-source noise is filtered before escalation." },
     { icon: "🔬", title: "Per-device triage", desc: "The Device tab's Triage Device panel returns one host's verdict, a 0–100 health score ring, a severity histogram, top processes, and frequency-deduped error patterns in a single anchored view." },
@@ -891,7 +891,7 @@ pytest --cov=src --cov-report=term-missing</pre>
     { name: "classifier.py", tech: "Python regex", resp: "Deterministic event classifier: 80 regex patterns across Junos/EOS/FRR/IOS-XE/NX-OS/SR Linux/SONiC/Cumulus with severity + category lookup; strip_ansi removes VT100 escapes at the LogEvent → ClassifiedEvent boundary." },
     { name: "llm.py", tech: "requests · AF_UNIX HTTP · Anthropic API", resp: "Provider fallback chain: Ollama (:11434) → Docker Model Runner (:12434 TCP + Unix socket) → Anthropic Claude → xAI Grok; returns None to trigger the rule-based KB." },
     { name: "kb.py", tech: "Python", resp: "Rule-based deep-analysis knowledge base producing deterministic 5-phase playbooks when no LLM is available." },
-    { name: "sources/", tech: "requests · typing.Protocol", resp: "Pluggable connector layer (LogSource Protocol + SourceManager): kibana, splunk, loki, syslog UDP/TCP listener, librenms, netbox v4.x manifest, telemetry — hot-pluggable." },
+    { name: "sources/", tech: "requests · typing.Protocol", resp: "Pluggable connector layer (LogSource Protocol + SourceManager): kibana, splunk, loki, syslog UDP/TCP listener, librenms, solarwinds Orion/SaaS, netbox v4.x manifest, telemetry — hot-pluggable." },
     { name: "adapters/", tech: "subprocess (docker CLI) · TextFSM", resp: "Local ingest adapters: frr (docker logs → LogEvent), file (RFC3164/5424/Junos/freeform parser), network_tool, tfsm_auto (optional TextFSM auto-detect)." },
     { name: "dedup.py", tech: "Python · Drain algorithm", resp: "Pre-LLM log clustering & deduplication engine: variable token masking, RFC 5424 PRI strip, fixed-depth parse tree, emitting 90%+ prompt token savings during storms." },
     { name: "sanitize_vault.py", tech: "hashlib · ipaddress · regex", resp: "Reversible token vault providing stateful bidirectional masking for IPv4, IPv6, MAC, and ASN addresses across EVPN Type-2 routes." },

@@ -27,7 +27,7 @@ Repo-only lessons for netlog-ai. Cross-repo lessons stay in `~/.cursor/AGENT_LEA
 ### [2026-09-25] [serve] Exit 143 is the previous UI
 - **Mistake:** Reading exit 143 on an old `ai_log_analyzer.cli serve` as a crash of the current UI.
 - **Avoid:** Restarting again because a killed process reported 143.
-- **Instead:** `curl -sS http://127.0.0.1:6060/api/health`. Version `1.1.0` and `"ok":true` means the replacement is up. Interpreter is `.venv/bin/python3.14`, not `.venv/bin/python`.
+- **Instead:** `curl -sS http://127.0.0.1:6060/api/health`. Version `1.1.1` and `"ok":true` means the replacement is up. Interpreter is `.venv/bin/python3.14`, not `.venv/bin/python`.
 
 ### [2026-10-13] [dedup] Drain-Style Pre-LLM Log Deduplication (`dedup.py`)
 - **Pattern:** Mask variable tokens (IPv4/IPv6, MAC, ASN, interfaces, numbers, hex, PIDs) into canonical placeholders (`<IP>`, `<MAC>`, `<INTF>`), then cluster logs via a fixed-depth parse tree using token-count and similarity thresholds.

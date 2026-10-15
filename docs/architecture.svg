@@ -47,7 +47,7 @@
   </g>
 
   <!-- Title -->
-  <text x="640" y="50" text-anchor="middle" font-size="26" font-weight="700" fill="#f0f6fc">netlog-ai v1.1.0 · Architecture</text>
+  <text x="640" y="50" text-anchor="middle" font-size="26" font-weight="700" fill="#f0f6fc">netlog-ai v1.1.1 · Architecture</text>
   <text x="640" y="74" text-anchor="middle" font-size="13" fill="#8b949e">Network logs in. Ranked actions out. — local-first, multi-vendor, sanitize-before-LLM</text>
 
   <!-- Column headers -->
@@ -415,6 +415,6 @@
 
   <!-- Legend dot pulse animation -->
   <g transform="translate(640,700)" text-anchor="middle">
-    <text font-size="10" fill="#6b7280">github.com/gesh75/netlog-ai · MIT · 584 tests passing</text>
+    <text font-size="10" fill="#6b7280">github.com/gesh75/netlog-ai · MIT · 596 tests passing</text>
   </g>
 </svg>

@@ -17,7 +17,7 @@
 
 [![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-596%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
-> 📓 Release **v1.1.0** — **Vendor-Safe Remediation & Two-Way ITSM Integration** on **v1.0.0 EVPN Causality & Telemetry Fusion** — details in [`CHANGELOG.md`](CHANGELOG.md).
+> 📓 Release **v1.1.1** — **SolarWinds Orion & Observability SaaS Connector** on **v1.1.0 Vendor-Safe Remediation & Two-Way ITSM** — details in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -32,8 +32,9 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
-## What's new in v1.1.0
+## What's new in v1.1.1
 
+- **SolarWinds Orion + Observability SaaS Connector** (`sources/solarwinds.py`): Pulls active alerts via SWIS SWQL (typically port 17778) with Bearer or Basic auth, and falls back to Observability SaaS `GET v1/alerts?status=active` on HTTP/URL errors only. Register as `--source solarwinds` or `NETLOG_SOURCE_*_TYPE=solarwinds`.
 - **Vendor-Safe Remediation & Rollback Guardrails** (`remediation.py`): Generates deterministic change plans with transactional auto-rollback timers (`commit confirmed` on Junos, `commit timer` on EOS, `checkpoint` on NX-OS, `revert timer` on IOS-XE, `vtysh` auto-revert daemon on FRR), destructive command blocklists, and post-check assertions.
 - **Two-Way ITSM Integration** (`itsm.py`): Bidirectional Jira Service Management & ServiceNow incident correlation with deterministic `NETLOG-<SHA256>` deduplication keys for zero-duplicate alerting across CLOS fabrics.
 - **Protocol-Aware EVPN Causality & Telemetry Fusion** (`evpn_causal.py`, `sources/telemetry.py`): 5-layer hierarchy bipartite causal engine with 2-hop topological coupling, suppressing downstream overlay symptoms when lower-layer physical/underlay faults occur.

@@ -4,7 +4,7 @@ All notable changes to **netlog-ai** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 loose semantic versioning.
 
-## [Unreleased]
+## [1.1.1] - 2026-10-15
 
 ### Added
 
