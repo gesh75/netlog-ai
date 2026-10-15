@@ -9,7 +9,26 @@ import sys
 from ai_log_analyzer.adapters import frr
 from ai_log_analyzer.adapters.file import parse_file, parse_lines
 from ai_log_analyzer.analyzer import analyze
+from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.sources import SourceError, registry
+from ai_log_analyzer.sources.manager import SourceManager
 from ai_log_analyzer.web.app import main as serve_main
+
+
+def _events_from_source(kind_or_id: str, limit: int) -> list[LogEvent]:
+    """Pull events for ``--source``. Matches a configured source id or kind."""
+    mgr = SourceManager()
+    mgr.load_from_env()
+    for sid in mgr.list_ids():
+        src = mgr.get(sid)
+        if sid == kind_or_id or getattr(src, "kind", None) == kind_or_id:
+            return mgr.fetch(sid, limit=limit)
+    if registry.is_registered(kind_or_id):
+        raise SourceError(
+            f"source type {kind_or_id!r} is registered but not configured "
+            f"(set NETLOG_SOURCE_<id>_TYPE={kind_or_id} and NETLOG_SOURCE_<id>_URL=...)"
+        )
+    raise SourceError(f"unknown source {kind_or_id!r}. Known: {registry.known()}")
 
 
 def cmd_serve(_args: argparse.Namespace) -> int:
@@ -29,12 +48,19 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             streams.append(parse_file(path))
     if args.stdin:
         streams.append(parse_lines(sys.stdin.readlines()))
+    source = getattr(args, "source", None)
+    if source:
+        try:
+            streams.append(_events_from_source(source, limit=getattr(args, "tail", 100) or 100))
+        except SourceError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
     event_iter = itertools.chain.from_iterable(streams)
     try:
         first = next(event_iter)
     except StopIteration:
-        print("error: no input — pass --frr, --file, or --stdin", file=sys.stderr)
+        print("error: no input — pass --frr, --file, --stdin, or --source", file=sys.stderr)
         return 2
 
     result = analyze(
@@ -259,6 +285,12 @@ def main() -> None:
         "--remediation",
         action="store_true",
         help="Generate rollback-guarded remediation plans for top action items",
+    )
+    ap.add_argument(
+        "--source",
+        default=None,
+        help="Pull events from a registered connector kind or source id "
+        "(e.g. solarwinds). Configure via NETLOG_SOURCE_<id>_* env vars.",
     )
     ap.set_defaults(func=cmd_analyze)
 
