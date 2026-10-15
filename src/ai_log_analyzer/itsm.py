@@ -127,7 +127,7 @@ class JiraITSMClient:
             "Authorization": self._auth_header,
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "netlog-ai/1.1.0",
+            "User-Agent": "netlog-ai/1.2.0",
         }
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -188,7 +188,7 @@ class ServiceNowITSMClient:
             "Authorization": self._auth_header,
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "netlog-ai/1.1.0",
+            "User-Agent": "netlog-ai/1.2.0",
         }
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:

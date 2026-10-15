@@ -996,11 +996,11 @@
   [aria-busy="true"] { cursor: progress; }
 
   /* ── Smooth source-type form transitions ─────────────────────────────── */
-  #frr-controls, #raw-controls, #file-controls {
+  #frr-controls, #raw-controls, #file-controls, #connector-controls {
     transition: opacity 0.18s ease, max-height 0.25s ease;
     overflow: hidden;
   }
-  #frr-controls.hidden, #raw-controls.hidden, #file-controls.hidden {
+  #frr-controls.hidden, #raw-controls.hidden, #file-controls.hidden, #connector-controls.hidden {
     max-height: 0; opacity: 0; margin: 0; padding: 0;
   }
 
@@ -1112,7 +1112,7 @@
       <span class="brand-title">AI Log Analyzer</span>
       <!-- Static fallback only — app.js overwrites this from /api/health,
            so the badge always tracks the installed package version -->
-      <span class="brand-version">v1.1.0</span>
+      <span class="brand-version">v1.2.0</span>
     </div>
   </div>
   <div class="header-spacer"></div>
@@ -1188,6 +1188,7 @@
             <option value="frr">FRR / clab Lab Containers</option>
             <option value="raw">Paste Raw Logs</option>
             <option value="file">File Path</option>
+            <option value="connector">Registered connector (Kibana / Splunk / Loki / LibreNMS / SolarWinds)</option>
           </select>
           <div id="frr-controls">
             <label>Containers</label>
@@ -1212,6 +1213,16 @@
                    autocomplete="off" spellcheck="false" autocapitalize="off">
             <label>Paste log lines</label>
             <textarea id="raw-text" placeholder="Mar  3 12:00:01 router1 rpd[1234]: bgp peer 10.0.0.1 down ..."></textarea>
+          </div>
+          <div id="connector-controls" class="hidden" aria-hidden="true" inert>
+            <label for="connector-source">Connector source</label>
+            <select id="connector-source" aria-label="Registered connector source"></select>
+            <div class="hint" style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45;">
+              Populated from <code style="background:var(--bg-2);padding:0 4px;border-radius:3px;">GET /api/sources</code>
+              (<code style="background:var(--bg-2);padding:0 4px;border-radius:3px;">solarwinds</code> and other registered kinds).
+              Configure via <code style="background:var(--bg-2);padding:0 4px;border-radius:3px;">NETLOG_SOURCE_*</code>
+              or <code style="background:var(--bg-2);padding:0 4px;border-radius:3px;">SOLARWINDS_URL</code>.
+            </div>
           </div>
           <div id="file-controls" class="hidden" aria-hidden="true" inert>
             <label for="file-path">Absolute path on server</label>
