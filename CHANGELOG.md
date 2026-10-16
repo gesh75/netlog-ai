@@ -6,6 +6,16 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-16
+
+### Added
+
+- **Deep network analytics** (`analytics.py`). RFC 2439 exponential flap dampening with periodic-vs-bursty jitter, Tarjan articulation-point blast radius, and config-to-log drift correlation. Stdlib only.
+- **ServiceNow table source** (`sources/servicenow.py`). Reads `em_alert`, `incident`, or `syslog`, normalizes display-value CI objects into syslog lines, and rejects loopback and metadata URLs before any request.
+- **Change correlation and incident sync** (`servicenow_sync.py`). Scores recent change requests against findings and creates or updates one incident per deterministic `netlog-ai-` correlation id. Dry-run is the default.
+- **CLI, API, and MCP surfaces.** `ai-log-analyzer analyze --deep-analytics`, `POST /api/analytics/deep`, `POST /api/itsm/servicenow/sync`, and MCP tools `netlog_deep_analytics`, `netlog_servicenow_correlate_changes`, `netlog_servicenow_sync_incident`.
+- **Topology overlay.** Cytoscape classes for critical and latent SPOFs, flap storms, and correlated change badges, plus a dry-run work-notes preview.
+
 ## [1.2.0] - 2026-10-15
 
 ### Added

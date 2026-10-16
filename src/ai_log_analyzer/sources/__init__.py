@@ -10,6 +10,7 @@ Built-in connectors (each registers itself on import):
   - loki                    Grafana Loki query_range API
   - syslog                  UDP/TCP syslog listener with ring buffer
   - librenms                LibreNMS REST API eventlog
+  - servicenow              ServiceNow Table API (em_alert, incident, syslog)
   - solarwinds              SolarWinds Orion SWIS (parameterized SWQL) + Observability SaaS logs/alerts
 
 Custom connectors register themselves with `registry.register(kind, factory)`.
@@ -22,6 +23,7 @@ from ai_log_analyzer.sources import (  # noqa: F401,E402
     kibana,
     librenms,
     loki,
+    servicenow,
     solarwinds,
     splunk,
     syslog,
@@ -33,6 +35,7 @@ from ai_log_analyzer.sources.base import (  # noqa: F401
     SourceError,
     SourceTimeoutError,
     registry,
+    validate_outbound_url,
 )
 
 __all__ = [
@@ -42,4 +45,7 @@ __all__ = [
     "SourceTimeoutError",
     "SourceAuthError",
     "registry",
+    "validate_outbound_url",
+    "servicenow",
+    "solarwinds",
 ]

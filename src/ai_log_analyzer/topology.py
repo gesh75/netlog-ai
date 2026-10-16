@@ -144,6 +144,10 @@ class Topology:
         }
 
 
+# Public alias used by the blast-radius analyzer.
+TopologyGraph = Topology
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-device analyzers
 # ─────────────────────────────────────────────────────────────────────────────

@@ -93,6 +93,28 @@ class IncidentEnrichmentPayload:
         }
 
 
+def build_servicenow_payload(
+    short_description: str,
+    work_notes: str,
+    *,
+    cmdb_ci: str = "",
+    correlation_id: str = "",
+    urgency: str = "2",
+    impact: str = "2",
+    caller_id: str = "netlog-ai",
+) -> dict[str, Any]:
+    """Base incident body shared by the ServiceNow sync client."""
+    return {
+        "caller_id": caller_id,
+        "cmdb_ci": cmdb_ci,
+        "correlation_id": correlation_id,
+        "short_description": short_description[:160],
+        "urgency": urgency,
+        "impact": impact,
+        "work_notes": work_notes,
+    }
+
+
 class JiraITSMClient:
     """Two-way Jira Service Management connector supporting search, create, and comment."""
 
@@ -127,7 +149,7 @@ class JiraITSMClient:
             "Authorization": self._auth_header,
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "netlog-ai/1.2.0",
+            "User-Agent": "netlog-ai/1.3.0",
         }
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -188,7 +210,7 @@ class ServiceNowITSMClient:
             "Authorization": self._auth_header,
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "netlog-ai/1.2.0",
+            "User-Agent": "netlog-ai/1.3.0",
         }
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:

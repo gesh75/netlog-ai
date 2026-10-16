@@ -28,6 +28,19 @@ log = logging.getLogger(__name__)
 _ENV_PREFIX = "NETLOG_SOURCE_"
 
 
+def _register_builtin_sources() -> None:
+    """Import built-in connectors so they self-register on the shared registry."""
+    from ai_log_analyzer.sources import (  # noqa: F401
+        kibana,
+        librenms,
+        loki,
+        servicenow,
+        solarwinds,
+        splunk,
+        syslog,
+    )
+
+
 class SourceManager:
     """Holds live `LogSource` instances keyed by source id."""
 
@@ -93,6 +106,7 @@ class SourceManager:
             ]
 
     def known_kinds(self) -> list[str]:
+        _register_builtin_sources()
         return registry.known()
 
     # ── ops ──────────────────────────────────────────────────────────────────

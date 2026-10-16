@@ -46,7 +46,9 @@ from ai_log_analyzer.adapters.file import parse_lines
 from ai_log_analyzer.analyzer import analyze, analyze_site, optimize_config
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.correlate import correlate_from_manager
+from ai_log_analyzer.deep_report import load_site_topology, run_deep_report
 from ai_log_analyzer.device_triage import triage_from_manager
+from ai_log_analyzer.servicenow_sync import ServiceNowClient
 from ai_log_analyzer.sources import SourceConfig, SourceError, registry
 from ai_log_analyzer.sources.manager import manager as source_manager
 
@@ -190,6 +192,17 @@ def _load_site_devices(safe_site_id: str) -> tuple[list[dict] | None, dict | Non
             "config_text": fpath.read_text(encoding="utf-8", errors="replace"),
         })
     return devices, manifest
+
+
+def _topology_from_body(body: dict) -> tuple[object | None, str | None]:
+    """Load a site topology when the request names one. Missing bundles are skipped."""
+    site = str(body.get("site") or "").strip()
+    if not site:
+        return None, None
+    try:
+        return load_site_topology(SITES_DIR, site), None
+    except ValueError as exc:
+        return None, str(exc)
 
 
 def _parse_frr_command(raw: str) -> list[str]:
@@ -1324,6 +1337,60 @@ def create_app() -> Flask:
                 return jsonify({"ok": True, "dry_run": False, "system": "servicenow", "result": res})
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 502
+
+    @app.route("/api/analytics/deep", methods=["POST"])
+    @require_api_token
+    def api_analytics_deep():
+        """Flap physics, blast radius, change correlation, and config drift."""
+        body = request.get_json(silent=True) or {}
+        topology, error = _topology_from_body(body)
+        if error:
+            return jsonify({"error": error}), 400
+        bundle = run_deep_report(
+            log_text=str(body.get("log_text") or body.get("text") or ""),
+            topology=topology,
+            changes=body.get("changes") or [],
+            config_before=str(body.get("config_before") or ""),
+            config_after=str(body.get("config_after") or ""),
+            incident_timestamp=body.get("incident_timestamp") or None,
+        )
+        return jsonify(bundle.payload)
+
+    @app.route("/api/itsm/servicenow/sync", methods=["POST"])
+    @require_api_token
+    def api_servicenow_sync():
+        """Preview or upsert one ServiceNow incident. Defaults to dry-run."""
+        body = request.get_json(silent=True) or {}
+        instance = str(body.get("instance_url") or "").strip()
+        dry_run = _parse_bool(body.get("dry_run", True), default=True) or not instance
+        topology, error = _topology_from_body(body)
+        if error:
+            return jsonify({"error": error}), 400
+        bundle = run_deep_report(
+            log_text=str(body.get("log_text") or body.get("text") or ""),
+            topology=topology,
+            changes=body.get("changes") or [],
+            config_before=str(body.get("config_before") or ""),
+            config_after=str(body.get("config_after") or ""),
+        )
+        try:
+            client = ServiceNowClient(
+                instance_url=instance,
+                username=str(body.get("username") or ""),
+                password=str(body.get("password") or ""),
+                bearer_token=str(body.get("bearer_token") or ""),
+                allow_private=_parse_bool(body.get("allow_private"), default=False),
+            )
+            result = client.sync_incident(
+                bundle.summary,
+                blast_radius=bundle.blast,
+                change_report=bundle.changes,
+                flap_report=bundle.flap,
+                dry_run=dry_run,
+            )
+        except (SourceError, ValueError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify(result.to_dict())
 
     # Auto-load env-configured sources on app boot (idempotent).
     try:

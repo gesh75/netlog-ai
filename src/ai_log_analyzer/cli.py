@@ -4,12 +4,16 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import os
 import sys
+from pathlib import Path
 
 from ai_log_analyzer.adapters import frr
 from ai_log_analyzer.adapters.file import parse_file, parse_lines
 from ai_log_analyzer.analyzer import analyze
 from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.deep_report import run_deep_report
+from ai_log_analyzer.servicenow_sync import ServiceNowClient
 from ai_log_analyzer.sources import SourceError, registry
 from ai_log_analyzer.sources.manager import SourceManager
 from ai_log_analyzer.web.app import main as serve_main
@@ -64,13 +68,30 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         print("error: no input — pass --frr, --file, --stdin, or --source", file=sys.stderr)
         return 2
 
+    want_deep = bool(
+        getattr(args, "deep_analytics", False)
+        or getattr(args, "snow_changes_file", None)
+        or getattr(args, "snow_sync", False)
+        or getattr(args, "snow_dry_run", False)
+    )
+    if want_deep:
+        events = [first, *event_iter]
+        source = iter(events)
+    else:
+        events = None
+        source = itertools.chain([first], event_iter)
     result = analyze(
-        itertools.chain([first], event_iter),
+        source,
         use_llm=not args.no_llm,
         dedup=getattr(args, "dedup", False),
         evpn_causal=getattr(args, "evpn_causal", False) or None,
     )
     res_dict = result.to_dict()
+    if want_deep and events is not None:
+        attached = _attach_deep_analytics(args, events)
+        if attached is None:
+            return 2
+        res_dict.update(attached)
     if getattr(args, "remediation", False):
         from ai_log_analyzer.remediation import RemediationGenerator, VendorOS
 
@@ -91,6 +112,46 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         res_dict["remediation_plans"] = plans
     print(json.dumps(res_dict, indent=2))
     return 0
+
+
+def _attach_deep_analytics(args: argparse.Namespace, events: list) -> dict | None:
+    """Return JSON keys for deep analytics and optional ServiceNow sync."""
+    changes: list = []
+    path = getattr(args, "snow_changes_file", "") or ""
+    if path:
+        try:
+            loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"error: snow changes file: {exc}", file=sys.stderr)
+            return None
+        if not isinstance(loaded, list):
+            print("error: snow changes file must be a JSON array", file=sys.stderr)
+            return None
+        changes = loaded
+    bundle = run_deep_report(events=events, changes=changes)
+    out: dict = {}
+    if getattr(args, "deep_analytics", False) or changes:
+        out["deep_analytics"] = bundle.payload
+    if getattr(args, "snow_sync", False) or getattr(args, "snow_dry_run", False):
+        instance = os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL") or ""
+        dry_run = bool(getattr(args, "snow_dry_run", False) or not instance)
+        client = ServiceNowClient(
+            instance_url=instance,
+            username=os.environ.get("SERVICENOW_USER") or os.environ.get("SNOW_USER") or "",
+            password=os.environ.get("SERVICENOW_PASSWORD") or os.environ.get("SNOW_PASSWORD") or "",
+            bearer_token=os.environ.get("SERVICENOW_TOKEN") or "",
+        )
+        synced = client.sync_incident(
+            bundle.summary,
+            blast_radius=bundle.blast,
+            change_report=bundle.changes,
+            flap_report=bundle.flap,
+            dry_run=dry_run,
+        )
+        out["servicenow_sync"] = synced.to_dict()
+        if "deep_analytics" not in out:
+            out["deep_analytics"] = bundle.payload
+    return out
 
 
 def cmd_containers(_args: argparse.Namespace) -> int:
@@ -298,6 +359,26 @@ def main() -> None:
             "SOLARWINDS_URL, SOLARWINDS_USERNAME, SOLARWINDS_PASSWORD, "
             "SOLARWINDS_TOKEN, SOLARWINDS_MODE, SOLARWINDS_VERIFY_SSL."
         ),
+    )
+    ap.add_argument(
+        "--deep-analytics",
+        action="store_true",
+        help="Attach flap physics and topology blast radius under deep_analytics",
+    )
+    ap.add_argument(
+        "--snow-changes-file",
+        default="",
+        help="Offline JSON file of ServiceNow change records to correlate",
+    )
+    ap.add_argument(
+        "--snow-sync",
+        action="store_true",
+        help="Create or update a ServiceNow incident (uses SERVICENOW_URL)",
+    )
+    ap.add_argument(
+        "--snow-dry-run",
+        action="store_true",
+        help="Preview the ServiceNow incident payload without a network call",
     )
     ap.set_defaults(func=cmd_analyze)
 
