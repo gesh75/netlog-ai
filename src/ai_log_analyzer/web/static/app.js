@@ -2254,6 +2254,38 @@ async function _renderCytoscape() {
         style: { "border-color": "#ff7b72", "border-width": 3 },
       },
       {
+        selector: "node.spof-critical",
+        style: {
+          "border-width": 5,
+          "border-color": "#f59e0b",
+          "border-style": "double",
+        },
+      },
+      {
+        selector: "node.spof-critical.spof-pulse",
+        style: { "border-color": "#f85149", "border-width": 7 },
+      },
+      {
+        selector: "node.spof-latent",
+        style: {
+          "border-width": 3,
+          "border-color": "#eab308",
+          "border-style": "dashed",
+        },
+      },
+      {
+        selector: "node.has-active-chg",
+        style: { "label": "data(overlayLabel)", "border-color": "#38bdf8" },
+      },
+      {
+        selector: "node.flap-dampened",
+        style: { "background-color": "#7c2d12", "border-color": "#fb923c" },
+      },
+      {
+        selector: "edge.flap-dampened",
+        style: { "line-color": "#fb923c", "line-style": "dashed", "width": 3 },
+      },
+      {
         selector: "node.pop-group",
         style: {
           "background-opacity": 0.10,
@@ -3118,6 +3150,186 @@ async function addCustomRule() {
   }
 }
 
+let loadedSnowChanges = [];
+let _spofPulseTimer = null;
+
+function loadDemoSnowChanges() {
+  const cy = _topoState && _topoState.cy;
+  const first = cy && cy.nodes("[!isPop]").length ? cy.nodes("[!isPop]")[0].id() : "leaf01";
+  const started = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  loadedSnowChanges = [{
+    number: "CHG0030001",
+    short_description: "BGP neighbor 192.0.2.10 MTU and interface change",
+    cmdb_ci: first,
+    state: "Implement",
+    start_date: started,
+    end_date: "",
+    risk: "High",
+    assigned_to: "netops",
+    close_notes: "",
+  }];
+  const summary = $("snow-summary");
+  if (summary) summary.textContent = `Loaded demo CHG0030001 on ${first}.`;
+  setStatus("Demo ServiceNow change loaded.");
+}
+
+function clearDeepAnalyticsOverlay() {
+  if (_spofPulseTimer) {
+    clearInterval(_spofPulseTimer);
+    _spofPulseTimer = null;
+  }
+  const cy = _topoState && _topoState.cy;
+  if (!cy) return;
+  cy.nodes().forEach((node) => {
+    node.removeClass("spof-critical spof-latent has-active-chg flap-dampened spof-pulse");
+    const base = node.data("baseLabel");
+    if (base) {
+      node.data("label", base);
+      node.data("overlayLabel", base);
+    }
+  });
+  cy.edges().removeClass("flap-dampened");
+}
+
+async function runDeepAnalyticsOverlay() {
+  const logText = ($("raw-text") && $("raw-text").value) || "";
+  const site = ($("site-picker") && $("site-picker").value) || "";
+  let payload = null;
+  try {
+    const res = await fetch("/api/analytics/deep", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        log_text: logText,
+        site,
+        changes: loadedSnowChanges,
+      }),
+    });
+    payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || "deep analytics failed");
+  } catch (err) {
+    setStatus(err.message || "Deep analytics failed.");
+    return;
+  }
+  _paintDeepCards(payload);
+  _paintDeepGraph(payload.device_overlays || {});
+  const panel = $("deep-analytics-panel");
+  if (panel && panel.tagName === "DETAILS") panel.open = true;
+  setStatus("Deep AIOps overlay updated.");
+}
+
+function _paintDeepCards(payload) {
+  const blast = payload.blast_radius || {};
+  const flap = payload.flap_analysis || {};
+  const changes = payload.change_correlation || {};
+  const score = $("blast-score");
+  if (score) score.textContent = String(blast.blast_radius_score ?? "—");
+  const spofs = $("blast-spofs");
+  if (spofs) {
+    const cuts = (blast.articulation_points || []).join(", ") || "none";
+    const critical = (blast.critical_spofs || []).join(", ") || "none";
+    spofs.textContent = `Cut vertices: ${cuts}. Critical SPOF: ${critical}.`;
+  }
+  const loss = $("blast-redundancy");
+  if (loss) {
+    const nodes = blast.nodes || [];
+    const worst = nodes.reduce((best, node) => {
+      return !best || node.redundancy_loss_pct > best.redundancy_loss_pct ? node : best;
+    }, null);
+    loss.textContent = worst
+      ? `Redundancy loss: ${worst.device} ${worst.redundancy_loss_pct}%`
+      : "Redundancy loss: —";
+  }
+  const flapSummary = $("flap-summary");
+  if (flapSummary) {
+    const top = (flap.entities || [])[0];
+    const pattern = top ? top.pattern : "INSUFFICIENT_DATA";
+    const peak = top ? top.peak_penalty : 0;
+    flapSummary.textContent =
+      `Dampened storms: ${flap.dampened_count || 0}. Peak penalty: ${peak}. Pattern: ${pattern}.`;
+  }
+  const cli = $("flap-cli");
+  if (cli) {
+    const hints = flap.recommended_dampening_cli || {};
+    const lines = Object.entries(hints).flatMap(([vendor, commands]) => [
+      `# ${vendor}`,
+      ...(commands || []),
+    ]);
+    cli.textContent = lines.join("\n") || "No dampening CLI.";
+  }
+  const snow = $("snow-summary");
+  if (snow) {
+    const top = changes.top_suspect_change;
+    const confidence = changes.overall_change_induced_probability || 0;
+    snow.textContent = top
+      ? `Correlated ${top} at ${Math.round(confidence * 100)}% confidence.`
+      : "No correlated ServiceNow change.";
+  }
+}
+
+function _paintDeepGraph(overlays) {
+  const cy = _topoState && _topoState.cy;
+  if (!cy) return;
+  clearDeepAnalyticsOverlay();
+  cy.nodes().forEach((node) => {
+    if (node.data("isPop")) return;
+    const key = Object.keys(overlays).find(
+      (name) => name.toLowerCase() === String(node.id()).toLowerCase(),
+    );
+    if (!key) return;
+    const info = overlays[key];
+    const base = node.data("baseLabel") || node.data("label") || node.id();
+    node.data("baseLabel", base);
+    let label = base;
+    if (info.risk_tier === "CRITICAL_SPOF") node.addClass("spof-critical");
+    else if (info.is_spof || info.risk_tier === "LATENT_SPOF") node.addClass("spof-latent");
+    if ((info.dampened_flaps || 0) > 0) {
+      node.addClass("flap-dampened");
+      node.connectedEdges().addClass("flap-dampened");
+    }
+    if (info.active_change && (info.change_confidence || 0) >= 0.5) {
+      node.addClass("has-active-chg");
+      label = `${base}\n[CHG ${info.active_change}]`;
+    }
+    node.data("overlayLabel", label);
+    node.data("label", label);
+  });
+  if (_spofPulseTimer) clearInterval(_spofPulseTimer);
+  _spofPulseTimer = setInterval(() => {
+    cy.nodes(".spof-critical").toggleClass("spof-pulse");
+  }, 800);
+}
+
+async function previewServiceNowSync() {
+  const logText = ($("raw-text") && $("raw-text").value) || "";
+  const site = ($("site-picker") && $("site-picker").value) || "";
+  let payload = null;
+  try {
+    const res = await fetch("/api/itsm/servicenow/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        log_text: logText,
+        site,
+        changes: loadedSnowChanges,
+        dry_run: true,
+      }),
+    });
+    payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || "ServiceNow preview failed");
+  } catch (err) {
+    setStatus(err.message || "ServiceNow preview failed.");
+    return;
+  }
+  const notes = (payload.payload && payload.payload.work_notes) || "";
+  const idNode = $("snow-preview-id");
+  if (idNode) idNode.textContent = `correlation_id ${payload.correlation_id || ""}`;
+  const noteNode = $("snow-preview-notes");
+  if (noteNode) noteNode.textContent = notes;
+  const dialog = $("snow-preview-dialog");
+  if (dialog && dialog.showModal) dialog.showModal();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   // Sidebar tabs
   document.querySelectorAll(".side-tab").forEach((tab) => {
@@ -3155,6 +3367,26 @@ document.addEventListener("DOMContentLoaded", () => {
     const id = $("site-picker").value; if (!id) { setStatus("Pick a site first."); return; }
     renderTopology(id);
   });
+  const _deepBtn = $("btn-deep-overlay");
+  if (_deepBtn) {
+    _deepBtn.addEventListener("click", () => {
+      const pressed = _deepBtn.getAttribute("aria-pressed") === "true";
+      _deepBtn.setAttribute("aria-pressed", pressed ? "false" : "true");
+      if (pressed) clearDeepAnalyticsOverlay();
+      else runDeepAnalyticsOverlay();
+    });
+  }
+  const _demoChg = $("btn-load-demo-chg");
+  if (_demoChg) _demoChg.addEventListener("click", loadDemoSnowChanges);
+  const _snowPreview = $("btn-snow-preview");
+  if (_snowPreview) _snowPreview.addEventListener("click", previewServiceNowSync);
+  const _snowClose = $("btn-snow-preview-close");
+  if (_snowClose) {
+    _snowClose.addEventListener("click", () => {
+      const dialog = $("snow-preview-dialog");
+      if (dialog && dialog.close) dialog.close();
+    });
+  }
   $("comply-btn").addEventListener("click", runCompliance);
   $("copilot-btn").addEventListener("click", askCopilot);
   $("pm-btn").addEventListener("click", postMortem);

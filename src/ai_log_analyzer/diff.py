@@ -7,9 +7,42 @@ from __future__ import annotations
 
 import difflib
 import re
+from dataclasses import dataclass, field
 
 from ai_log_analyzer import llm
 from ai_log_analyzer.sanitize import sanitize
+
+
+@dataclass
+class ConfigDiff:
+    """Before/after config lines used by the drift correlator.
+
+    ``added`` and ``removed`` win when set. Otherwise changed lines are derived
+    from ``before`` and ``after`` with the standard library differ.
+    """
+
+    before: str = ""
+    after: str = ""
+    hostname: str = ""
+    added: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+
+    def changed_lines(self) -> list[str]:
+        if self.added or self.removed:
+            return [*self.added, *self.removed]
+        lines: list[str] = []
+        for line in difflib.ndiff(self.before.splitlines(), self.after.splitlines()):
+            if line.startswith("+ ") or line.startswith("- "):
+                lines.append(line[2:])
+        return lines
+
+    def to_dict(self) -> dict:
+        return {
+            "hostname": self.hostname,
+            "added": list(self.added),
+            "removed": list(self.removed),
+            "changed_lines": self.changed_lines(),
+        }
 
 
 def text_diff(before: str, after: str, context: int = 3) -> str:

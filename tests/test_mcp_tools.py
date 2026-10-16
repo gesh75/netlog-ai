@@ -35,6 +35,9 @@ EXPECTED_TOOLS = {
     "fetch_solarwinds_logs",
     "fetch_solarwinds_alerts",
     "push_solarwinds_alert_note",
+    "netlog_deep_analytics",
+    "netlog_servicenow_correlate_changes",
+    "netlog_servicenow_sync_incident",
 }
 
 

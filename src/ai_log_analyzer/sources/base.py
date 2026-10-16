@@ -11,6 +11,8 @@ Design goals:
 """
 from __future__ import annotations
 
+import ipaddress
+import urllib.parse
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
@@ -31,6 +33,44 @@ class SourceTimeoutError(SourceError):
 
 class SourceAuthError(SourceError):
     """All configured auth methods failed for this source."""
+
+
+_METADATA_HOSTS = frozenset({
+    "metadata.google.internal",
+    "metadata.google.com",
+    "metadata",
+})
+
+
+def validate_outbound_url(url: str, *, allow_private: bool = False) -> str:
+    """Reject non-HTTP(S) URLs and SSRF targets before any outbound request.
+
+    Loopback, unspecified, link-local (including the cloud metadata address),
+    and metadata hostnames are always blocked. Other private addresses are
+    blocked unless ``allow_private`` is set.
+    """
+    if not isinstance(url, str) or not url.strip():
+        raise SourceError("outbound URL is required")
+    parsed = urllib.parse.urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise SourceError(f"outbound URL scheme {parsed.scheme!r} is not allowed")
+    host = parsed.hostname
+    if not host:
+        raise SourceError("outbound URL is missing a host")
+    lowered = host.lower().rstrip(".")
+    if lowered in _METADATA_HOSTS or lowered.endswith(".metadata.google.internal"):
+        raise SourceError("outbound URL targets a blocked metadata host")
+    if lowered == "localhost":
+        raise SourceError("outbound URL targets localhost")
+    try:
+        address = ipaddress.ip_address(lowered)
+    except ValueError:
+        return url.strip()
+    if address.is_loopback or address.is_unspecified or address.is_multicast or address.is_link_local:
+        raise SourceError("outbound URL targets a blocked address")
+    if not allow_private and (address.is_private or address.is_reserved):
+        raise SourceError("outbound URL targets a private address")
+    return url.strip()
 
 
 # ──────────────────────────────────────────────────────────────────────────────

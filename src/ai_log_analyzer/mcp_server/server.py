@@ -22,6 +22,9 @@ Tools exposed:
   - fetch_solarwinds_logs : SolarWinds syslog / OLM / SaaS logs (read-only)
   - fetch_solarwinds_alerts : SolarWinds active alerts (read-only)
   - push_solarwinds_alert_note : explicit Orion.AlertActive/AppendNote writeback
+  - netlog_deep_analytics : flap physics and topology blast radius
+  - netlog_servicenow_correlate_changes : score change records against findings
+  - netlog_servicenow_sync_incident : dry-run or upsert one ServiceNow incident
 
 The MCP SDK is an optional dependency — install with
 `pip install netlog-ai[mcp]` or `pip install 'mcp>=2,<3'`.
@@ -29,6 +32,7 @@ Requires MCP SDK 2.x (MCPServer). See issue #17.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -37,6 +41,8 @@ from pathlib import Path
 from typing import Any
 
 from ai_log_analyzer.analyzer import analyze
+from ai_log_analyzer.deep_report import load_site_topology, run_deep_report
+from ai_log_analyzer.servicenow_sync import ServiceNowClient
 from ai_log_analyzer.sources import SourceConfig, SourceError, registry
 from ai_log_analyzer.sources.manager import manager as source_manager
 from ai_log_analyzer.sources.solarwinds import SolarWindsConnector
@@ -735,6 +741,64 @@ def _build_server():
         except SourceError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "alert_object_id": int(alert_object_id), "result": result}
+
+    @mcp.tool()
+    def netlog_deep_analytics(log_text: str, site_name: str = "") -> dict[str, Any]:
+        """Flap physics, dampening status, and topology blast radius for a log snippet."""
+        topology = None
+        if site_name:
+            try:
+                topology = load_site_topology(_SITES_DIR, site_name)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+        bundle = run_deep_report(log_text=log_text, topology=topology)
+        return {"ok": True, **bundle.payload}
+
+    @mcp.tool()
+    def netlog_servicenow_correlate_changes(log_text: str, changes_json: str) -> dict[str, Any]:
+        """Correlate log anomalies with a JSON array of ServiceNow change records."""
+        try:
+            changes = json.loads(changes_json or "[]")
+        except json.JSONDecodeError as exc:
+            return {"ok": False, "error": f"changes_json is not JSON: {exc}"}
+        if not isinstance(changes, list):
+            return {"ok": False, "error": "changes_json must be a JSON array"}
+        bundle = run_deep_report(log_text=log_text, changes=changes)
+        return {"ok": True, "change_correlation": bundle.payload["change_correlation"]}
+
+    @mcp.tool()
+    def netlog_servicenow_sync_incident(
+        log_text: str,
+        instance_url: str = "",
+        dry_run: bool = True,
+        changes_json: str = "[]",
+    ) -> dict[str, Any]:
+        """Preview or upsert an idempotent ServiceNow incident. Defaults to dry-run."""
+        try:
+            changes = json.loads(changes_json or "[]")
+        except json.JSONDecodeError as exc:
+            return {"ok": False, "error": f"changes_json is not JSON: {exc}"}
+        if not isinstance(changes, list):
+            return {"ok": False, "error": "changes_json must be a JSON array"}
+        live = bool(instance_url) and not dry_run
+        bundle = run_deep_report(log_text=log_text, changes=changes)
+        try:
+            client = ServiceNowClient(
+                instance_url=instance_url,
+                username=os.environ.get("SERVICENOW_USER", ""),
+                password=os.environ.get("SERVICENOW_PASSWORD", ""),
+                bearer_token=os.environ.get("SERVICENOW_TOKEN", ""),
+            )
+            result = client.sync_incident(
+                bundle.summary,
+                blast_radius=bundle.blast,
+                change_report=bundle.changes,
+                flap_report=bundle.flap,
+                dry_run=not live,
+            )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, **result.to_dict()}
 
     return mcp
 

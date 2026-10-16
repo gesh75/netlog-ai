@@ -1089,6 +1089,57 @@
   /* The "+" between keys — AA-compliant muted color, not opacity-faded.
    * opacity: 0.5 on top of --muted-2 dropped effective contrast under 3:1. */
   .kbd-plus { color: var(--muted-2); font-weight: 700; }
+
+  .deep-analytics-panel {
+    margin: 10px 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 8px 10px;
+  }
+  .deep-analytics-panel summary {
+    cursor: pointer;
+    font-weight: 650;
+    color: var(--fg);
+  }
+  .deep-card-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+  .deep-card {
+    flex: 1 1 220px;
+    min-width: 200px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    color: var(--fg-dim);
+  }
+  .deep-card h3 { margin: 0 0 6px; font-size: 13px; color: var(--fg); }
+  .deep-score {
+    display: inline-block;
+    min-width: 2.5em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--warn);
+    color: #0d1117;
+    font-weight: 700;
+  }
+  .deep-card pre {
+    white-space: pre-wrap;
+    background: var(--bg-2);
+    color: var(--fg-dim);
+    border-radius: 6px;
+    padding: 8px;
+    max-height: 160px;
+    overflow: auto;
+  }
+  #snow-preview-dialog {
+    background: var(--panel);
+    color: var(--fg);
+    border: 1px solid var(--border-hi);
+    border-radius: 10px;
+    max-width: 720px;
+    width: calc(100% - 32px);
+  }
+  #snow-preview-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 </style>
 </head>
 <body>
@@ -1112,7 +1163,7 @@
       <span class="brand-title">AI Log Analyzer</span>
       <!-- Static fallback only — app.js overwrites this from /api/health,
            so the badge always tracks the installed package version -->
-      <span class="brand-version">v1.2.0</span>
+      <span class="brand-version">v1.3.0</span>
     </div>
   </div>
   <div class="header-spacer"></div>
@@ -1674,6 +1725,7 @@
                 title="VXLAN overlay: VTEPs, L2/L3 VNIs">VXLAN</button>
         <span class="topo-legend-sep">·</span>
         <button id="topo-reset-layout" class="tiny secondary" aria-label="Reset layout — clear pinned positions for this site/layer">↺ Reset Layout</button>
+        <button id="btn-deep-overlay" class="btn btn-secondary secondary tiny" type="button" aria-pressed="false" title="Highlight SPOF articulation nodes, flap storms, and active ServiceNow changes">Deep AIOps Overlay (SPOF &amp; CHG)</button>
         <label class="topo-chip-toggle" title="Group devices by POP/region when manifest provides one">
           <input type="checkbox" id="topo-group-pop" checked> Group by POP
         </label>
@@ -1696,7 +1748,37 @@
         <span class="topo-legend-item" role="listitem"><span class="topo-swatch" style="background:#d29922;"></span>Medium finding</span>
       </div>
       <div id="topo-empty-banner" style="display:none;margin:6px 0 8px;padding:8px 12px;background:rgba(210,153,34,0.08);border:1px solid #d29922;border-radius:6px;color:#d29922;font-size:13px;"></div>
+      <details id="deep-analytics-panel" class="deep-analytics-panel">
+        <summary>Deep Analytics &amp; ServiceNow Change Correlation</summary>
+        <div class="deep-card-row">
+          <section id="blast-radius-card" class="deep-card" aria-live="polite">
+            <h3>Blast Radius &amp; SPOF Score</h3>
+            <p>Score <span id="blast-score" class="deep-score">—</span></p>
+            <p id="blast-spofs">Cut vertices: —</p>
+            <p id="blast-redundancy">Redundancy loss: —</p>
+          </section>
+          <section id="flap-physics-card" class="deep-card" aria-live="polite">
+            <h3>RFC 2439 Flap Physics</h3>
+            <p id="flap-summary">Dampened storms: —</p>
+            <pre id="flap-cli" tabindex="0">Vendor dampening CLI appears here.</pre>
+          </section>
+          <section id="snow-correlation-card" class="deep-card" aria-live="polite">
+            <h3>ServiceNow Change &amp; Incident Sync</h3>
+            <p id="snow-summary">No change records loaded.</p>
+            <div class="btn-row">
+              <button id="btn-load-demo-chg" class="secondary tiny" type="button">Load Demo CHG</button>
+              <button id="btn-snow-preview" class="secondary tiny" type="button">Preview ServiceNow Incident Work Notes (Dry-Run)</button>
+            </div>
+          </section>
+        </div>
+      </details>
       <div id="topo-cy" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;height:760px;"></div>
+      <dialog id="snow-preview-dialog" aria-labelledby="snow-preview-title">
+        <h3 id="snow-preview-title">ServiceNow incident preview</h3>
+        <p id="snow-preview-id"></p>
+        <pre id="snow-preview-notes" tabindex="0"></pre>
+        <button id="btn-snow-preview-close" class="secondary" type="button">Close</button>
+      </dialog>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
         <button id="export-mermaid" class="tiny secondary" aria-label="Copy Mermaid diagram to clipboard">📋 Copy Mermaid</button>
         <button id="export-dot"     class="tiny secondary" aria-label="Copy Graphviz DOT diagram to clipboard">📋 Copy Graphviz DOT</button>
