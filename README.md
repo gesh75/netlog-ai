@@ -32,6 +32,14 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
+## What's new in v1.3.0
+
+- **Deep network analytics** (`analytics.py`): RFC 2439 exponential flap dampening (periodic timer vs bursty physical noise), Tarjan articulation-point blast radius, and config-to-log drift correlation. Stdlib only.
+- **ServiceNow table source** (`sources/servicenow.py`) plus change-to-finding correlation and idempotent incident sync (`servicenow_sync.py`). Dry-run is the default.
+- **21 MCP tools**, including `netlog_deep_analytics`, `netlog_servicenow_correlate_changes`, and `netlog_servicenow_sync_incident`.
+- **Topology overlay.** Cytoscape classes for critical and latent SPOFs, flap storms, and correlated change badges.
+- Full test suite: **632 passing tests**. Docs: <https://gesh75.github.io/netlog-ai/>
+
 ## What's new in v1.2.0
 
 - **SolarWinds Orion + Observability SaaS connector** (`sources/solarwinds.py`): Parameterized SWQL on SWIS v3 (alert join, OLM syslog with `Orion.SysLog` fallback, `Orion.Events`), SaaS `GET /v1/logs` and `/v1/alerts` with cursor/page pagination, `build_site_manifest` / `fetch_interface_telemetry`, and explicit `AppendNote` / `Acknowledge` writeback. Configure with `SOLARWINDS_*` or `NETLOG_SOURCE_*`.
@@ -53,6 +61,7 @@ pasted logs — it pulls from any common log source (full guide:
 | `syslog`    | UDP/TCP listener       | Zero-config — point any device at port 5514 |
 | `librenms`  | LibreNMS REST          | `NETLOG_SOURCE_librenms_URL=… NETLOG_SOURCE_librenms_API_TOKEN=…` |
 | `solarwinds`| SolarWinds Orion / Observability SaaS | `NETLOG_SOURCE_orion_TYPE=solarwinds NETLOG_SOURCE_orion_URL=https://orion.example:17778` |
+| `servicenow`| ServiceNow Table API (`em_alert`, `incident`, `syslog`) | `NETLOG_SOURCE_snow_TYPE=servicenow NETLOG_SOURCE_snow_URL=https://example.service-now.com` |
 | `netbox`    | NetBox v4.x REST / DCIM| `NETLOG_SOURCE_netbox_URL=… NETLOG_SOURCE_netbox_API_TOKEN=…` |
 | `telemetry` | Prometheus REST        | `NETLOG_SOURCE_telemetry_PROMETHEUS_URL=…` |
 
@@ -63,19 +72,22 @@ pip install 'netlog-ai[mcp]'
 netlog-ai mcp        # stdio transport — wire into Claude Code, Cursor, Continue
 ```
 
-18 agent tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
+21 agent tools exposed: `list_sources`, `add_source`, `fetch_logs`, `search_logs`,
 `analyze_logs`, `get_top_offenders`, `correlate_sources`, `analyze_device`,
 `list_sites`, `analyze_site`, `analyze_evpn_causality`, `generate_remediation_plan`,
 `enrich_itsm_incident`, `fetch_solarwinds_logs`, `fetch_solarwinds_alerts`,
-`push_solarwinds_alert_note`, plus healthcheck + connector inventory. See
+`push_solarwinds_alert_note`, `netlog_deep_analytics`,
+`netlog_servicenow_correlate_changes`, `netlog_servicenow_sync_incident`,
+plus healthcheck + connector inventory. See
 [docs/CONNECTORS.md](docs/CONNECTORS.md) for the full reference.
 
 ## Features
 
 | | |
 |---|---|
-| 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, SolarWinds Orion/SaaS, NetBox v4.x, Prometheus telemetry, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
-| 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly via 18 agent tools |
+| 🔌 **Pluggable sources** | Kibana, Splunk, Loki, LibreNMS, SolarWinds Orion/SaaS, ServiceNow, NetBox v4.x, Prometheus telemetry, syslog UDP/TCP — one Protocol, one config dict, hot-pluggable |
+| 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly via 21 agent tools |
+| 📉 **Deep analytics** | RFC 2439 flap dampening, Tarjan SPOF blast radius, and config-to-log drift, drawn on the topology map |
 | 🌐 **EVPN Causal Engine** | 5-layer bipartite graph (L1 Physical → L2 Link → L3 Underlay → L4 Overlay → L5 Services) with 2-hop topological symptom suppression and root-cause isolation |
 | 🔒 **Safe Remediation** | Vendor-safe change plan generation (`remediation.py`) with auto-revert timers (`commit confirmed`, `commit timer`, `checkpoint`, `revert timer`), destructive command blocklist, and post-check assertions |
 | 🎫 **Two-Way ITSM** | Bi-directional Jira Service Management and ServiceNow incident enrichment with deterministic `NETLOG-<SHA256>` deduplication keys |

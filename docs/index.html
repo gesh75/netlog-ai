@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>netlog-ai — local, sanitize-first AI network log analyzer</title>
-<meta name="description" content="netlog-ai: network logs in, ranked actions out. A local-first, multi-vendor network log analyzer that classifies events, ranks them, sanitizes before any LLM call, and emits 5-phase root-cause playbooks with copy-pastable per-vendor CLI fixes.">
+<meta name="description" content="netlog-ai v1.3.0: network logs in, ranked actions out. Local-first multi-vendor analysis with RFC 2439 flap dampening, Tarjan SPOF blast radius, ServiceNow change sync, and sanitize-before-LLM root-cause playbooks.">
 <meta name="color-scheme" content="dark">
 <style>
   :root {
@@ -351,16 +351,16 @@
   <section class="hero" id="hero" aria-label="Introduction">
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <span class="tagchip"><span class="spark" aria-hidden="true"></span>v1.2.0 · SolarWinds connector · EVPN causality · vendor-safe remediation · ITSM</span>
+        <span class="tagchip"><span class="spark" aria-hidden="true"></span>v1.3.0 · flap dampening · SPOF blast radius · ServiceNow sync · SolarWinds</span>
         <h1 class="hero-title">netlog-ai</h1>
         <p class="hero-tag">Network logs in. <b>Ranked actions out.</b> A local, sanitize-first, multi-vendor AI log analyzer that turns raw syslog and CLI output into prioritized, copy-pastable root-cause playbooks.</p>
 
         <div class="chips" id="chips" role="list" aria-label="Project statistics">
-          <div class="chip" role="listitem"><div class="num" data-count="613">613</div><div class="lbl">tests collected</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="632">632</div><div class="lbl">tests collected</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="80">80</div><div class="lbl">regex patterns</div></div>
-          <div class="chip" role="listitem"><div class="num" data-count="7">7</div><div class="lbl">log connectors</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="8">8</div><div class="lbl">log connectors</div></div>
           <div class="chip" role="listitem"><div class="num" data-count="30">30</div><div class="lbl">demo devices</div></div>
-          <div class="chip" role="listitem"><div class="num" data-count="18">18</div><div class="lbl">MCP tools</div></div>
+          <div class="chip" role="listitem"><div class="num" data-count="21">21</div><div class="lbl">MCP tools</div></div>
         </div>
 
         <div class="cta-row">
@@ -826,13 +826,14 @@ pytest --cov=src --cov-report=term-missing</pre>
   <section id="roadmap" aria-labelledby="road-h">
     <div class="wrap">
       <p class="eyebrow">Status + plan</p>
-      <h2 class="title" id="road-h">1.2.0 SolarWinds connector</h2>
-      <p class="lead" style="margin-bottom:30px">v1.2.0 adds a SolarWinds Orion / Observability SaaS connector (parameterized SWQL, syslog, events, topology, telemetry, explicit alert writeback) on top of v1.1.0 rollback-protected remediation and two-way Jira / ServiceNow enrichment.</p>
+      <h2 class="title" id="road-h">1.3.0 deep analytics and ServiceNow</h2>
+      <p class="lead" style="margin-bottom:30px">v1.3.0 adds RFC 2439 flap dampening, Tarjan SPOF blast radius, ServiceNow change correlation, and a Cytoscape AIOps overlay on top of the v1.2.0 SolarWinds connector and v1.1.0 rollback-protected remediation.</p>
       <div class="grid features">
         <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>0.9.0 — log dedup & vault</h3><p>Drain-style syslog deduplication, RFC 5424 PRI and Cisco sequence prefix parsing, IPv6/MAC redaction in SanitizeVault, and NetBox v4.x manifest enrichment.</p></article>
         <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>1.0.0 — EVPN causality</h3><p>5-tier CLOS fabric bipartite causal inference, optical DOM/DDM and interface counter telemetry fusion, Cytoscape EVPN overlay edges, and MCP causality tool.</p></article>
         <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>1.1.0 — remediation & ITSM</h3><p>Vendor-safe remediation plans with rollback timers (Junos commit confirmed, EOS commit timer, NX-OS checkpoint, IOS-XE revert timer), safety blocklist, and two-way Jira/ServiceNow enrichment.</p></article>
         <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>1.2.0 — SolarWinds</h3><p>Orion SWIS parameterized SWQL (alert join, OLM→SysLog, Events), Observability SaaS logs/alerts pagination, site manifest + NPM telemetry, and explicit alert note writeback via CLI, web, and MCP.</p></article>
+        <article class="card feat reveal"><div class="ico" aria-hidden="true">✓</div><h3>1.3.0 — deep analytics</h3><p>RFC 2439 flap dampening, Tarjan SPOF blast radius, ServiceNow table source plus change/incident sync, and a Cytoscape overlay for critical SPOFs, flap storms, and correlated changes.</p></article>
       </div>
     </div>
   </section>
@@ -875,6 +876,7 @@ pytest --cov=src --cov-report=term-missing</pre>
     { icon: "📄", title: "Executable remediation + reports", desc: "Every finding ships Junos set lines, EOS running-config patches, and FRR vtysh commands plus rollback/verify steps, exportable as Markdown/HTML/CSV/PDF." },
     { icon: "🛡️", title: "Vendor-safe remediation & ITSM", desc: "1.1.0 change plans with auto-revert timers across Junos, EOS, NX-OS, IOS-XE, and FRR, destructive command guardrails, and two-way Jira / ServiceNow incident deduplication and enrichment." },
     { icon: "☀️", title: "SolarWinds Orion & SaaS", desc: "1.2.0 connector: parameterized SWIS SWQL (alert join, OLM→SysLog, Events), Observability SaaS log/alert pagination, site manifest + NPM telemetry, and explicit alert-note writeback via MCP." },
+    { icon: "📉", title: "Deep analytics & ServiceNow", desc: "1.3.0: RFC 2439 flap dampening, Tarjan SPOF blast radius, ServiceNow change correlation and dry-run incident sync, drawn on the Cytoscape topology map." },
     { icon: "🛡", title: "Sanitize diff + custom rule editor", desc: "See exactly what the LLM is allowed to see (per-rule redaction counts) and extend the classifier at runtime from the UI — custom rules run before the built-in KB." },
     { icon: "⌨️", title: "Keyboard-first, accessible PWA", desc: "WCAG-AA dark dashboard with 1/2/3 tab switching, Cmd/Ctrl+Enter to run, ARIA roles, prefers-reduced-motion, and an installable PWA manifest." }
   ];
@@ -898,7 +900,7 @@ pytest --cov=src --cov-report=term-missing</pre>
     { name: "dedup.py", tech: "Python · Drain algorithm", resp: "Pre-LLM log clustering & deduplication engine: variable token masking, RFC 5424 PRI strip, fixed-depth parse tree, emitting 90%+ prompt token savings during storms." },
     { name: "sanitize_vault.py", tech: "hashlib · ipaddress · regex", resp: "Reversible token vault providing stateful bidirectional masking for IPv4, IPv6, MAC, and ASN addresses across EVPN Type-2 routes." },
     { name: "web/app.py", tech: "Flask 3 · vanilla JS · Cytoscape.js + ELK", resp: "Flask create_app() exposing ~33 API routes (incl. /api/remediation and /api/itsm/enrich) plus a no-build vanilla-JS SPA (index.html + app.js) on port 6060." },
-    { name: "mcp_server/server.py", tech: "MCP SDK 2.x (MCPServer) · stdio", resp: "Agent surface: MCPServer stdio server exposing 18 tools incl. analyze_evpn_causality, generate_remediation_plan, enrich_itsm_incident, and SolarWinds log/alert/note tools." },
+    { name: "mcp_server/server.py", tech: "MCP SDK 2.x (MCPServer) · stdio", resp: "Agent surface: MCPServer stdio server exposing 21 tools incl. analyze_evpn_causality, generate_remediation_plan, enrich_itsm_incident, SolarWinds log/alert/note tools, and netlog deep analytics / ServiceNow sync." },
     { name: "cli.py", tech: "Python argparse", resp: "Console entrypoint (ai-log-analyzer / netlog-ai) with serve, analyze, containers, remediation, and mcp subcommands." },
     { name: "evpn_causal.py", tech: "Python", resp: "Protocol-aware CLOS fabric bipartite causal engine: L1 physical to L5 EVPN overlay hierarchy with 2-hop topological symptom suppression." },
     { name: "telemetry.py", tech: "Prometheus REST · Python", resp: "Counter & optical interlocking engine: correlates DOM Rx dBm power, FCS/CRC errors, and egress queue discards to separate physical layer faults from microburst congestion." },
