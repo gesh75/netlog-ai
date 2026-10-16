@@ -2,8 +2,8 @@
 
 netlog-ai ships with a pluggable connector layer (`src/ai_log_analyzer/sources/`)
 that lets it pull events from any common log source, plus an **MCP server**
-that exposes the analyzer as **18 agent-callable tools** (v1.2.0). The
-hermetic pytest suite is **613 passing**.
+that exposes the analyzer as **21 agent-callable tools** (v1.3.0). The
+hermetic pytest suite is **632 passing**.
 
 The same engine that processes `--file` and pasted text now also drives:
 
@@ -15,12 +15,13 @@ The same engine that processes `--file` and pasted text now also drives:
 | `syslog`   | UDP/TCP listener | n/a                                 | Zero-config, perfect for laptop demos |
 | `librenms`  | LibreNMS REST    | `api_token`                           | Eventlog via `/api/v0/logs/eventlog` |
 | `solarwinds`| SolarWinds Orion / Observability SaaS | `api_token` · `basic`          | Parameterized SWIS SWQL (alerts join, OLM→SysLog, Events); SaaS `/v1/logs` + `/v1/alerts` pagination; explicit alert writeback |
+| `servicenow`| ServiceNow Table API | `basic` · `bearer`                 | `em_alert`, `incident`, or `syslog`; display-value CI objects normalized to syslog lines; loopback and metadata URLs rejected |
 | `netbox`    | NetBox REST      | `api_token`                           | Device role/site/platform enrichment & v4.x cable topology manifest |
 | `telemetry` | Prometheus REST  | `api_token` · `basic`                 | Optical DOM/DDM (dBm), FCS/CRC error deltas, and queue drop fusion |
 | `itsm`      | Jira / ServiceNow| `api_token` · `basic`                 | Two-way incident enrichment, closed-loop triage, and rollback plans |
 
-**LogSource registry count:** 7 kinds (`kibana`, `elasticsearch` alias, `splunk`,
-`loki`, `syslog`, `librenms`, `solarwinds`). NetBox, Prometheus telemetry, and
+**LogSource registry count:** 8 kinds (`kibana`, `elasticsearch` alias, `splunk`,
+`loki`, `syslog`, `librenms`, `solarwinds`, `servicenow`). NetBox, Prometheus telemetry, and
 ITSM are adjacent integrations, not `LogSource` registry entries.
 
 Every connector implements the same Python `Protocol` (`LogSource`) so the
@@ -140,7 +141,7 @@ netlog-ai mcp                       # stdio transport (default)
 netlog-ai mcp --transport streamable-http
 ```
 
-### Tools exposed (18)
+### Tools exposed (21)
 
 | Tool                   | Purpose                                                                              |
 |------------------------|--------------------------------------------------------------------------------------|
@@ -162,6 +163,9 @@ netlog-ai mcp --transport streamable-http
 | `fetch_solarwinds_logs`    | Pull SolarWinds syslog / OLM / SaaS log lines (read-only)                            |
 | `fetch_solarwinds_alerts`  | Pull SolarWinds active alerts (SWIS join query or SaaS `/v1/alerts`)                 |
 | `push_solarwinds_alert_note` | Explicit `Orion.AlertActive/AppendNote` RCA writeback — never automatic            |
+| `netlog_deep_analytics`        | RFC 2439 flap physics and Tarjan SPOF blast radius for a log snippet               |
+| `netlog_servicenow_correlate_changes` | Score ServiceNow change records against findings                            |
+| `netlog_servicenow_sync_incident` | Preview or upsert one idempotent ServiceNow incident (dry-run by default)       |
 
 ### Hook into Claude Code
 

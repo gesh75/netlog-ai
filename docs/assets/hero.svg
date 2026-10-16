@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc" fill="none" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
-  <title id="title">netlog-ai v1.2.0 — architecture</title>
+  <title id="title">netlog-ai v1.3.0 — architecture</title>
   <desc id="desc">Animated banner: multi-vendor network log streams flow left-to-right from Kibana, Splunk, Loki, syslog and SolarWinds source nodes, pass through a glowing sanitize shield that redacts secrets, converge into a pulsing violet LLM and rule-based KB core, and emit a root-cause pulse into a ranked action-item stack. A red anomaly spark races down one lane.</desc>
 
   <defs>
