@@ -110,6 +110,38 @@ _MIGRATIONS = {
 _BUSY_TIMEOUT_MS = 10_000
 
 
+def _is_busy(exc: BaseException) -> bool:
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
+
+
+def _begin_immediate(conn: sqlite3.Connection) -> None:
+    """BEGIN IMMEDIATE with an explicit busy retry.
+
+    CPython's busy handler does not reliably retry ``BEGIN`` on every
+    3.11/3.12 build, so a lock that the timeout should wait out can still
+    surface as ``OperationalError: database is locked``.
+    """
+    if conn.in_transaction:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+    deadline = time.monotonic() + _BUSY_TIMEOUT_MS / 1000.0
+    delay = 0.002
+    while True:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            return
+        except sqlite3.OperationalError as exc:
+            if not _is_busy(exc) or time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.05)
+
+
 class _TrackedConnection(sqlite3.Connection):
     """A plain sqlite3 connection that supports weak references (fork guard)."""
 
@@ -145,6 +177,11 @@ class StateDB:
         conn = getattr(self._local, "conn", None)
         if (conn is None or getattr(self._local, "pid", None) != pid
                 or getattr(self._local, "generation", None) != _fork_generation):
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
             conn = sqlite3.connect(str(self.path), timeout=_BUSY_TIMEOUT_MS / 1000,
                                    isolation_level=None, check_same_thread=False,
                                    factory=_TrackedConnection)
@@ -160,11 +197,14 @@ class StateDB:
     @contextmanager
     def write(self) -> Iterator[sqlite3.Connection]:
         conn = self.conn()
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_immediate(conn)
         try:
             yield conn
         except BaseException:
-            conn.execute("ROLLBACK")
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
             raise
         conn.execute("COMMIT")
 

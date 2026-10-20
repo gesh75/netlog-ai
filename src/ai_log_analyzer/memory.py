@@ -289,12 +289,14 @@ class SqliteIncidentStore(IncidentStore):
         return self.db.incidents_count()
 
     def _persist(self, new: list[dict]) -> int:
+        """Write through to SQLite. ``StateDB.write`` retries lock errors;
+        this method must not swallow them — that is how rows were lost."""
         try:
             self.db.incidents_append(new, cap=_MAX_RECORDS)
             self._load()  # pick up row ids (citation ids) and other workers' rows
-        except Exception as exc:  # sqlite3.Error / OSError — never break an analysis
-            logger.warning("could not persist incident store to %s: %s", self.path, exc)
-            self._records = (self._records + new)[-_MAX_RECORDS:]
+        except Exception:
+            logger.exception("could not persist incident store to %s", self.path)
+            raise
         return len(new)
 
     def resolve(self, inc_id: str, resolution: str, resolved_by: str = "") -> dict | None:

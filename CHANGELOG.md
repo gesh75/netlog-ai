@@ -18,7 +18,7 @@ loose semantic versioning.
 
 ### Fixed
 
-- Shared SQLite state DB could silently lose committed rows across forked workers: a connection still open at `fork()` (unreachable but not yet garbage-collected) was inherited, and when the child finalized it, closing the descriptor dropped the child's POSIX locks on the database, so sibling workers overwrote each other's WAL frames. Every connection is now closed before `fork()` (`os.register_at_fork`) and reopened lazily.
+- Shared SQLite state DB could silently lose committed rows across forked workers: a connection still open at `fork()` (unreachable but not yet garbage-collected) was inherited, and when the child finalized it, closing the descriptor dropped the child's POSIX locks on the database, so sibling workers overwrote each other's WAL frames. Every connection is now closed before `fork()` (`os.register_at_fork`) and reopened lazily. Writes also retry `BEGIN IMMEDIATE` / `database is locked` instead of swallowing `OperationalError` (which dropped the insert).
 - `VXLAN_TUNNEL_DOWN` / VTEP-down / NVE-peer-lost lines were classified as "VPN/IPsec tunnel failure"; they are now "VXLAN tunnel / VTEP down" (category `evpn`, EVPN cascade playbook).
 
 ### Added — durable ingest, multi-worker state, suppression, automation export
