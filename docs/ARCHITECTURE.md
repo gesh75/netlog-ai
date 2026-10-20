@@ -12,7 +12,7 @@ xAI Grok) write a 5-phase root-cause playbook with copy-pastable per-vendor CLI 
 invariant is **sanitize-before-LLM** — every config and log is scrubbed of secrets and public IPs before
 any outbound call — and it degrades gracefully to a deterministic rule-based KB when no model is available.
 The same analyzer core is exposed three ways: a no-build Flask + vanilla-JS dashboard (port 6060), a CLI,
-and an MCP server (21 tools; 632 passing tests) for agent clients like Claude Code. Release v1.3.0 adds RFC 2439 flap dampening, Tarjan SPOF blast radius, ServiceNow change correlation, and a Cytoscape AIOps overlay on top of v1.2.0 SolarWinds and the v1.1.0 5-layer EVPN-VXLAN
+and an MCP server (21 tools; 901 passing tests) for agent clients like Claude Code. Release v2.0.0 adds the V2 platform: a sanitize-first LLM gateway with a reversible entity vault, FortiOS / PAN-OS / Catalyst SD-WAN parsing with cross-vendor correlation, durable multi-worker syslog with topology-aware suppression, Ansible / Nornir export, evidence-cited RCA (local BM25 retrieval), a streaming triage worker, RBAC with an append-only audit log, and the V2 dashboard (see docs/OPERATIONS.md). Release v1.3.0 adds RFC 2439 flap dampening, Tarjan SPOF blast radius, ServiceNow change correlation, and a Cytoscape AIOps overlay on top of v1.2.0 SolarWinds and the v1.1.0 5-layer EVPN-VXLAN
 causal inference, optical DOM vs. QoS telemetry interlocking, vendor-safe remediation guardrails (commit confirmed,
 commit timers, checkpoints), two-way Jira and ServiceNow incident enrichment, Drain-style log deduplication,
 NetBox v4.x automated topology resolution, a causal console (timeline, blast radius, change-window correlator),

@@ -58,6 +58,20 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Release notes from this version's CHANGELOG section
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Everything between "## [VERSION]" and the next "## [" heading.
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "See [CHANGELOG.md](https://github.com/gesh75/netlog-ai/blob/main/CHANGELOG.md)." > notes.md
+          fi
+          printf '\n---\nFull history: [CHANGELOG.md](https://github.com/gesh75/netlog-ai/blob/main/CHANGELOG.md)\n' >> notes.md
+          wc -l notes.md
       - name: Create GitHub release with artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,8 +79,9 @@ jobs:
           TAG="$GITHUB_REF_NAME"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file notes.md
           else
             gh release create "$TAG" dist/* \
-              --title "$TAG" \
-              --notes "See [CHANGELOG.md](https://github.com/gesh75/netlog-ai/blob/main/CHANGELOG.md)."
+              --title "netlog-ai $TAG" \
+              --notes-file notes.md
           fi
