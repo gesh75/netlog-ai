@@ -2,7 +2,7 @@
 
 netlog-ai ships with a pluggable connector layer (`src/ai_log_analyzer/sources/`)
 that lets it pull events from any common log source, plus an **MCP server**
-that exposes the analyzer as **21 agent-callable tools** (v1.3.0). The
+that exposes the analyzer as **21 agent-callable tools** (v2.0.0). The
 hermetic pytest suite is **632 passing**.
 
 The same engine that processes `--file` and pasted text now also drives:

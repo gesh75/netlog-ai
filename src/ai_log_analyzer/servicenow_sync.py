@@ -271,7 +271,7 @@ class ServiceNowClient:
         headers = {
             "Accept": "application/json",
             "Authorization": _auth_header(self.username, self.password, self.bearer_token),
-            "User-Agent": "netlog-ai/1.3.0",
+            "User-Agent": "netlog-ai/2.0.0",
         }
         if data is not None:
             headers["Content-Type"] = "application/json"
