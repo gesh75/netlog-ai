@@ -162,10 +162,21 @@ Four providers, switchable at runtime from the UI dropdown — or via env / API:
 
 | Mode          | Order |
 |---------------|-------|
-| `ollama`      | Ollama native API on `:11434` (default; `OLLAMA_URL` / `OLLAMA_MODEL`) |
-| `local`       | Local Docker Model Runner → falls back to Claude if `ANTHROPIC_API_KEY` is set |
+| `ollama`      | Ollama native API on `:11434` (default; `OLLAMA_URL` / `OLLAMA_MODEL`) → Docker Model Runner |
+| `local`       | Local Docker Model Runner → Ollama |
 | `claude`      | Claude first → falls back to local |
 | `claude-only` | Claude only, no fallback |
+
+Local modes **never** fall back to a cloud API unless you opt in with
+`ALLOW_CLOUD_FALLBACK=true` (that also gates Claude ↔ Grok fallback).
+
+Every call goes through one gateway (`llm.query()`) that enforces, regardless
+of caller: secret/PII redaction; reversible pseudonyms for IPs, MACs, ASNs and
+(for cloud providers) hostnames — `<IP_1>`, `<ASN_2>`, `<HOST_3>`, mapped back
+to real values in the answer; a per-provider prompt budget; retry/backoff on
+429/5xx; fencing of raw log/config text against prompt injection; and the
+destructive-command `SafetyGuardrail` on every model-generated CLI line. See
+`.env.example` for the knobs.
 
 ```bash
 LLM_PROVIDER=claude ANTHROPIC_API_KEY=sk-ant-... ai-log-analyzer serve
