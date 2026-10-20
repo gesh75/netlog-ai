@@ -296,10 +296,16 @@ def cmd_remediation(args: argparse.Namespace) -> int:
         print(f"error: safety violation: {exc}", file=sys.stderr)
         return 1
 
-    if args.json:
-        print(json.dumps(plan.to_dict(), indent=2))
-    else:
-        print(plan.to_markdown_card())
+    fmt = "json" if args.json else (getattr(args, "format", None) or "markdown")
+    from ai_log_analyzer.remediation_export import ExportUnsupportedError, export_plan
+    try:
+        print(export_plan(plan, fmt), end="" if fmt in ("ansible", "nornir") else "\n")
+    except ExportUnsupportedError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except SafetyViolationError as exc:
+        print(f"error: safety violation: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -403,7 +409,8 @@ def main() -> None:
     rem_p.add_argument(
         "--vendor",
         required=True,
-        choices=["arista_eos", "juniper_junos", "cisco_nxos", "cisco_ios", "frr"],
+        choices=["arista_eos", "juniper_junos", "cisco_nxos", "cisco_ios", "frr",
+                 "fortinet_fortios", "paloalto_panos", "cisco_sdwan"],
         help="Device vendor OS",
     )
     rem_p.add_argument("--action", choices=["drain", "copp"], default="drain", help="Remediation action type")
@@ -412,6 +419,8 @@ def main() -> None:
     rem_p.add_argument("--rollback-minutes", type=int, default=5, help="Auto-rollback timer in minutes (1-30)")
     rem_p.add_argument("--rationale", default="", help="Engineering justification")
     rem_p.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    rem_p.add_argument("--format", choices=["markdown", "json", "ansible", "nornir"], default="markdown",
+                       help="Export as CLI card (markdown), JSON, an Ansible playbook, or a Nornir/NAPALM script")
     rem_p.set_defaults(func=cmd_remediation)
 
     mp = sub.add_parser("mcp", help="Run as an MCP server (for Claude Code / Cursor / Continue)")

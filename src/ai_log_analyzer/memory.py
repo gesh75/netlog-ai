@@ -13,6 +13,16 @@ differently. A token-overlap search (`find_similar`) additionally powers the
 `/api/incidents/similar` endpoint for free-text lookups ("have we seen fan
 failures on spine-02?"). Zero dependencies, bounded file size, and nothing
 ever leaves the host.
+
+Backends:
+
+* JSONL (path not ending in .db/.sqlite): appends and cap rewrites hold an
+  exclusive ``fcntl`` lock on ``<path>.lock`` and re-read the file before a
+  rewrite, so concurrent workers neither interleave lines nor drop each
+  other's records.
+* SQLite WAL (path ending in .db/.sqlite/.sqlite3, or the shared
+  ``AI_LOG_ANALYZER_STATE_DB``): process-safe, the recommended choice for
+  multi-worker Gunicorn deployments.
 """
 from __future__ import annotations
 
@@ -20,8 +30,16 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
+
+try:  # POSIX advisory locking; Windows falls back to unlocked writes.
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +72,14 @@ class IncidentStore:
         self._load()
 
     def _load(self) -> None:
+        self._records = self._read_file()
+        if len(self._records) > _MAX_RECORDS:
+            self._records = self._records[-_MAX_RECORDS:]
+
+    def _read_file(self) -> list[dict]:
+        records: list[dict] = []
         if not self.path.is_file():
-            return
+            return records
         try:
             for line in self.path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
@@ -64,13 +88,26 @@ class IncidentStore:
                 try:
                     rec = json.loads(line)
                 except json.JSONDecodeError:
-                    continue
+                    continue  # a torn line never poisons the journal
                 if isinstance(rec, dict) and rec.get("description"):
-                    self._records.append(rec)
+                    records.append(rec)
         except OSError as exc:
             logger.warning("incident store unreadable (%s) — starting fresh", exc)
-        if len(self._records) > _MAX_RECORDS:
-            self._records = self._records[-_MAX_RECORDS:]
+        return records
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        """Exclusive cross-process lock for appends and rewrites."""
+        if fcntl is None:
+            yield
+            return
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        with lock_path.open("a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def __len__(self) -> int:
         return len(self._records)
@@ -160,29 +197,72 @@ class IncidentStore:
             })
         if not new:
             return 0
-        self._records.extend(new)
+        return self._persist(new)
+
+    def _persist(self, new: list[dict]) -> int:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            if len(self._records) > _MAX_RECORDS:
-                self._records = self._records[-_MAX_RECORDS:]
-                tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-                tmp.write_text(
-                    "\n".join(json.dumps(r) for r in self._records) + "\n",
-                    encoding="utf-8")
-                tmp.replace(self.path)
-            else:
-                with self.path.open("a", encoding="utf-8") as fh:
-                    for r in new:
-                        fh.write(json.dumps(r) + "\n")
+            with self._locked():
+                # Re-read under the lock: other workers may have appended since
+                # this instance loaded, and a rewrite must not drop them.
+                on_disk = self._read_file()
+                if len(on_disk) + len(new) > _MAX_RECORDS:
+                    merged = (on_disk + new)[-_MAX_RECORDS:]
+                    tmp = self.path.with_suffix(self.path.suffix + f".{os.getpid()}.tmp")
+                    tmp.write_text("\n".join(json.dumps(r) for r in merged) + "\n", encoding="utf-8")
+                    tmp.replace(self.path)
+                else:
+                    merged = on_disk + new
+                    with self.path.open("a", encoding="utf-8") as fh:
+                        fh.write("".join(json.dumps(r) + "\n" for r in new))
+                        fh.flush()
+                        os.fsync(fh.fileno())
+            self._records = merged
         except OSError as exc:
             logger.warning("could not persist incident store to %s: %s", self.path, exc)
+            self._records = (self._records + new)[-_MAX_RECORDS:]
         return len(new)
 
 
+class SqliteIncidentStore(IncidentStore):
+    """Incident memory on the shared SQLite WAL database (multi-worker safe)."""
+
+    def __init__(self, db: Any) -> None:  # db: state_store.StateDB
+        self.db = db
+        self.path = db.path
+        self._records = []
+        self._load()
+
+    def _load(self) -> None:
+        self._records = self.db.incidents_all(_MAX_RECORDS)
+
+    def __len__(self) -> int:
+        return self.db.incidents_count()
+
+    def _persist(self, new: list[dict]) -> int:
+        try:
+            self.db.incidents_append(new, cap=_MAX_RECORDS)
+        except Exception as exc:  # sqlite3.Error / OSError — never break an analysis
+            logger.warning("could not persist incident store to %s: %s", self.path, exc)
+        self._records = (self._records + new)[-_MAX_RECORDS:]
+        return len(new)
+
+
+_SQLITE_SUFFIXES = (".db", ".sqlite", ".sqlite3")
+
+
 def get_store() -> IncidentStore | None:
-    """Opt-in via AI_LOG_ANALYZER_INCIDENT_STORE; None when unset."""
-    path = os.environ.get("AI_LOG_ANALYZER_INCIDENT_STORE", "")
-    return IncidentStore(path) if path else None
+    """Opt-in via AI_LOG_ANALYZER_INCIDENT_STORE (JSONL or *.db) or the shared
+    AI_LOG_ANALYZER_STATE_DB; None when neither is set."""
+    from ai_log_analyzer.state_store import get_state_db, open_db
+
+    path = os.environ.get("AI_LOG_ANALYZER_INCIDENT_STORE", "").strip()
+    if path:
+        if path.lower().endswith(_SQLITE_SUFFIXES):
+            return SqliteIncidentStore(open_db(path))
+        return IncidentStore(path)
+    db = get_state_db()
+    return SqliteIncidentStore(db) if db is not None else None
 
 
 def annotate_and_record(result_dict_items: list[dict], generated_at: str) -> None:

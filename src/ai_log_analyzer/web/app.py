@@ -1220,11 +1220,15 @@ def create_app() -> Flask:
         except SafetyViolationError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
-        return jsonify({
-            "ok": True,
-            "plan": plan.to_dict(),
-            "markdown_card": plan.to_markdown_card(),
-        })
+        out = {"ok": True, "plan": plan.to_dict(), "markdown_card": plan.to_markdown_card()}
+        export = (body.get("export") or "").strip().lower()
+        if export:
+            from ai_log_analyzer.remediation_export import ExportUnsupportedError, export_plan
+            try:
+                out["export"] = {"format": export, "content": export_plan(plan, export)}
+            except (ExportUnsupportedError, SafetyViolationError) as exc:
+                return jsonify({"ok": False, "error": str(exc), "plan": plan.to_dict()}), 400
+        return jsonify(out)
 
     @app.route("/api/itsm/enrich", methods=["POST"])
     @require_api_token
