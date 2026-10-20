@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import multiprocessing
+import os
 import shutil
 import socket
 import ssl
@@ -88,6 +89,32 @@ def test_sqlite_incident_store_concurrent_workers(tmp_path):
     store = memory.SqliteIncidentStore(StateDB(path))
     assert len(store) == 4 * 40 * 3
     assert store.recurrence("w3-r39-2")["count"] == 1
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="POSIX fork only")
+def test_no_sqlite_connection_survives_a_fork(tmp_path):
+    """Regression: a connection still open at fork() (e.g. unreachable but not
+    yet garbage-collected) was inherited; when the child finalized it, the
+    close dropped the child's POSIX locks on the database and sibling
+    workers lost committed rows."""
+    import sqlite3
+
+    db = StateDB(tmp_path / "state.db")
+    inherited = db.conn()
+    pid = os.fork()
+    if pid == 0:  # child: the inherited handle must be closed, a fresh one must work
+        code = 1
+        try:
+            try:
+                inherited.execute("SELECT 1")
+            except sqlite3.ProgrammingError:
+                db.kv_set("t", "child", 1)
+                code = 0
+        finally:
+            os._exit(code)
+    _, status = os.waitpid(pid, 0)
+    assert os.WEXITSTATUS(status) == 0
+    assert db.kv_get_all("t") == {"child": 1}      # the parent reopens transparently too
 
 
 def _jsonl_worker(path: str, worker: int, rounds: int, cap: int) -> None:

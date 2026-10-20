@@ -17,6 +17,15 @@ WAL lets readers proceed while one writer commits. Writes use
 instead of failing. Connections are per thread and re-opened after
 ``fork()`` (Gunicorn pre-fork), because SQLite handles must not cross a fork.
 
+Every connection is also closed just before ``fork()``. A child that
+inherits an open handle (for example one that is unreachable but not yet
+garbage-collected) eventually closes it, and closing any descriptor of a
+file drops all of that process's POSIX locks on it, including the locks
+held by the child's own live connection. Sibling processes then commit
+over each other's WAL frames and committed rows are silently lost.
+Closing first leaves nothing to inherit; each thread reopens lazily on its
+next call.
+
 Enable with ``AI_LOG_ANALYZER_STATE_DB=/var/lib/netlog-ai/state.db``.
 """
 from __future__ import annotations
@@ -27,6 +36,7 @@ import os
 import sqlite3
 import threading
 import time
+import weakref
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -100,6 +110,16 @@ _MIGRATIONS = {
 _BUSY_TIMEOUT_MS = 10_000
 
 
+class _TrackedConnection(sqlite3.Connection):
+    """A plain sqlite3 connection that supports weak references (fork guard)."""
+
+
+# Every open connection, including ones whose StateDB is already gone but that
+# the garbage collector has not finalized yet; closed before fork().
+_LIVE_CONNS: weakref.WeakSet[_TrackedConnection] = weakref.WeakSet()
+_fork_generation = 0
+
+
 class StateDB:
     """Thin, thread- and fork-safe wrapper around one SQLite WAL database."""
 
@@ -123,14 +143,18 @@ class StateDB:
     def conn(self) -> sqlite3.Connection:
         pid = os.getpid()
         conn = getattr(self._local, "conn", None)
-        if conn is None or getattr(self._local, "pid", None) != pid:
+        if (conn is None or getattr(self._local, "pid", None) != pid
+                or getattr(self._local, "generation", None) != _fork_generation):
             conn = sqlite3.connect(str(self.path), timeout=_BUSY_TIMEOUT_MS / 1000,
-                                   isolation_level=None, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
+                                   isolation_level=None, check_same_thread=False,
+                                   factory=_TrackedConnection)
+            _LIVE_CONNS.add(conn)
+            conn.execute("PRAGMA journal_mode=WAL").fetchall()
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
             self._local.conn = conn
             self._local.pid = pid
+            self._local.generation = _fork_generation
         return conn
 
     @contextmanager
@@ -386,6 +410,20 @@ class StateDB:
             out.append(rec)
         return out
 
+
+def _close_before_fork() -> None:
+    """Close every connection this process opened (see the module docstring)."""
+    global _fork_generation
+    _fork_generation += 1
+    for c in list(_LIVE_CONNS):
+        try:
+            c.close()
+        except Exception:  # pragma: no cover - already closed / unusable
+            pass
+
+
+if hasattr(os, "register_at_fork"):  # POSIX
+    os.register_at_fork(before=_close_before_fork)
 
 _INSTANCES: dict[str, StateDB] = {}
 _INSTANCES_LOCK = threading.Lock()
