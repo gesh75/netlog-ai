@@ -1,0 +1,72 @@
+{
+  "id": "evpn-underlay-link-cascade",
+  "title": "EVPN-VXLAN: spine1-leaf1 underlay link failure cascades to BGP and VTEP alarms",
+  "tags": [
+    "evpn",
+    "vxlan",
+    "arista",
+    "datacenter"
+  ],
+  "site": "clab-clos-evpn",
+  "golden_patch": {
+    "leaf1": [
+      [
+        "   neighbor 10.0.1.0 remote-as 65100",
+        "   neighbor 10.0.1.0 remote-as 65100\n   neighbor 10.0.1.0 bfd"
+      ]
+    ]
+  },
+  "logs": [
+    "Oct 20 10:00:00 spine1 Rib: %LINEPROTO-5-UPDOWN: Line protocol on Interface Ethernet1, changed state to down",
+    "Oct 20 10:00:00 spine1 Ebra: %LINK-3-UPDOWN: Interface Ethernet1, changed state to down",
+    "Oct 20 10:00:01 leaf1 Ebra: %LINK-3-UPDOWN: Interface Ethernet1, changed state to down",
+    "Oct 20 10:00:02 leaf1 Bgp: %BGP-3-NOTIFICATION: sent to neighbor 10.0.1.0 (VRF default AS 65000) 6/6 (Cease/other configuration change) 0 bytes",
+    "Oct 20 10:00:02 leaf1 Bgp: %BGP-5-ADJCHANGE: peer 10.0.1.0 (VRF default AS 65000) old state Established event HoldTimerExpired new state Idle",
+    "Oct 20 10:00:03 spine1 Bgp: %BGP-5-ADJCHANGE: peer 10.0.1.1 (VRF default AS 65001) old state Established event HoldTimerExpired new state Idle",
+    "Oct 20 10:00:04 leaf1 Bgp: BGP EVPN neighbor 10.0.0.1 Down Notification",
+    "Oct 20 10:00:05 leaf2 VxlanSwFwd: %VXLAN-3-VTEP_DOWN: VXLAN_TUNNEL_DOWN: VTEP 10.0.250.11 unreachable on Vxlan1",
+    "Oct 20 10:00:05 leaf2 Bgp: EVPN Type-2 MAC/IP route withdraw for VNI 10010 from peer 10.0.250.11",
+    "Oct 20 10:00:06 leaf3 VxlanSwFwd: %VXLAN-3-VTEP_DOWN: VXLAN_TUNNEL_DOWN: VTEP 10.0.250.11 unreachable on Vxlan1",
+    "Oct 20 10:00:06 leaf3 Bgp: EVPN Type-2 MAC/IP route withdraw for VNI 10010 from peer 10.0.250.11"
+  ],
+  "expect": {
+    "root": {
+      "description_any": [
+        "Interface link down"
+      ],
+      "devices_any": [
+        "spine1",
+        "leaf1"
+      ]
+    },
+    "top_k": 2,
+    "must_detect": [
+      "Interface link down",
+      "BGP hold timer expired",
+      "VXLAN tunnel / VTEP down"
+    ],
+    "must_not_detect": [
+      "VPN/IPsec tunnel failure"
+    ],
+    "suppressed": [
+      "BGP hold timer expired"
+    ],
+    "suppression_root": {
+      "kind": "transport",
+      "hosts_any": [
+        "spine1",
+        "leaf1"
+      ]
+    },
+    "evidence": [
+      {
+        "host": "leaf1",
+        "kind": "drift"
+      },
+      {
+        "host": "leaf1",
+        "kind": "config"
+      }
+    ]
+  }
+}

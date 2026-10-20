@@ -1,0 +1,69 @@
+{
+  "id": "bgp-route-leak-and-flap",
+  "title": "BGP: upstream route leak trips max-prefix on pe-01 while leaf5 sessions flap",
+  "tags": [
+    "bgp",
+    "leak",
+    "flap",
+    "frr"
+  ],
+  "configs": [
+    {
+      "hostname": "pe-01",
+      "platform": "frr",
+      "config_text": "hostname pe-01\n!\nrouter bgp 65000\n bgp router-id 10.255.255.1\n neighbor 192.0.2.1 remote-as 64500\n neighbor 192.0.2.1 description TRANSIT-A\n !\n address-family ipv4 unicast\n  neighbor 192.0.2.1 maximum-prefix 10000 80\n  neighbor 192.0.2.1 route-map TRANSIT-A-IN in\n exit-address-family\n!\nroute-map TRANSIT-A-IN permit 10\n match ip address prefix-list CUSTOMER-ROUTES\n!\n"
+    }
+  ],
+  "golden": {
+    "pe-01": "hostname pe-01\n!\nrouter bgp 65000\n bgp router-id 10.255.255.1\n neighbor 192.0.2.1 remote-as 64500\n neighbor 192.0.2.1 description TRANSIT-A\n !\n address-family ipv4 unicast\n  neighbor 192.0.2.1 maximum-prefix 10000 80 restart 30\n  neighbor 192.0.2.1 route-map TRANSIT-A-IN in\n exit-address-family\n!\nroute-map TRANSIT-A-IN permit 10\n match ip address prefix-list CUSTOMER-ROUTES\n match rpki valid\n!\n"
+  },
+  "logs": [
+    "Oct 20 10:00:01 pe-01 bgpd[1100]: %MAXPFX: No. of IPv4 Unicast prefix received from 192.0.2.1 reaches 8001, max 10000",
+    "Oct 20 10:00:31 pe-01 bgpd[1100]: %MAXPFXEXCEED: No. of IPv4 Unicast prefix received from 192.0.2.1 reaches 10001, max 10000",
+    "Oct 20 10:00:31 pe-01 bgpd[1100]: %NOTIFICATION: sent to neighbor 192.0.2.1 6/1 (Cease/Maximum Number of Prefixes Reached) 7 bytes 00 01 00 00 27 10",
+    "Oct 20 10:09:00 bgpmon-01 bgp-monitor[777]: BGP origin AS changed for prefix 203.0.113.0/24: AS64500 -> AS64666 (possible hijack) via peer 10.0.4.1",
+    "Oct 20 10:09:05 bgpmon-01 bgp-monitor[777]: BGP AS-path change for prefix 198.51.100.0/24 via peer 10.0.4.1: 65010 3356 64500 -> 65010 174 64666 64500",
+    "Oct 20 10:11:00 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine0) in vrf default Down BGP Notification send",
+    "Oct 20 10:11:20 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine0) in vrf default Up",
+    "Oct 20 10:11:50 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine1) in vrf default Down BGP Notification send",
+    "Oct 20 10:11:70 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine1) in vrf default Up",
+    "Oct 20 10:12:40 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine2) in vrf default Down BGP Notification send",
+    "Oct 20 10:12:60 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine2) in vrf default Up",
+    "Oct 20 10:11:00 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine0) in vrf default Down BGP Notification send",
+    "Oct 20 10:11:20 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine0) in vrf default Up",
+    "Oct 20 10:11:50 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine1) in vrf default Down BGP Notification send",
+    "Oct 20 10:11:70 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine1) in vrf default Up",
+    "Oct 20 10:12:40 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine2) in vrf default Down BGP Notification send",
+    "Oct 20 10:12:60 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine2) in vrf default Up"
+  ],
+  "expect": {
+    "root": {
+      "description_any": [
+        "BGP max-prefix limit exceeded"
+      ],
+      "devices_any": [
+        "pe-01"
+      ]
+    },
+    "top_k": 1,
+    "must_detect": [
+      "BGP max-prefix limit exceeded",
+      "BGP origin / AS-path change (possible hijack or leak)",
+      "BGP peer down / connect failure"
+    ],
+    "states": {
+      "BGP peer down / connect failure": "flapping"
+    },
+    "bgp_anomalies": [
+      "max_prefix_exceeded",
+      "path_change",
+      "peer_flapping"
+    ],
+    "evidence": [
+      {
+        "host": "pe-01",
+        "kind": "drift"
+      }
+    ]
+  }
+}

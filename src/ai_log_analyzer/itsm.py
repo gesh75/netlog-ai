@@ -18,6 +18,8 @@ from typing import Any
 
 from ai_log_analyzer.remediation import RemediationPlan
 
+_ATTACHMENT_CHARS = 6000   # Jira descriptions cap near 32 KB; leave room for the RCA card
+
 
 @dataclass
 class IncidentEnrichmentPayload:
@@ -35,6 +37,9 @@ class IncidentEnrichmentPayload:
     suppressed_symptom_count: int = 0
     telemetry_summary: str | None = None
     remediation_plan: RemediationPlan | None = None
+    # Extra Markdown sections (title → body), e.g. the RCA playbook, cited
+    # evidence and an Ansible check-mode playbook from the triage worker.
+    attachments: dict[str, str] = field(default_factory=dict)
 
     @property
     def fingerprint(self) -> str:
@@ -64,6 +69,9 @@ class IncidentEnrichmentPayload:
             lines.extend(["", "### Optical / Interface Telemetry Verdict", f"> {self.telemetry_summary}"])
         if self.remediation_plan:
             lines.extend(["", self.remediation_plan.to_markdown_card()])
+        for title, body in self.attachments.items():
+            if body:
+                lines.extend(["", f"### {title}", body[:_ATTACHMENT_CHARS]])
         return "\n".join(lines)
 
     def to_jira_issue_fields(self, project_key: str, issue_type: str = "Incident") -> dict[str, Any]:

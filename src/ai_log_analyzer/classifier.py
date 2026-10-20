@@ -124,6 +124,9 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"bfd.*(?:down|removed|session.*fail)",                            "high",     "routing",    "BFD session down"),
     (r"isis.*(?:adj.*down|adj.*change|lsp.*purge)",                     "high",     "routing",    "IS-IS adjacency change"),
     (r"license.*(?:expir|invalid|warn)|expir.*license",                 "high",     "compliance", "License expiration warning"),
+    # VXLAN data-plane tunnels are not IPsec VPNs: match them before the generic tunnel rule.
+    (r"vxlan[_ -]?tunnel[_ -]?down|vtep[_ -]?down|vtep\s+\S+\s+(?:is\s+)?(?:down|unreachable)|nve\d*.*peer.*(?:down|lost)|nve: nve peer .* lost",
+                                                                         "high",     "evpn",       "VXLAN tunnel / VTEP down"),
     (r"ike.*fail|ipsec.*fail|vpn.*down|tunnel.*down|advpn",             "high",     "vpn",        "VPN/IPsec tunnel failure"),
     (r"lacp.*(?:timeout|expired|down)|lag_bundle.*down|ae\d+.*down",    "high",     "lag",        "LACP/LAG member down"),
     (r"lag_bundle.*leaving|lag.*member.*removed",                       "high",     "lag",        "LAG member leaving bundle"),

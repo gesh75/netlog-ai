@@ -1,0 +1,48 @@
+{
+  "id": "panos-ha-failover-vpn-bgp",
+  "title": "PAN-OS: DC2 HA failover takes down the AWS TGW IPsec tunnel and its BGP peer",
+  "tags": [
+    "paloalto",
+    "ha",
+    "ipsec",
+    "bgp"
+  ],
+  "logs": [
+    "<10>Oct 20 08:15:01 PA-DC2-01 1,2026/10/20 08:15:01,013201001234,SYSTEM,ha,0,2026/10/20 08:15:01,,state-change,,0,0,general,critical,HA Group 1: Moved from state Active to state Non-Functional,7310045,0x0,0,0,0,0,,PA-DC2-01",
+    "<10>Oct 20 08:15:02 PA-DC2-02 1,2026/10/20 08:15:02,013201001235,SYSTEM,ha,0,2026/10/20 08:15:02,,state-change,,0,0,general,critical,HA Group 1: Moved from state Passive to state Active,7310046,0x0,0,0,0,0,,PA-DC2-02",
+    "<11>Oct 20 08:15:40 PA-DC2-02 1,2026/10/20 08:15:40,013201001235,SYSTEM,vpn,0,2026/10/20 08:15:40,,ike-nego-p1-fail,GW-AWS-TGW1,0,0,general,high,\"IKE phase-1 negotiation is failed as initiator, main mode. Failed SA: 192.0.2.10[500]-198.51.100.77[500] cookie:84a7d9c1e2f30455:0000000000000000. Due to timeout.\",7310050,0x0,0,0,0,0,,PA-DC2-02",
+    "<11>Oct 20 08:15:45 PA-DC2-02 1,2026/10/20 08:15:45,013201001235,SYSTEM,vpn,0,2026/10/20 08:15:45,,ike-nego-p2-fail,TUN-AWS-TGW1,0,0,general,high,\"IKE phase-2 negotiation is failed as initiator, quick mode. Failed SA: 192.0.2.10[500]-198.51.100.77[500] message id:0x5A3C1F20.\",7310051,0x0,0,0,0,0,,PA-DC2-02",
+    "<12>Oct 20 08:16:30 PA-DC2-02 1,2026/10/20 08:16:30,013201001235,SYSTEM,routing,0,2026/10/20 08:16:30,,routed-bgp-peer-status,TGW1-PEER,0,0,general,high,BGP peer 169.254.20.1 (virtual router default) state changed from Established to Idle,7310060,0x0,0,0,0,0,,PA-DC2-02"
+  ],
+  "expect": {
+    "root": {
+      "description_any": [
+        "Firewall HA failover / state change"
+      ],
+      "devices_any": [
+        "PA-DC2-01",
+        "PA-DC2-02"
+      ]
+    },
+    "top_k": 1,
+    "must_detect": [
+      "Firewall HA failover / state change",
+      "IPsec IKE Phase 1 negotiation failure",
+      "BGP peer down / connect failure"
+    ],
+    "must_not_detect": [
+      "Firewall HA split-brain / heartbeat loss"
+    ],
+    "suppressed": [
+      "IPsec IKE Phase 1 negotiation failure",
+      "IPsec IKE Phase 2 negotiation failure"
+    ],
+    "suppression_root": {
+      "kind": "platform",
+      "hosts_any": [
+        "pa-dc2-01",
+        "pa-dc2-02"
+      ]
+    }
+  }
+}

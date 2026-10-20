@@ -221,6 +221,8 @@ def cmd_eval(args: argparse.Namespace) -> int:
     """
     from ai_log_analyzer import judge
 
+    if args.golden:
+        return _cmd_eval_golden(args)
     if args.file:
         try:
             with open(args.file, encoding="utf-8") as fh:
@@ -251,6 +253,90 @@ def cmd_eval(args: argparse.Namespace) -> int:
         print(f"\nFAIL: overall {report['overall']} < required {args.min_score}",
               file=sys.stderr)
         return 1
+    return 0
+
+
+def _cmd_eval_golden(args: argparse.Namespace) -> int:
+    """Replay the labeled golden incidents and score RCA accuracy,
+    de-tokenization, guardrail compliance and evidence (0-1 each)."""
+    from ai_log_analyzer import judge
+
+    report = judge.run_eval(judge.load_cases(args.cases))
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(f"Golden incidents : {report['cases']}")
+        print("Scores           : " + "  ".join(f"{k}={v:.2f}" for k, v in report["scores"].items()))
+        print()
+        for r in report["results"]:
+            s = r["scores"]
+            print(f"  {s['overall']:.2f}  {r['id']}  (top item: {r['top_item']}; "
+                  f"playbook {r['playbook_quality']}/10)")
+            for note in r["notes"][:4]:
+                print(f"        ! {note}")
+    overall = report["scores"].get("overall", 0.0)
+    if args.min_golden and overall < args.min_golden:
+        print(f"\nFAIL: golden overall {overall} < required {args.min_golden}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_rag(args: argparse.Namespace) -> int:
+    """Build or query the local retrieval index (configs, drift, topology, runbooks, incidents)."""
+    from ai_log_analyzer import rag
+    from ai_log_analyzer.state_store import open_db
+
+    if args.rag_cmd == "drift":
+        with open(args.running, encoding="utf-8") as fh_r, open(args.golden_file, encoding="utf-8") as fh_g:
+            print(json.dumps(rag.config_drift(fh_r.read(), fh_g.read()), indent=2))
+        return 0
+    index = rag.RagIndex(open_db(args.db)) if args.db else rag.get_index()
+    if index is None:
+        print("error: no index — pass --db or set AI_LOG_ANALYZER_RAG_DB / AI_LOG_ANALYZER_STATE_DB",
+              file=sys.stderr)
+        return 2
+    if args.rag_cmd == "index":
+        sites = args.sites or os.environ.get("AI_LOG_ANALYZER_SITES_DIR", "") or \
+            str(Path(__file__).resolve().parent / "data" / "sites")
+        golden = args.golden or os.environ.get("AI_LOG_ANALYZER_GOLDEN_DIR", "") or None
+        report = rag.build_default_index(index, sites_dir=sites, golden_dir=golden, netbox=args.netbox)
+        print(json.dumps(report, indent=2))
+        return 0
+    if args.rag_cmd == "search":
+        hosts = [h for h in (args.hosts or "").split(",") if h]
+        hits = index.search(args.query, k=args.k, hosts=hosts)
+        if args.json:
+            print(json.dumps(hits, indent=2))
+        else:
+            for h in hits:
+                print(f"{h['score']:>7.2f}  {h['citation']}")
+        return 0
+    print(json.dumps(index.stats(), indent=2))
+    return 0
+
+
+def cmd_triage_worker(args: argparse.Namespace) -> int:
+    """Run the streaming triage loop in the foreground (systemd / container entrypoint)."""
+    from ai_log_analyzer import rag
+    from ai_log_analyzer.state_store import get_state_db
+    from ai_log_analyzer.triage_worker import StreamingTriageWorker
+
+    db = get_state_db()
+    if db is None:
+        print("error: AI_LOG_ANALYZER_STATE_DB must point at the syslog spool database", file=sys.stderr)
+        return 2
+    worker = StreamingTriageWorker(db, rag_index=rag.get_index())
+    if args.once:
+        print(json.dumps(worker.run_once(), indent=2, default=str))
+        return 0
+    worker.start()
+    try:
+        while worker.running:
+            worker._thread.join(1.0)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        worker.stop()
     return 0
 
 
@@ -402,7 +488,34 @@ def main() -> None:
     ep.add_argument("--json", action="store_true", help="Machine-readable output")
     ep.add_argument("--show", type=int, default=10, help="Verdicts to print, worst first (default 10)")
     ep.add_argument("--min-score", type=float, default=0.0, help="Exit 1 if overall quality is below this (CI gate)")
+    ep.add_argument("--golden", action="store_true",
+                    help="Replay the labeled golden incidents (RCA, de-tokenization, guardrail, evidence)")
+    ep.add_argument("--cases", help="Directory or JSON file of golden cases (default: bundled set)")
+    ep.add_argument("--min-golden", type=float, default=0.0,
+                    help="With --golden: exit 1 if the overall 0-1 score is below this")
     ep.set_defaults(func=cmd_eval)
+
+    rp = sub.add_parser("rag", help="Local retrieval index: build, search, stats, config drift")
+    rp.add_argument("--db", help="Index database (default: AI_LOG_ANALYZER_RAG_DB / AI_LOG_ANALYZER_STATE_DB)")
+    rsub = rp.add_subparsers(dest="rag_cmd", required=True)
+    ri = rsub.add_parser("index", help="(Re)build: KB runbooks, site configs + golden drift, NetBox, incidents")
+    ri.add_argument("--sites", help="Site bundles directory (default: bundled sites / AI_LOG_ANALYZER_SITES_DIR)")
+    ri.add_argument("--golden", help="Golden configs directory (<site>/<host>.txt or <host>.txt)")
+    ri.add_argument("--netbox", action="store_true", help="Also index NetBox devices and cables")
+    rs = rsub.add_parser("search", help="BM25 search with citations")
+    rs.add_argument("query")
+    rs.add_argument("--hosts", help="Comma-separated devices to boost")
+    rs.add_argument("-k", type=int, default=8)
+    rs.add_argument("--json", action="store_true")
+    rsub.add_parser("stats", help="Document counts per kind and source")
+    rd = rsub.add_parser("drift", help="Diff a running config against its golden config")
+    rd.add_argument("running")
+    rd.add_argument("golden_file")
+    rp.set_defaults(func=cmd_rag)
+
+    tw = sub.add_parser("triage-worker", help="Run the streaming triage loop over the syslog spool")
+    tw.add_argument("--once", action="store_true", help="Run one tick and print its report")
+    tw.set_defaults(func=cmd_triage_worker)
 
     rem_p = sub.add_parser("remediation", help="Generate rollback-guarded vendor CLI change plan")
     rem_p.add_argument("--device", required=True, help="Target device name")

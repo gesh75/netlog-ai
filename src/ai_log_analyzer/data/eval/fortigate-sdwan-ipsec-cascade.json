@@ -1,0 +1,58 @@
+{
+  "id": "fortigate-sdwan-ipsec-cascade",
+  "title": "FortiGate SD-WAN: HQ SLA failure drops the IPsec overlay and the DC1 BGP session",
+  "tags": [
+    "fortinet",
+    "sdwan",
+    "ipsec",
+    "juniper"
+  ],
+  "configs": [
+    {
+      "hostname": "dc1-edge-01",
+      "platform": "junos",
+      "config_text": "set security ike gateway gw-hq-fgt address 198.51.100.2\nset security ike gateway gw-hq-fgt external-interface ge-0/0/0\nset security ipsec vpn hq-fgt bind-interface st0.10\nset security ipsec vpn hq-fgt ike gateway gw-hq-fgt\nset protocols bgp group HQ-FGT type external\nset protocols bgp group HQ-FGT peer-as 65010\nset protocols bgp group HQ-FGT neighbor 169.254.10.2 hold-time 30\n"
+    }
+  ],
+  "logs": [
+    "<189>date=2026-10-20 time=07:00:58 devname=\"FGT-HQ-01\" devid=\"FG100FTK19000001\" tz=\"+0000\" vd=\"root\" logid=\"0113022925\" type=\"event\" subtype=\"sdwan\" level=\"warning\" logdesc=\"SDWAN SLA notification\" eventtype=\"SLA\" healthcheck=\"HC-DC1\" slatargetid=1 interface=\"wan1\" status=\"down\" latency=\"412.300\" jitter=\"58.120\" packetloss=\"18.000\" msg=\"Health Check member status changed. Member out-of-sla.\"",
+    "<189>date=2026-10-20 time=07:01:02 devname=\"FGT-HQ-01\" devid=\"FG100FTK19000001\" tz=\"+0000\" vd=\"root\" logid=\"0101037124\" type=\"event\" subtype=\"vpn\" level=\"error\" logdesc=\"IPsec phase 1 error\" msg=\"IPsec phase 1 error\" action=\"negotiate\" remip=203.0.113.10 locip=198.51.100.2 remport=500 locport=500 outintf=\"wan1\" cookies=\"5c1f2a3b4d5e6f70/0000000000000000\" user=\"N/A\" group=\"N/A\" xauthuser=\"jsmith\" xauthgroup=\"N/A\" assignip=N/A vpntunnel=\"HQ-DC1\" status=\"negotiate_error\" reason=\"peer SA proposal not match local policy\" peer_notif=\"NOT-APPLICABLE\"",
+    "<189>date=2026-10-20 time=07:01:05 devname=\"FGT-HQ-01\" devid=\"FG100FTK19000001\" tz=\"+0000\" vd=\"root\" logid=\"0101037138\" type=\"event\" subtype=\"vpn\" level=\"notice\" logdesc=\"IPsec connection status changed\" msg=\"IPsec connection status change\" action=\"tunnel-down\" remip=203.0.113.10 locip=198.51.100.2 remport=500 locport=500 outintf=\"wan1\" vpntunnel=\"HQ-DC1\" tunnelip=N/A tunnelid=1 tunneltype=\"ipsec\" duration=86400",
+    "Oct 20 07:01:06 dc1-edge-01 kmd[1802]: KMD_VPN_DOWN_ALARM_USER: VPN hq-fgt from 198.51.100.2 is down. Local-ip: 203.0.113.10, gateway name: gw-hq-fgt, vpn name: hq-fgt, tunnel-id: 131073, local tunnel-if: st0.10, remote tunnel-ip: Not-Available, Local IKE-ID: 203.0.113.10, Remote IKE-ID: 198.51.100.2, VR id: 0, SA Type: Static",
+    "Oct 20 07:02:36 dc1-edge-01 rpd[2210]: bgp_hold_timeout:4102: NOTIFICATION sent to 169.254.10.2 (External AS 65010): code 4 (Hold Timer Expired Error), Reason: holdtime expired for 169.254.10.2 (External AS 65010), socket buffer sndcc: 0 rcvcc: 0 TCP state: 4",
+    "Oct 20 07:02:36 dc1-edge-01 rpd[2210]: RPD_BGP_NEIGHBOR_STATE_CHANGED: BGP peer 169.254.10.2 (External AS 65010) changed state from Established to Idle (event HoldTime) (instance master)",
+    "<189>date=2026-10-20 time=07:04:05 devname=\"FGT-HQ-01\" devid=\"FG100FTK19000001\" tz=\"+0000\" vd=\"root\" logid=\"0103020300\" type=\"event\" subtype=\"router\" level=\"warning\" logdesc=\"BGP neighbor status changed\" msg=\"BGP: %BGP-5-ADJCHANGE: VRF 0 neighbor 169.254.10.1 Down Hold Timer Expired\""
+  ],
+  "expect": {
+    "root": {
+      "description_any": [
+        "SD-WAN SLA violation / member out of SLA"
+      ],
+      "devices_any": [
+        "FGT-HQ-01"
+      ]
+    },
+    "top_k": 1,
+    "must_detect": [
+      "SD-WAN SLA violation / member out of SLA",
+      "IPsec IKE Phase 1 negotiation failure",
+      "BGP hold timer expired"
+    ],
+    "suppressed": [
+      "IPsec IKE Phase 1 negotiation failure",
+      "BGP hold timer expired"
+    ],
+    "suppression_root": {
+      "kind": "transport",
+      "hosts_any": [
+        "fgt-hq-01"
+      ]
+    },
+    "evidence": [
+      {
+        "host": "dc1-edge-01",
+        "kind": "config"
+      }
+    ]
+  }
+}
