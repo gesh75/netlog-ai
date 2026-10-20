@@ -434,7 +434,7 @@ const NV2 = (() => {
   // ── root-cause incidents (suppression + correlation) ─────────────────────
   const CORR_KEY_LABEL = {
     shared_ip: "Peer IP", p2p_subnet: "P2P", same_tunnel: "Tunnel", same_interface: "Intf",
-    same_device_temporal: null,
+    shared_asn: "ASN", same_vrf: "VRF", same_device_temporal: null,
   };
 
   function entityChip(k, v) {

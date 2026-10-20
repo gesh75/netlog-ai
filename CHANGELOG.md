@@ -6,6 +6,15 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Added
+- **ASN and VRF entity correlation.** `correlate_entities` now joins failures across devices that drop sessions to the same external / origin AS (`shared_asn`) or fail in the same tenant VRF (`same_vrf`) inside the correlation window, so for example a transit outage that takes down eBGP on Junos, EOS and PAN-OS edges becomes one incident. Incidents carry a `shared` block (`{"asn": [...], "vrf": [...]}`), and the summary names the shared AS / VRF. The dashboard shows ASN / VRF entity chips.
+- **Noise guardrails for those joins:**
+  - ASNs join only on active routing / transport failures. Recoveries do not join on them.
+  - iBGP sessions, the local AS (learned from iBGP lines in the batch) and reserved ASNs (0, 23456, 65535, 4294967295) are never join keys.
+  - ASN spellings (`AS65010`, asdot `1.10`) are normalized first.
+  - Default-like tables (`default`, `global`, `main`, `0`, `root`, `mgmt`, `master`, `inet.0` and similar) never group events on their own. They join only when paired with the same external AS on an active routing failure.
+  - ASN / VRF evidence is not "strong", so an ASN- or VRF-only incident stays `medium` confidence.
+
 ## [2.0.0] - 2026-10-20
 
 **netlog-ai V2.** This release builds a sanitize-first, multi-vendor, evidence-cited network operations platform on top of 1.x, in five milestones:
