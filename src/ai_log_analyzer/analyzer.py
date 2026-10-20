@@ -11,6 +11,7 @@ from typing import Any
 
 from ai_log_analyzer import kb, llm
 from ai_log_analyzer.adapters.file import parse_lines
+from ai_log_analyzer.bgp_anomaly import BgpAnomalyCollector
 from ai_log_analyzer.causal import (
     _event_sort_key,
     _reference_dt,
@@ -26,12 +27,14 @@ from ai_log_analyzer.classifier import (
     LogEvent,
     iter_classify,
 )
+from ai_log_analyzer.correlate import _LAYER_BY_EVENT_TYPE, correlate_entities
 from ai_log_analyzer.dedup import (
     NetworkLogDeduplicator,
     is_dedup_enabled,
     reset_dedup_enabled,
     set_dedup_enabled,
 )
+from ai_log_analyzer.entity_state import EntityStateTracker, group_state, summarize
 from ai_log_analyzer.evpn_causal import is_evpn_causal_enabled
 from ai_log_analyzer.handoff import incident_handoff
 from ai_log_analyzer.netbox import enrich_hosts
@@ -50,7 +53,18 @@ _RECOVERY_DESCRIPTIONS: frozenset[str] = frozenset({
     "BGP peer established",
     "OSPF neighbor established",
     "LAG member joining bundle",
+    "VPN/IPsec tunnel up",
+    "SD-WAN member back in SLA",
+    "SD-WAN BFD session up",
+    "SD-WAN OMP peer up",
+    "SD-WAN control connection up",
 })
+
+# Action items whose entities all recovered rank below live outages of the
+# same severity; flapping sits between the two.
+_STATE_RANK: dict[str, int] = {"active": 0, "": 0, "flapping": 1, "recovered": 2, "up": 3}
+_CORRELATION_POOL = 2000
+_MAX_GROUP_ENTITIES = 200
 
 # Generic textbook placeholders the LLM falls back to when it ignores the
 # real inventory. Word-boundary matched, case-insensitive.
@@ -88,6 +102,10 @@ class ActionItem:
     sample_messages: list[str]
     deep_analysis: dict[str, Any] = field(default_factory=dict)
     recurrence: dict[str, Any] | None = None  # history from the incident store
+    # Down→up pairing over the group's entities: active | flapping |
+    # recovered | up | "" (no entity identity extracted).
+    state: str = ""
+    entity_states: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d = {
@@ -101,6 +119,9 @@ class ActionItem:
         }
         if self.recurrence:
             d["recurrence"] = self.recurrence
+        if self.state:
+            d["state"] = self.state
+            d["entity_states"] = self.entity_states
         return d
 
 
@@ -127,6 +148,9 @@ class AnalysisResult:
     repeat_offenders: list = field(default_factory=list)
     netbox: dict = field(default_factory=dict)
     evpn_causal: dict = field(default_factory=dict)
+    entity_states: dict = field(default_factory=dict)
+    bgp_anomalies: dict = field(default_factory=dict)
+    entity_correlation: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -151,6 +175,9 @@ class AnalysisResult:
             "repeat_offenders": self.repeat_offenders,
             "netbox": self.netbox,
             "evpn_causal": self.evpn_causal,
+            "entity_states": self.entity_states,
+            "bgp_anomalies": self.bgp_anomalies,
+            "entity_correlation": self.entity_correlation,
         }
 
 
@@ -420,7 +447,8 @@ def _try_parse_json(text: str) -> dict | None:
 # Action item aggregation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _group_actionable(e: ClassifiedEvent, seen: dict, seq: int) -> None:
+def _group_actionable(e: ClassifiedEvent, seen: dict, seq: int,
+                      entity: tuple[str, str, str] | None = None) -> None:
     """Fold one classified event into the action-item groups (streaming-safe).
 
     Groups are keyed by (severity, description) — bounded by the KB rule
@@ -440,8 +468,11 @@ def _group_actionable(e: ClassifiedEvent, seen: dict, seq: int) -> None:
         "count": 0,
         "devices": set(),
         "msg_heap": [],
+        "entities": set(),
     })
     bucket["count"] += 1
+    if entity is not None and len(bucket["entities"]) < _MAX_GROUP_ENTITIES:
+        bucket["entities"].add(entity)
     if e.hostname:
         bucket["devices"].add(e.hostname)
     entry = (e.timestamp, -seq, e.message[:300])
@@ -454,15 +485,19 @@ def _group_actionable(e: ClassifiedEvent, seen: dict, seq: int) -> None:
 def build_action_items(events: Iterable[ClassifiedEvent], llm_top_n: int = 3) -> list[ActionItem]:
     """Deduplicate events into action items, run LLM only on top-N priority items."""
     seen: dict[tuple[str, str], dict] = {}
+    tracker = EntityStateTracker()
     for seq, e in enumerate(events):
-        _group_actionable(e, seen, seq)
-    return _finalize_action_items(seen, llm_top_n)
+        _group_actionable(e, seen, seq, tracker.add(e, seq))
+    return _finalize_action_items(seen, llm_top_n, tracker.report())
 
 
-def _finalize_action_items(seen: dict, llm_top_n: int = 3) -> list[ActionItem]:
+def _finalize_action_items(seen: dict, llm_top_n: int = 3,
+                           entity_report: dict | None = None) -> list[ActionItem]:
+    report = entity_report or {}
+    states = {k: group_state(b.get("entities", ()), report) for k, b in seen.items()}
     sorted_keys = sorted(
         seen.keys(),
-        key=lambda k: (SEV_ORDER.get(k[0], 5), -seen[k]["count"]),
+        key=lambda k: (SEV_ORDER.get(k[0], 5), _STATE_RANK.get(states[k][0], 0), -seen[k]["count"]),
     )
 
     items: list[ActionItem] = []
@@ -487,6 +522,8 @@ def _finalize_action_items(seen: dict, llm_top_n: int = 3) -> list[ActionItem]:
             devices=devices,
             sample_messages=messages[:3],
             deep_analysis=deep,
+            state=states[key][0],
+            entity_states=states[key][1],
         ))
     return items
 
@@ -654,7 +691,16 @@ def _with_reserved_config(
 
 def _aggregate_stream(
     classified: Iterable[ClassifiedEvent], top_k: int = 300,
-) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict, TemplateMiner, StabilityTracker, list[ClassifiedEvent]]:
+) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict, TemplateMiner,
+           StabilityTracker, list[ClassifiedEvent]]:
+    """Legacy 8-tuple view of ``_aggregate_stream_ex`` (kept for callers/tests)."""
+    return _aggregate_stream_ex(classified, top_k)[:8]
+
+
+def _aggregate_stream_ex(
+    classified: Iterable[ClassifiedEvent], top_k: int = 300,
+) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int], dict, dict, TemplateMiner,
+           StabilityTracker, list[ClassifiedEvent], dict[str, Any]]:
     """Single bounded pass over a classified stream.
 
     Memory is O(top_k + KB rules + devices + template clusters) regardless of
@@ -664,6 +710,8 @@ def _aggregate_stream(
     classify_events()' ordering exactly (severity rank, then timestamp desc,
     then arrival). Events no KB rule matched are additionally mined into
     templates so novel message shapes surface instead of vanishing as noise.
+    The extras dict carries the bounded entity-state tracker, BGP anomaly
+    collector and cross-vendor correlation pool.
 
     Config-category events are reserved as earliest-per-host plus newest-N so
     the change-window correlator still sees the causative commit during a
@@ -678,11 +726,22 @@ def _aggregate_stream(
     by_host: dict[str, dict] = {}
     miner = TemplateMiner()
     tracker = StabilityTracker()
+    entities = EntityStateTracker()
+    bgp = BgpAnomalyCollector()
+    corr_pool: list[ClassifiedEvent] = []
+    corr_dropped = 0
 
     for seq, e in enumerate(classified):
         sev_counts[e.severity] = sev_counts.get(e.severity, 0) + 1
         cat_counts[e.category] = cat_counts.get(e.category, 0) + 1
-        _group_actionable(e, groups, seq)
+        _group_actionable(e, groups, seq, entities.add(e, seq))
+        bgp.add(e)
+        if e.event_type in _LAYER_BY_EVENT_TYPE and e.state != "up" \
+                and e.severity in ("critical", "high", "medium"):
+            if len(corr_pool) < _CORRELATION_POOL:
+                corr_pool.append(e)
+            else:
+                corr_dropped += 1
         _count_device(e, by_host)
         tracker.add(e)
         if e.category == "other" and e.message:
@@ -704,7 +763,8 @@ def _aggregate_stream(
         if len(top_events) >= top_k:
             break
     config_events = _merge_config_reserve(config_heap, first_config)
-    return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner, tracker, config_events
+    extras = {"entities": entities, "bgp": bgp, "corr_pool": corr_pool, "corr_dropped": corr_dropped}
+    return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner, tracker, config_events, extras
 
 
 def _event_to_raw_line(event: LogEvent) -> str:
@@ -768,9 +828,10 @@ def _analyze_inner(
 ) -> AnalysisResult:
     if is_dedup_enabled():
         events = _dedup_events(events)
-    top_events, sev_counts, cat_counts, groups, by_host, miner, tracker, config_events = _aggregate_stream(
-        iter_classify(events)
+    top_events, sev_counts, cat_counts, groups, by_host, miner, tracker, config_events, extras = (
+        _aggregate_stream_ex(iter_classify(events))
     )
+    entity_report = extras["entities"].report()
     causal_events = _with_reserved_config(top_events, config_events)
     # Opt-in cross-run persistence: flags templates never seen in ANY prior
     # run (AI_LOG_ANALYZER_TEMPLATE_STORE) — the classic AIOps early-warning.
@@ -784,6 +845,7 @@ def _analyze_inner(
         action_items = _finalize_action_items(
             groups,
             llm_top_n=llm_top_n if effective_llm else 0,
+            entity_report=entity_report,
         )
         summary, summary_llm = _executive_summary(
             sev_counts, cat_counts, score, grade, grade_label, action_items,
@@ -855,6 +917,10 @@ def _analyze_inner(
         repeat_offenders=repeats,
         netbox=netbox_data,
         evpn_causal=evpn_data,
+        entity_states=summarize(entity_report.values()),
+        bgp_anomalies=extras["bgp"].report(entity_report.values()),
+        entity_correlation={**correlate_entities(extras["corr_pool"]),
+                            "dropped": extras["corr_dropped"]},
     )
     result.handoff = incident_handoff(result.to_dict())
     return result

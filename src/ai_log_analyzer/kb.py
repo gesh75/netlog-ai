@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ai_log_analyzer import kb_vendor
+
 # ── Type shorthand ───────────────────────────────────────────────────────────
 # Action: {cli: {platform: command}, expected: str, note: str}
 # Phase:  {name: str, goal: str, actions: list[Action]}
@@ -2268,6 +2270,11 @@ KB: dict[str, dict[str, dict[str, Any]]] = {
     "vpn":        {"tunnel_down": _VPN_DOWN,    "_default": _VPN_DOWN},
     "redundancy": {"failover":    _REDUNDANCY,  "_default": _REDUNDANCY},
 }
+
+
+# Security / SD-WAN vendor and BGP-anomaly playbooks (matched before the
+# generic entries of the same category; adds the sdwan + firewall categories).
+kb_vendor.merge_into(KB)
 
 
 def lookup(category: str, description: str) -> dict[str, Any]:

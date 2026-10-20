@@ -2,7 +2,13 @@
 
 Produces deterministic pre-checks, transactional configuration blocks with
 auto-revert timers, post-checks, and explicit abort/rollback sequences across
-Arista EOS, Juniper Junos, Cisco NX-OS, Cisco IOS-XE, and FRRouting.
+Arista EOS, Juniper Junos, Cisco NX-OS, Cisco IOS-XE, FRRouting, Fortinet
+FortiOS, Palo Alto PAN-OS and Cisco Catalyst SD-WAN.
+
+Rollback semantics differ per platform and are stated in each plan:
+Junos/EOS/IOS-XE/SD-WAN have a native confirm timer; FortiOS revert mode
+restores the saved config by restarting the unit; PAN-OS has no commit timer,
+so its plan saves a named snapshot and rolls back by loading it.
 """
 
 from __future__ import annotations
@@ -22,6 +28,9 @@ class VendorOS(str, Enum):
     CISCO_NXOS = "cisco_nxos"
     CISCO_IOS_XE = "cisco_ios"
     FRR = "frr"
+    FORTINET_FORTIOS = "fortinet_fortios"
+    PALOALTO_PANOS = "paloalto_panos"
+    CISCO_SDWAN = "cisco_sdwan"
 
 
 class RemediationActionType(str, Enum):
@@ -48,6 +57,10 @@ _FORBIDDEN_CLI_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # Junos `clear bgp neighbor` with no peer resets every session too.
     ("clear_all_bgp", re.compile(r"^\s*clear\s+(?:ip\s+)?bgp\s+(?:(?:neighbor\s+)?(?:\*|all)(?!\S)(?!.*\bsoft\b)|neighbor\s*$)", re.IGNORECASE)),
     ("load_override", re.compile(r"^\s*load\s+(?:override|factory-default)\b", re.IGNORECASE)),
+    # FortiOS / PAN-OS / SD-WAN platform resets, wipes and restarts.
+    ("fortios_destructive", re.compile(r"^\s*execute\s+(?:factoryreset\w*|formatlogdisk|erase-disk|reboot|shutdown|restore\s+image)\b", re.IGNORECASE)),
+    ("panos_destructive", re.compile(r"^\s*request\s+(?:system\s+private-data-reset|restart\s+system|shutdown\s+system)\b", re.IGNORECASE)),
+    ("sdwan_destructive", re.compile(r"^\s*request\s+(?:software\s+reset|reset\s+all|platform\s+software\s+sdwan\s+software\s+reset)\b|^\s*reboot\s+now\b", re.IGNORECASE)),
     ("shell_wipe", re.compile(r"\brm\s+-[a-z]*r[a-z]*f?\s+/(?:\s|$)|\bmkfs\b|\bdd\s+if=.*\bof=/dev/", re.IGNORECASE)),
 ]
 
@@ -64,6 +77,9 @@ def _command_segments(cmd: str) -> list[str]:
 
 class SafetyViolationError(ValueError):
     """Raised when a proposed remediation violates network safety guardrails."""
+
+
+_NO_QOS_TEMPLATE = frozenset({VendorOS.FORTINET_FORTIOS, VendorOS.PALOALTO_PANOS, VendorOS.CISCO_SDWAN})
 
 
 @dataclass
@@ -90,6 +106,13 @@ class RemediationPlan:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    def _apply_heading(self) -> str:
+        if self.vendor == VendorOS.PALOALTO_PANOS:
+            return f"No Native Auto-Revert — Manual Rollback Window {self.rollback_minutes}m"
+        if self.vendor == VendorOS.FORTINET_FORTIOS:
+            return f"Revert Mode — Unit Restarts on Saved Config in {self.rollback_minutes}m if Unsaved"
+        return f"Auto-Reverts in {self.rollback_minutes}m if Unconfirmed"
+
     def to_markdown_card(self) -> str:
         """Render a copy-pasteable engineering remediation card for CLI, Web UI, or Jira."""
         pre_block = "\n".join(self.pre_checks)
@@ -105,7 +128,7 @@ class RemediationPlan:
             f"**Rationale:** {self.rationale}\n"
             + (f"**Blast Radius:** {self.blast_radius_notes}\n" if self.blast_radius_notes else "")
             + f"\n#### 1. Pre-Checks (Read-Only)\n```text\n{pre_block}\n```\n"
-            f"#### 2. Transactional Apply (Auto-Reverts in {self.rollback_minutes}m if Unconfirmed)\n"
+            f"#### 2. Transactional Apply ({self._apply_heading()})\n"
             f"```text\n{apply_block}\n```\n"
             f"#### 3. Post-Checks (Verify Convergence)\n```text\n{post_block}\n```\n"
             f"#### 4a. Confirm Change (Make Persistent)\n```text\n{confirm_block}\n```\n"
@@ -244,6 +267,50 @@ class RemediationGenerator:
             rollback_cmds = ["configure revert now"]
             return config_cmds, commit_timer, confirm_cmds, rollback_cmds
 
+        if vendor == VendorOS.FORTINET_FORTIOS:
+            # Revert mode: changes are live but unsaved; if not saved before the
+            # timer expires the unit restarts on the last saved configuration.
+            config_cmds = [
+                f"execute backup config flash netlog-ai-{session_tag}",
+                "config system global",
+                "    set cfg-save revert",
+                f"    set cfg-revert-timeout {rollback_minutes * 60}",
+                "end",
+                *body_commands,
+            ]
+            commit_timer = [
+                f"# changes are live and UNSAVED; auto-revert in {rollback_minutes} min restarts the unit "
+                "on the saved config — run in a maintenance window",
+            ]
+            confirm_cmds = ["execute cfg save", "config system global", "    set cfg-save automatic", "end"]
+            rollback_cmds = ["execute cfg reload"]
+            return config_cmds, commit_timer, confirm_cmds, rollback_cmds
+
+        if vendor == VendorOS.PALOALTO_PANOS:
+            snapshot = f"netlog-ai-{session_tag}.xml"
+            config_cmds = ["configure", f"save config to {snapshot}", *body_commands, "validate full"]
+            commit_timer = [
+                f'commit description "netlog-ai {session_tag}"',
+                f"# PAN-OS has no commit-confirmed timer: if post-checks fail within {rollback_minutes} min, "
+                "run the rollback block",
+            ]
+            confirm_cmds = ["exit"]
+            rollback_cmds = ["configure", f"load config from {snapshot}",
+                             f'commit description "netlog-ai rollback {session_tag}"']
+            return config_cmds, commit_timer, confirm_cmds, rollback_cmds
+
+        if vendor == VendorOS.CISCO_SDWAN:
+            # cEdge (IOS-XE SD-WAN) config-transaction / vEdge CLI. vManage
+            # template-attached devices must be changed through vManage.
+            config_cmds = ["config-transaction", *body_commands]
+            commit_timer = [f"commit confirmed {rollback_minutes}"]
+            confirm_cmds = ["config-transaction", "commit"]
+            rollback_cmds = [
+                "# let the commit-confirmed timer expire, or roll back now:",
+                "config-transaction", "rollback configuration 0", "commit",
+            ]
+            return config_cmds, commit_timer, confirm_cmds, rollback_cmds
+
         # FRR (vtysh transactional snapshot + reload test)
         config_cmds = [
             f"cp /etc/frr/frr.conf /etc/frr/frr.conf.{session_tag}.bak",
@@ -301,6 +368,19 @@ class RemediationGenerator:
                 f"show interfaces {interface} status",
                 "show ip bgp summary",
             ]
+        elif vendor == VendorOS.FORTINET_FORTIOS:
+            pre = ["diagnose sys sdwan member", "get router info bgp summary"]
+            body = ["config system interface", f"    edit {interface}", "        set status down",
+                    "    next", "end"]
+            post = ["diagnose sys sdwan health-check", "get router info bgp summary"]
+        elif vendor == VendorOS.PALOALTO_PANOS:
+            pre = [f"show interface {interface}", "show routing protocol bgp summary"]
+            body = [f"set network interface ethernet {interface} link-state down"]
+            post = [f"show interface {interface}", "show routing protocol bgp summary"]
+        elif vendor == VendorOS.CISCO_SDWAN:
+            pre = ["show sdwan bfd sessions", "show sdwan control connections"]
+            body = [f"interface {interface}", " shutdown"]
+            post = ["show sdwan bfd sessions", "show sdwan control connections"]
         else:
             pre = [f"show interface {interface}", "show ip bgp summary"]
             body = [f"interface {interface}", "shutdown"]
@@ -334,6 +414,11 @@ class RemediationGenerator:
         rationale: str = "Prioritize BFD/BGP control-plane traffic to eliminate microburst hold-timer drops.",
     ) -> RemediationPlan:
         """Generate strict-priority control-plane QoS/CoPP protection for BFD/BGP."""
+        if vendor in _NO_QOS_TEMPLATE:
+            raise SafetyViolationError(
+                f"No vetted QoS/CoPP template for {vendor.value}; use a custom plan "
+                "(local-in policy / zone protection / SD-WAN QoS) reviewed by an engineer."
+            )
         timer = self.default_rollback_minutes if rollback_minutes is None else rollback_minutes
         plan_id = self._make_plan_id(device, RemediationActionType.QOS_COPP_CONTROL_PLANE_BOOST, interface)
         session_tag = plan_id.replace("-", "_")

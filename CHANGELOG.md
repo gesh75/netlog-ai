@@ -6,6 +6,21 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Added — multi-vendor schema, parsers and BGP intelligence
+
+- **Canonical event schema.** `LogEvent` / `ClassifiedEvent` gain optional `vendor`, `event_type`, `interface`, `peer_ip`, `asn`, `vrf`, `vni`, `tunnel_id`, `action` (`vendor_action` on `ClassifiedEvent`), `state`, `normalized_utc_ts` and an `attrs` map. The five-field constructor is unchanged; `ClassifiedEvent.to_dict()` adds an `entities` key only when fields are known.
+- **Parser plugin registry** (`ai_log_analyzer/parsers/`) replaces the first-regex-wins parser: FortiOS key=value (VPN/IKE, SD-WAN SLA, router BGP, HA, conserve mode, traffic/UTM), PAN-OS CSV (SYSTEM routing/vpn/ha/globalprotect, TRAFFIC, THREAT, GLOBALPROTECT), Cisco Catalyst SD-WAN (vEdge notifications + cEdge FTMD/OMPD/VDAEMON), and entity enrichment for Junos, EOS, IOS-XE, NX-OS, FRR, SONiC, Cumulus and SR Linux. Legacy base fields are byte-identical. Connector events are enriched lazily in the classifier. See `docs/PARSERS.md`.
+- **Classifier + KB.** Rules and 5-phase playbooks (FortiOS / PAN-OS / SD-WAN CLI) for IKE Phase 1/2 and DPD failures, SD-WAN SLA violations, BFD / OMP / control-connection loss, firewall HA split-brain and failover, FortiGate conserve mode and session-table exhaustion, IPS hits, GlobalProtect auth failures; new `sdwan` and `firewall` categories.
+- **BGP anomaly detection** (`bgp_anomaly.py`, `AnalysisResult.bgp_anomalies`): RFC 4271 / RFC 4486 NOTIFICATION decoding, RFC 8203 shutdown communication, planned vs unplanned, max-prefix warning vs exceeded with counts, origin / AS-path changes, per-peer flapping and fabric-wide route-flap storms. Hold-timer expiry and administrative Cease now get distinct playbooks.
+- **Down → up state pairing** (`entity_state.py`): action items carry `state` (`active` / `flapping` / `recovered`) and `entity_states`; active outages rank above recovered ones of the same severity. `AnalysisResult.entity_states` summarizes every entity.
+- **Cross-vendor entity correlation** (`correlate.correlate_entities`, `AnalysisResult.entity_correlation`): joins events on shared IPs, BGP /30-/31 point-to-point subnets, device interfaces and tunnels, and same-device timing; root = lowest layer, earliest event (e.g. FortiGate SD-WAN SLA miss → IPsec down → Junos KMD VPN down → BGP hold-timer on both ends).
+- **Remediation vendors:** `fortinet_fortios` (revert mode — honest about the restart on revert), `paloalto_panos` (named snapshot + manual rollback; no native timer), `cisco_sdwan` (`config-transaction` + `commit confirmed`). QoS/CoPP templates are refused for these vendors. Guardrail blocks FortiOS/PAN-OS/SD-WAN factory-reset, wipe and restart commands.
+
+### Changed
+
+- Hold-timer, max-prefix, administrative Cease, protocol NOTIFICATION and origin/AS-path lines get specific descriptions instead of the generic "BGP peer down" bucket (same severity/category).
+- Classifier literal gate is now per pattern (only patterns whose guaranteed literal occurs are tried, in table order): identical results, ~3.6× faster classification stage. End-to-end ingest is ~30 % slower than before this release on a 147k-line mixed corpus because every line now gets entity extraction, state pairing and correlation.
+
 ### Security
 
 - **Central LLM gateway** (`llm.query()`). Every LLM call — analyzer, copilot, diff, judge, site_doc, site_optimize — now passes one boundary that re-applies secret/PII redaction, so no caller can forget it.

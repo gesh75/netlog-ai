@@ -1,0 +1,36 @@
+Oct 20 10:00:01 pe-01 bgpd[1100]: %MAXPFX: No. of IPv4 Unicast prefix received from 192.0.2.1 reaches 8001, max 10000
+Oct 20 10:00:31 pe-01 bgpd[1100]: %MAXPFXEXCEED: No. of IPv4 Unicast prefix received from 192.0.2.1 reaches 10001, max 10000
+Oct 20 10:00:31 pe-01 bgpd[1100]: %NOTIFICATION: sent to neighbor 192.0.2.1 6/1 (Cease/Maximum Number of Prefixes Reached) 7 bytes 00 01 00 00 27 10
+Oct 20 10:01:00 ce-02 1234: %BGP-4-MAXPFX: No. of prefix received from 198.51.100.9 (afi 0) reaches 80, max 100
+Oct 20 10:05:00 spine1 Bgp: %BGP-3-NOTIFICATION: received from neighbor 10.0.1.1 (VRF default AS 65101) 6/2 (Cease/administrative shutdown) reset reason Shutdown Communication: "CHG0012345 planned leaf1 maintenance"
+Oct 20 10:05:02 leaf2 rpd[2210]: bgp_send: NOTIFICATION sent to 10.0.1.5 (Internal AS 65000): code 6 (Cease) subcode 2 (Administratively Shutdown), Reason: Shutdown Communication: "drain for RMA RITM0099"
+Oct 20 10:06:00 leaf3 bgpd[900]: %NOTIFICATION: received from neighbor 10.0.1.9 6/4 (Cease/Administrative Reset) 0 bytes
+Oct 20 10:07:00 border1 bgpd[900]: %NOTIFICATION: received from neighbor 10.0.2.2 2/2 (OPEN Message Error/Bad Peer AS) 2 bytes FD E9
+Oct 20 10:07:30 border1 bgpd[900]: %NOTIFICATION: received from neighbor 10.0.2.6 3/1 (UPDATE Message Error/Malformed Attribute List) 0 bytes
+Oct 20 10:08:00 nx-01 %BGP-5-ADJCHANGE: bgp-65001 [12345] (default) neighbor 10.0.3.1 Down - holdtimer expired error
+Oct 20 10:09:00 bgpmon-01 bgp-monitor[777]: BGP origin AS changed for prefix 203.0.113.0/24: AS64500 -> AS64666 (possible hijack) via peer 10.0.4.1
+Oct 20 10:09:05 bgpmon-01 bgp-monitor[777]: BGP AS-path change for prefix 198.51.100.0/24 via peer 10.0.4.1: 65010 3356 64500 -> 65010 174 64666 64500
+Oct 20 10:11:00 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine0) in vrf default Down BGP Notification send
+Oct 20 10:11:20 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine0) in vrf default Up
+Oct 20 10:11:50 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine1) in vrf default Down BGP Notification send
+Oct 20 10:11:70 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine1) in vrf default Up
+Oct 20 10:12:40 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine2) in vrf default Down BGP Notification send
+Oct 20 10:12:60 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.1(spine2) in vrf default Up
+Oct 20 10:11:00 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine0) in vrf default Down BGP Notification send
+Oct 20 10:11:20 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine0) in vrf default Up
+Oct 20 10:11:50 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine1) in vrf default Down BGP Notification send
+Oct 20 10:11:70 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine1) in vrf default Up
+Oct 20 10:12:40 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine2) in vrf default Down BGP Notification send
+Oct 20 10:12:60 leaf5 bgpd[900]: %ADJCHANGE: neighbor 10.0.5.5(spine2) in vrf default Up
+Oct 20 10:11:00 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.1(spine0) in vrf default Down BGP Notification send
+Oct 20 10:11:20 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.1(spine0) in vrf default Up
+Oct 20 10:11:50 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.1(spine1) in vrf default Down BGP Notification send
+Oct 20 10:11:70 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.1(spine1) in vrf default Up
+Oct 20 10:12:40 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.1(spine2) in vrf default Down BGP Notification send
+Oct 20 10:12:60 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.1(spine2) in vrf default Up
+Oct 20 10:11:00 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.5(spine0) in vrf default Down BGP Notification send
+Oct 20 10:11:20 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.5(spine0) in vrf default Up
+Oct 20 10:11:50 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.5(spine1) in vrf default Down BGP Notification send
+Oct 20 10:11:70 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.5(spine1) in vrf default Up
+Oct 20 10:12:40 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.5(spine2) in vrf default Down BGP Notification send
+Oct 20 10:12:60 leaf6 bgpd[900]: %ADJCHANGE: neighbor 10.0.6.5(spine2) in vrf default Up
