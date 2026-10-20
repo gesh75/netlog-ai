@@ -6,6 +6,8 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-20
+
 ### Added
 - **ASN and VRF entity correlation.** `correlate_entities` now joins failures across devices that drop sessions to the same external / origin AS (`shared_asn`) or fail in the same tenant VRF (`same_vrf`) inside the correlation window, so for example a transit outage that takes down eBGP on Junos, EOS and PAN-OS edges becomes one incident. Incidents carry a `shared` block (`{"asn": [...], "vrf": [...]}`), and the summary names the shared AS / VRF. The dashboard shows ASN / VRF entity chips.
 - **Noise guardrails for those joins:**
