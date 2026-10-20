@@ -13,11 +13,64 @@
 > 🗂️ Part of the **[gesh75 documentation hub](https://gesh75.github.io/)** — all my network & AI engineering project docs in one place.
 
 
-> **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog events from any vendor (Junos, Arista EOS, FRR, IOS-XE, NX-OS, SR Linux, SONiC, Cumulus), builds a prioritized action list, and lets an LLM write the root-cause analysis with copy-pastable CLI fixes.
+> **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog from data-center, security and SD-WAN gear (Cisco IOS-XE / NX-OS / Catalyst SD-WAN, Juniper Junos, Arista EOS, Fortinet FortiOS, Palo Alto PAN-OS, plus FRR, SR Linux, SONiC, Cumulus), correlates it across vendors into root-cause incidents, and writes evidence-cited playbooks with guarded CLI and Ansible fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-632%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-901%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
-> 📓 Release **v1.3.0** — **Deep network analytics, ServiceNow change correlation, and SPOF overlay** on **v1.2.0 SolarWinds Orion / Observability SaaS** — details in [`CHANGELOG.md`](CHANGELOG.md).
+> 📓 Release **v2.0.0** — the V2 platform: a sanitize-first LLM gateway, multi-vendor security and SD-WAN parsing with cross-vendor correlation, durable multi-worker ingest with topology-aware suppression, evidence-cited RCA with streaming ticket triage, RBAC with an audit trail, and a dashboard for all of it. Details in [`CHANGELOG.md`](CHANGELOG.md); upgrade notes in [What's new in v2.0.0](#whats-new-in-v200).
+
+## V2 at a glance
+
+```mermaid
+flowchart LR
+  subgraph Ingest
+    S[Syslog UDP / TCP / TLS<br/>RFC 6587, allow-list] --> SP[(SQLite WAL spool<br/>state DB)]
+    F[Files · connectors<br/>Splunk, Kibana, SolarWinds, ServiceNow] --> PR
+    SP --> PR[Parser registry<br/>canonical event schema]
+  end
+  PR --> C[Classifier + KB] --> X[Entity pairing · BGP anomalies<br/>cross-vendor correlation<br/>topology-aware suppression]
+  X --> R[RAG evidence<br/>configs · golden drift · NetBox<br/>runbooks · past incidents]
+  R --> G[LLM gateway<br/>sanitize → vault tokens → budget<br/>egress policy]
+  G --> P[Cited playbooks<br/>SafetyGuardrail on all CLI]
+  P --> E[Remediation: vendor CLI ·<br/>Ansible check-mode · Nornir]
+  X --> T[Streaming triage worker<br/>cooldowns · rate limit · lease]
+  T --> I[Jira · ServiceNow · webhook]
+  UI[Dashboard + REST + MCP<br/>RBAC: viewer / operator / admin] --- P
+  UI --- A[(Append-only audit log)]
+```
+
+| Vendor / platform | Parsing & events | Remediation plan | Automation export |
+|---|---|---|---|
+| Cisco IOS-XE | ✓ | revert timer | `cisco.ios` · Nornir |
+| Cisco NX-OS | ✓ | checkpoint / rollback | `cisco.nxos` · Nornir |
+| Cisco Catalyst SD-WAN (vEdge / cEdge) | ✓ BFD, OMP, control, SLA | `commit confirmed` | refused, use vManage |
+| Juniper Junos | ✓ | `commit confirmed` | `junipernetworks.junos` · Nornir |
+| Arista EOS | ✓ | commit timer | `arista.eos` · Nornir |
+| Fortinet FortiOS | ✓ IPsec / IKE, SD-WAN SLA, HA, BGP, conserve mode, UTM | revert mode | `fortinet.fortios` (drain) |
+| Palo Alto PAN-OS | ✓ SYSTEM, TRAFFIC, THREAT, GlobalProtect, HA | snapshot + manual rollback | `paloaltonetworks.panos` (drain) |
+| FRR | ✓ | vtysh auto-revert | `vtysh` + backup restore |
+| Nokia SR Linux, SONiC, Cumulus | ✓ | — | — |
+
+| Role | Can |
+|---|---|
+| `viewer` | dashboards, incident search, live tail, triage status, retrieval search |
+| `operator` | viewer + analyze, correlate, copilot, remediation plans, ITSM enrichment, resolve incidents |
+| `admin` | operator + `/api/run`, LLM provider / toggle, sources and rules, triage worker control, index rebuild, audit log |
+
+Key settings (full list in [`.env.example`](.env.example) and [docs/OPERATIONS.md](docs/OPERATIONS.md)):
+
+| Variable | Purpose |
+|---|---|
+| `AI_LOG_ANALYZER_STATE_DB` | shared SQLite WAL DB: syslog spool, incidents, LLM toggles, retrieval index, audit log, triage state |
+| `ALLOW_CLOUD_FALLBACK` | default `false`: a local LLM never falls back to a cloud API |
+| `LLM_TOKENIZE_HOSTNAMES`, `LLM_MAX_PROMPT_CHARS` | vault tokenization of hostnames (`auto` = cloud only) and per-provider prompt budget |
+| `AI_LOG_ANALYZER_SYSLOG_ALLOW`, `AI_LOG_ANALYZER_SYSLOG_RCVBUF` | syslog sender allow-list and socket buffer |
+| `AI_LOG_ANALYZER_DEPENDENCIES` | optional dependency map for topology-aware suppression |
+| `AI_LOG_ANALYZER_RAG_DB`, `AI_LOG_ANALYZER_GOLDEN_DIR`, `AI_LOG_ANALYZER_RAG` | retrieval index location, golden configs, off switch (`0`) |
+| `AI_LOG_ANALYZER_TRIAGE_WORKER`, `AI_LOG_ANALYZER_TRIAGE_SINKS` | start the streaming triage worker; `jira`, `servicenow`, `webhook` or `dry-run` (default) |
+| `AI_LOG_ANALYZER_TRIAGE_COOLDOWN_S`, `…_MAX_TICKETS_PER_HOUR`, `…_WINDOW_S`, `…_MIN_SEVERITY` | ticket-storm controls |
+| `AI_LOG_ANALYZER_VIEWER_TOKENS`, `…_OPERATOR_TOKENS`, `…_ADMIN_TOKENS`, `AI_LOG_ANALYZER_RBAC_FILE` | RBAC principals (`AI_LOG_ANALYZER_API_TOKEN` still works as admin) |
+| `AI_LOG_ANALYZER_AUDIT_DB`, `AI_LOG_ANALYZER_AUDIT_LLM` | audit store (defaults to the state DB); LLM call auditing `cloud` / `all` / `off` |
 
 ---
 
@@ -32,33 +85,37 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
-## What's new (unreleased) — V2 dashboard
+## What's new in v2.0.0
 
-- **Sign in with a role token** from the header; the UI works on RBAC deployments (viewer / operator / admin).
-- **Live status bar**: syslog spool depth, streaming-triage state and tickets, the LLM egress policy (*Local only · no cloud fallback* vs *Cloud enabled*) and vault tokenization stats.
-- **Root-cause incident cards** with the shared peer IPs, ASNs, tunnels and VRFs, and the suppressed downstream alerts one click away; FortiOS / PAN-OS / SD-WAN vendor and event-type badges.
-- **Remediation as Vendor CLI, Ansible (check-mode dry run first) or Nornir**, downloadable; commands withheld by the SafetyGuardrail are flagged ⛔ and cannot be run.
-- **Clickable RAG citations** (config lines, golden drift, NetBox, past incidents) in playbooks and Copilot, plus an admin audit-log viewer.
+Five milestones, each its own PR:
 
-## What's new (unreleased) — evidence-grounded RCA, streaming triage, RBAC
+1. **LLM gateway & reversible vault** ([#57](https://github.com/gesh75/netlog-ai/pull/57)).
+   - **Single gateway:** every LLM call goes through `llm.query()`, which sanitizes first, then applies per-incident reversible tokens (`<IP_n>`, `<HOST_n>`, `<ASN_n>`), per-provider prompt budgets, and retry/backoff.
+   - **No silent cloud egress:** `ALLOW_CLOUD_FALLBACK=false` by default.
+   - **Guardrail:** the SafetyGuardrail screens all model-generated CLI.
+2. **Multi-vendor security & SD-WAN** ([#58](https://github.com/gesh75/netlog-ai/pull/58)).
+   - **Parsing:** FortiOS, PAN-OS and Catalyst SD-WAN parsers on a pluggable registry, with a canonical event schema (vendor, event type, peer IP, ASN, VRF, VNI, interface, tunnel, state, UTC time).
+   - **Correlation:** down → up pairing, BGP anomaly detection (RFC 4271/4486/8203, max-prefix, path changes, flap storms) and cross-vendor correlation, so a FortiGate SLA miss → IPsec drop → Junos BGP hold-timer chain is reported as one incident.
+3. **Durable ingest & automation** ([#59](https://github.com/gesh75/netlog-ai/pull/59), landed via [#60](https://github.com/gesh75/netlog-ai/pull/60)).
+   - **Durable syslog:** multi-worker TCP/TLS syslog (RFC 6587, allow-list, sender attribution) into a SQLite WAL spool shared by every worker.
+   - **Suppression:** topology-aware alert suppression for dead routers, HA failovers and transport loss.
+   - **Automation export:** Ansible (check-mode dry run, guarded apply, rollback `rescue`) and Nornir export.
+4. **Evidence, triage, RBAC & evaluation** ([#61](https://github.com/gesh75/netlog-ai/pull/61)).
+   - **Cited evidence:** local BM25 retrieval over configs, golden drift, NetBox, runbooks and resolved incidents, so every playbook cites `[S#]` evidence.
+   - **Streaming triage:** the worker opens Jira / ServiceNow / webhook tickets with cooldowns and a rate limit.
+   - **RBAC & audit:** viewer / operator / admin roles and an append-only, hash-chained audit log.
+   - **Golden-incident harness:** `ai-log-analyzer eval --golden`.
+5. **V2 dashboard** ([#62](https://github.com/gesh75/netlog-ai/pull/62)).
+   - **Sign-in and status:** role-token sign-in, plus a live status bar (spool, triage, LLM egress policy, vault).
+   - **Incident cards:** root-cause cards with suppressed alerts and shared entities.
+   - **Remediation tabs:** CLI / Ansible / Nornir, with ⛔ guardrail flags.
+   - **Citations & audit:** clickable RAG citations and an audit-log viewer.
 
-- **Every RCA cites its evidence**: a local BM25 index (SQLite, no external service) over device configs, running-vs-golden drift, NetBox topology, KB runbooks and resolved past incidents. Playbooks and Copilot answers carry `[S1]`-style citations such as `leaf1 running-config L102-L118` or `INC-000042 (2026-10-01, resolved)`; invented citations and line numbers are flagged — see [docs/OPERATIONS.md](docs/OPERATIONS.md#retrieval-index-rag).
-- **Continuous streaming triage**: a background worker tails the syslog spool, correlates and suppresses over a sliding window, and opens or updates ServiceNow / Jira / webhook tickets with the RCA and a check-mode Ansible plan attached, with per-incident cooldowns and a global rate limit against ticket storms.
-- **RBAC + audit trail**: `viewer` / `operator` / `admin` tokens separate dashboards from analysis and from privileged actions (`/api/run`, LLM toggles, configuration); an append-only, hash-chained audit log records who ran what, including every external LLM call.
-- **Golden-incident eval harness**: `ai-log-analyzer eval --golden` replays labeled EVPN, BGP leak/flap, FortiGate SD-WAN/IPsec and PAN-OS HA incidents and scores RCA accuracy, de-tokenization, guardrail compliance and evidence.
-
-## What's new (unreleased) — durable ingest, suppression, Ansible
-
-- **Durable, multi-worker syslog**: TCP/TLS with RFC 6587 framing and concurrent connections, sender-IP attribution, allow-list, and a SQLite WAL spool shared by every Gunicorn worker (also used for incident memory and LLM toggles) — see [docs/OPERATIONS.md](docs/OPERATIONS.md).
-- **Topology-aware suppression**: a dead core router, firewall HA failover or SD-WAN transport loss is one root incident, not a storm of child alerts.
-- **Ansible / Nornir export** of every remediation plan with a check-mode diff first and a rollback `rescue` block.
-
-## What's new (unreleased) — multi-vendor security & SD-WAN
-
-- **Fortinet FortiOS, Palo Alto PAN-OS and Cisco Catalyst SD-WAN** parsers on a pluggable parser registry, with a canonical event schema (vendor, event type, peer IP, ASN, VRF, VNI, interface, tunnel, down/up state, UTC time) across every vendor — see [docs/PARSERS.md](docs/PARSERS.md).
-- **Cross-vendor correlation**: a FortiGate SD-WAN SLA miss → IPsec drop → Junos BGP hold-timer expiry is reported as one incident with its root cause, joined on shared IPs and point-to-point subnets.
-- **BGP anomaly detection**: NOTIFICATION code decoding (RFC 4271/4486), RFC 8203 shutdown messages (planned vs unplanned), max-prefix, origin/AS-path changes, route-flap storms.
-- **Recovered ≠ outage**: a down followed by a matching up is flagged `recovered` (or `flapping`), not an active hard outage.
+**Upgrading from 1.x**
+- **Cloud fallback is off:** cloud fallback is now opt-in. Set `ALLOW_CLOUD_FALLBACK=true` to keep the old local → cloud behavior.
+- **API token is admin:** `AI_LOG_ANALYZER_API_TOKEN` maps to the `admin` role, so existing tokens keep full access. Add viewer and operator tokens to narrow access. With RBAC on, sign in from the 👤 chip in the dashboard.
+- **Header-less syslog hostnames:** these lines are now attributed to the sender IP instead of `syslog`.
+- **Shared state DB:** set `AI_LOG_ANALYZER_STATE_DB` for multi-worker deployments. It also turns on the durable spool, retrieval evidence and the audit log.
 
 ## What's new in v1.3.0
 

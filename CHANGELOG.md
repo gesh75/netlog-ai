@@ -6,6 +6,34 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-20
+
+**netlog-ai V2.** This release builds a sanitize-first, multi-vendor, evidence-cited network operations platform on top of 1.x, in five milestones:
+
+| # | Milestone | PR |
+|---|---|---|
+| 1 | **LLM gateway & reversible vault.** One `llm.query()` boundary for every call: secret/PII redaction, then per-incident reversible tokens (`<IP_n>`, `<HOST_n>`, `<ASN_n>`), per-provider budgets, retry/backoff and no silent cloud egress. The SafetyGuardrail screens all model-generated CLI. | [#57](https://github.com/gesh75/netlog-ai/pull/57) |
+| 2 | **Multi-vendor security & SD-WAN.** FortiOS, PAN-OS and Catalyst SD-WAN parsers on a pluggable registry with a canonical event schema; down → up pairing; BGP anomaly detection; cross-vendor correlation. | [#58](https://github.com/gesh75/netlog-ai/pull/58) |
+| 3 | **Durable ingest & automation.** Multi-worker TCP/TLS syslog into a SQLite WAL spool; topology-aware suppression; Ansible (check mode, guarded apply, rollback) and Nornir export. | [#59](https://github.com/gesh75/netlog-ai/pull/59) via [#60](https://github.com/gesh75/netlog-ai/pull/60) |
+| 4 | **Evidence, triage, RBAC & evaluation.** Local BM25 retrieval with `[S#]` citations (configs, golden drift, NetBox, runbooks, resolved incidents); streaming triage worker with ticket-storm controls; viewer / operator / admin roles; append-only hash-chained audit log; golden-incident regression harness. | [#61](https://github.com/gesh75/netlog-ai/pull/61) |
+| 5 | **V2 dashboard.** Role-token sign-in, live status bar (spool, triage, LLM egress, vault), root-cause incident cards, CLI / Ansible / Nornir remediation tabs with ⛔ guardrail flags, clickable citations, audit-log viewer. | [#62](https://github.com/gesh75/netlog-ai/pull/62) |
+
+**Supported vendors:**
+- **Fully supported:** Cisco IOS-XE, NX-OS and Catalyst SD-WAN; Juniper Junos; Arista EOS; Fortinet FortiOS; Palo Alto PAN-OS; FRR. These have parsing, remediation plans and automation export where the platform allows it; SD-WAN changes go through vManage.
+- **Parsing and classification only:** Nokia SR Linux, SONiC and Cumulus.
+
+**Upgrading from 1.x**
+- **Cloud fallback is now opt-in.** `ollama` / `local` no longer fall back to Claude or Grok. Set `ALLOW_CLOUD_FALLBACK=true` to restore it.
+- **API token maps to admin.** `AI_LOG_ANALYZER_API_TOKEN` maps to the `admin` role, so existing integrations keep full access. Add `AI_LOG_ANALYZER_{VIEWER,OPERATOR}_TOKENS` to narrow access. With RBAC on, the dashboard asks for a token via the 👤 chip.
+- **Syslog hostnames:** header-less syslog lines are attributed to their sender IP instead of the literal `syslog`.
+- **Shared state DB recommended.** Set `AI_LOG_ANALYZER_STATE_DB` for multi-worker deployments. It also enables the durable spool, incident memory with stable `INC-` IDs, retrieval evidence, the audit log and the triage worker.
+- **Evidence retrieval cost.** Analyses retrieve evidence when a state or RAG DB is configured, adding about 25 ms per playbook. Set `AI_LOG_ANALYZER_RAG=0` to turn it off.
+- **Classifier change:** `VXLAN_TUNNEL_DOWN` / VTEP-down lines are classified as `evpn` (were "VPN/IPsec tunnel failure").
+
+**Verification:**
+- **Tests:** 901 tests pass on Python 3.10, 3.11 and 3.12.
+- **Eval harness:** `ai-log-analyzer eval --golden` scores 1.00 on RCA accuracy, de-tokenization, guardrail compliance and evidence across the four labeled incidents (EVPN underlay cascade, BGP route leak + flap, FortiGate SD-WAN/IPsec cascade, PAN-OS HA failover).
+
 ### Added — V2 dashboard
 
 - **API-token sign-in.** The UI now works on RBAC deployments: a 👤 chip next to the brand takes a viewer / operator / admin token. The token is kept in `sessionStorage` and sent as `Authorization: Bearer` on every `/api/*` call, or as `?token=` for the SSE live tail. Before this, the dashboard could not call protected routes once tokens were configured.

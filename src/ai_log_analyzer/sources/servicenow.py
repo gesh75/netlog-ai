@@ -142,7 +142,7 @@ def _headers(config: SourceConfig) -> dict[str, str]:
     auth_type = str((config.extra or {}).get("auth_type") or "").strip().lower()
     if auth_type not in {"basic", "bearer"}:
         auth_type = "basic" if config.username else "bearer"
-    headers = {"Accept": "application/json", "User-Agent": "netlog-ai/1.3.0"}
+    headers = {"Accept": "application/json", "User-Agent": "netlog-ai/2.0.0"}
     if auth_type == "basic":
         if not config.username:
             raise SourceAuthError(f"ServiceNow {config.id} basic auth requires a username")
