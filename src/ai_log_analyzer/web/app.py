@@ -22,16 +22,19 @@ except ImportError:
     pass
 
 import itertools
+from collections.abc import Callable
 from functools import wraps
 
-from flask import Flask, abort, jsonify, request, send_from_directory
+from flask import Flask, abort, jsonify, make_response, request, send_from_directory
 from flask_cors import CORS
 
 from ai_log_analyzer import (
     __version__,
+    audit,
     copilot,
     llm,
     postmortem,
+    rbac,
     reports,
     runbook,
     site_doc,
@@ -138,21 +141,89 @@ def _token_supplied() -> str:
     return supplied
 
 
-def require_api_token(fn):
-    """Require the API token when AI_LOG_ANALYZER_API_TOKEN is set.
+def sanitize_line(line: str) -> str:
+    from ai_log_analyzer.sanitize import sanitize
+    return sanitize(line, mask_pii=False)[0]
 
-    Accepted as `X-API-Token: <token>` or `Authorization: Bearer <token>`.
-    When the env var is empty (dev mode + bound to 127.0.0.1) this decorator
-    is a no-op. Once set, every mutating route must present the token.
+
+def _remote() -> str:
+    return request.remote_addr or ""
+
+
+def current_principal(allow_query_token: bool = False) -> rbac.Principal | None:
+    """The authenticated principal for this request.
+
+    Tokens come from headers. ``?token=`` is accepted only where a browser
+    cannot set headers (the SSE live tail), since URLs end up in proxy logs.
     """
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not API_TOKEN:
-            return fn(*args, **kwargs)
-        if _token_supplied() != API_TOKEN:
-            abort(401)
-        return fn(*args, **kwargs)
-    return wrapper
+    token = _token_supplied() or (request.args.get("token", "") if allow_query_token else "")
+    return rbac.authenticate(token, API_TOKEN)
+
+
+def require_role(role: str, audit_action: str | None = None,
+                 audit_detail: Callable[[], dict] | None = None):
+    """Gate a route on a minimum role and optionally audit it.
+
+    Dev mode (no token or RBAC principal configured) is a no-op gate, as
+    before, and the actor is recorded as ``anonymous``. Otherwise a missing
+    or unknown token is 401 and an insufficient role is 403. The principal
+    is bound for the whole request, so external LLM calls the route makes
+    are attributed to it in the audit log.
+    """
+    if role not in rbac.RANK:
+        raise ValueError(f"unknown role {role!r}")
+
+    def deco(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if rbac.auth_enabled(API_TOKEN):
+                principal = current_principal()
+                if principal is None:
+                    abort(401)
+                if not principal.allows(role):
+                    audit.record("authz.denied", target=request.path, outcome="denied",
+                                 actor=audit.Actor(principal.name, principal.role, _remote()),
+                                 detail={"required": role, "method": request.method})
+                    abort(403)
+                actor = audit.Actor(principal.name, principal.role, _remote())
+            else:
+                actor = audit.Actor("anonymous", "dev", _remote())
+            with audit.actor_scope(actor):
+                try:
+                    resp = fn(*args, **kwargs)
+                except Exception as exc:   # abort() or a crash: the attempt is still audited
+                    if audit_action:
+                        _audit_route(audit_action, audit_detail, getattr(exc, "code", None) or 500)
+                    raise
+                if audit_action:
+                    status = resp[1] if isinstance(resp, tuple) and len(resp) > 1 else \
+                        getattr(resp, "status_code", 200)
+                    _audit_route(audit_action, audit_detail, status)
+                return resp
+        return wrapper
+    return deco
+
+
+def _audit_route(action: str, detail_fn: Callable[[], dict] | None, status: int) -> None:
+    try:
+        detail = detail_fn() if detail_fn else {}
+    except Exception:  # a detail extractor must never fail the request
+        detail = {}
+    audit.record(action, target=request.path, outcome="ok" if int(status) < 400 else f"http_{status}",
+                 detail={"method": request.method, **detail})
+
+
+def require_api_token(fn):
+    """Back-compat alias: the operator role (the legacy shared token is admin)."""
+    return require_role("operator")(fn)
+
+
+def _body_fields(*keys: str) -> Callable[[], dict]:
+    """Audit-detail extractor: selected JSON body fields, never credentials."""
+    def extract() -> dict:
+        body = request.get_json(silent=True) or {}
+        return {k: sanitize_line(v) if isinstance(v, str) else v for k, v in body.items() if k in keys}
+    return extract
 
 
 def _parse_bool(value, default: bool = False) -> bool:
@@ -283,6 +354,8 @@ def create_app() -> Flask:
             "ok": True,
             "version": __version__,
             "network_tool_available": network_tool.is_available(),
+            "auth": "rbac" if rbac.auth_enabled(API_TOKEN) else "dev",
+            "audit": audit.is_enabled(),
         })
 
     @app.route("/api/llm/status", methods=["GET"])
@@ -291,12 +364,12 @@ def create_app() -> Flask:
         # last_errors carries upstream HTTP error bodies — useful in the UI,
         # but on a token-protected deployment don't hand it to anonymous
         # callers. Dev mode (no token) keeps full output for the dashboard.
-        if API_TOKEN and _token_supplied() != API_TOKEN:
+        if rbac.auth_enabled(API_TOKEN) and current_principal() is None:
             state = {k: v for k, v in state.items() if k != "last_errors"}
         return jsonify(state)
 
     @app.route("/api/llm/provider", methods=["POST"])
-    @require_api_token
+    @require_role("admin", "llm.provider.set", _body_fields("provider"))
     def llm_set_provider():
         body = request.get_json(silent=True) or {}
         ok, msg = llm.set_provider(body.get("provider", ""))
@@ -305,7 +378,7 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "provider": msg})
 
     @app.route("/api/llm/toggle", methods=["POST"])
-    @require_api_token
+    @require_role("admin", "llm.toggle", _body_fields("enabled"))
     def llm_toggle():
         body = request.get_json(silent=True) or {}
         enabled = bool(body.get("enabled", True))
@@ -322,7 +395,9 @@ def create_app() -> Flask:
         })
 
     @app.route("/api/rules", methods=["POST"])
-    @require_api_token
+    @require_role("admin", "config.rules.add", lambda: {"rules": [
+        {k: r.get(k) for k in ("pattern", "severity", "category", "description")}
+        for r in ((request.get_json(silent=True) or {}).get("rules") or [])[:20] if isinstance(r, dict)]})
     def api_rules_add():
         """Register custom classification rules at runtime (non-persistent).
 
@@ -342,7 +417,7 @@ def create_app() -> Flask:
                         "custom_total": len(_clf.custom_rules())}), status
 
     @app.route("/api/sanitize-diff", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_sanitize_diff():
         """Preview the sanitize-before-LLM gate on pasted text.
 
@@ -441,7 +516,7 @@ def create_app() -> Flask:
 
     # ── Site-wide strategic optimization advisor ──────────────────────────
     @app.route("/api/optimize/site-wide/<site_id>", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_optimize_site_wide(site_id: str):
         """Strategic gap analysis for the whole site.
 
@@ -537,7 +612,7 @@ def create_app() -> Flask:
 
     # ── Post-mortem fleet search ──────────────────────────────────────────
     @app.route("/api/postmortem/<site_id>", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_postmortem(site_id: str):
         safe = "".join(c for c in site_id if c.isalnum() or c in "-_").lower()
         if safe != site_id.lower():
@@ -553,7 +628,7 @@ def create_app() -> Flask:
 
     # ── Snapshot diff ─────────────────────────────────────────────────────
     @app.route("/api/diff", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_diff():
         body = request.get_json(silent=True) or {}
         before = body.get("before") or ""
@@ -566,7 +641,7 @@ def create_app() -> Flask:
 
     # ── AI Copilot ────────────────────────────────────────────────────────
     @app.route("/api/copilot", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_copilot():
         body = request.get_json(silent=True) or {}
         question = (body.get("question") or "").strip()
@@ -591,7 +666,7 @@ def create_app() -> Flask:
 
     # ── Runbook generator ─────────────────────────────────────────────────
     @app.route("/api/runbook", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_runbook():
         body = request.get_json(silent=True) or {}
         finding = body.get("finding") or {}
@@ -610,7 +685,7 @@ def create_app() -> Flask:
 
     # ── Reports: Markdown / HTML / CSV / PDF ──────────────────────────────
     @app.route("/api/report/<site_id>", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_report(site_id: str):
         body = request.get_json(silent=True) or {}
         fmt = (body.get("format") or "md").lower()
@@ -654,7 +729,7 @@ def create_app() -> Flask:
         return jsonify({"error": f"unknown format: {fmt}"}), 400
 
     @app.route("/api/optimize/site", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_optimize_site():
         """Cross-device analysis on a site bundle."""
         body = request.get_json(silent=True) or {}
@@ -701,7 +776,7 @@ def create_app() -> Flask:
 
     # ── Main analysis ─────────────────────────────────────────────────────
     @app.route("/api/analyze", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_analyze():
         body = request.get_json(silent=True) or {}
         source = body.get("source", "frr")
@@ -809,7 +884,7 @@ def create_app() -> Flask:
 
     # ── Live CLI execution: DCN_Network_Tool SSH first, docker-exec fallback ──
     @app.route("/api/run", methods=["POST"])
-    @require_api_token
+    @require_role("admin", "run.command", _body_fields("hostname", "command", "raw"))
     def api_run():
         """Execute a CLI command on a lab device.
 
@@ -848,7 +923,7 @@ def create_app() -> Flask:
 
     # ── Config-aware Optimization (LLM killer feature) ────────────────────
     @app.route("/api/optimize", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_optimize():
         """Pull running config from a device and ask LLM for resilience improvements."""
         body = request.get_json(silent=True) or {}
@@ -915,7 +990,7 @@ def create_app() -> Flask:
 
     # ── Incident memory ────────────────────────────────────────────────────
     @app.route("/api/incidents/similar", methods=["GET"])
-    @require_api_token
+    @require_role("viewer")
     def api_incidents_similar():
         """Free-text search over the local incident journal.
 
@@ -946,9 +1021,8 @@ def create_app() -> Flask:
         headers, so on tokened deployments pass ?token=<API token>.
         Optional ?min_severity=critical|high|medium|low filters server-side.
         """
-        if API_TOKEN and request.args.get("token", "") != API_TOKEN \
-                and _token_supplied() != API_TOKEN:
-            abort(401)
+        if rbac.auth_enabled(API_TOKEN) and current_principal(allow_query_token=True) is None:
+            abort(401)   # any role may watch the live tail
         src = source_manager.get(source_id)
         if src is None:
             return jsonify({"error": f"unknown source: {source_id}"}), 404
@@ -1000,7 +1074,7 @@ def create_app() -> Flask:
         })
 
     @app.route("/api/sources", methods=["POST"])
-    @require_api_token
+    @require_role("admin", "config.sources.add", _body_fields("id", "type", "url"))
     def api_sources_add():
         """Register a new source. Body: {id, type, url, api_token?, username?,
         password?, auth_methods?, extra?, verify_tls?, timeout_seconds?}."""
@@ -1036,18 +1110,18 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "id": src_id})
 
     @app.route("/api/sources/<source_id>", methods=["DELETE"])
-    @require_api_token
+    @require_role("admin", "config.sources.remove")
     def api_sources_remove(source_id: str):
         removed = source_manager.remove(source_id)
         return jsonify({"ok": removed})
 
     @app.route("/api/sources/<source_id>/test", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_sources_test(source_id: str):
         return jsonify(source_manager.healthcheck(source_id))
 
     @app.route("/api/sources/<source_id>/fetch", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_sources_fetch(source_id: str):
         """Pull a batch of events from a registered source. Body:
         {since_seconds, limit, host_filter}."""
@@ -1075,7 +1149,7 @@ def create_app() -> Flask:
         })
 
     @app.route("/api/sources/<source_id>/analyze", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_sources_analyze(source_id: str):
         """Fetch + run the full analyzer (classifier → dedup → optional LLM)."""
         body = request.get_json(silent=True) or {}
@@ -1102,7 +1176,7 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "count": len(events), "result": result_dict})
 
     @app.route("/api/correlate", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_correlate():
         """Cross-source device correlation: which hosts surface actionable
         events from >=2 sources (confirmed) vs 1 (suspected). Thin wrapper
@@ -1124,7 +1198,7 @@ def create_app() -> Flask:
         return jsonify(result)
 
     @app.route("/api/triage", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_triage():
         """Per-device deep triage: verdict + health score + severity histogram
         + top processes + deduped error patterns for one host. Thin wrapper
@@ -1144,7 +1218,7 @@ def create_app() -> Flask:
         return jsonify(result)
 
     @app.route("/api/remediation", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_remediation():
         """Generate vendor-safe remediation plan with automatic rollback timer."""
         from ai_log_analyzer.remediation import (
@@ -1231,7 +1305,7 @@ def create_app() -> Flask:
         return jsonify(out)
 
     @app.route("/api/itsm/enrich", methods=["POST"])
-    @require_api_token
+    @require_role("operator", "itsm.enrich", _body_fields("system", "dry_run", "site", "device"))
     def api_itsm_enrich():
         """Format or dispatch two-way ITSM enrichment to Jira or ServiceNow."""
         from ai_log_analyzer.itsm import (
@@ -1343,7 +1417,7 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": str(exc)}), 502
 
     @app.route("/api/analytics/deep", methods=["POST"])
-    @require_api_token
+    @require_role("operator")
     def api_analytics_deep():
         """Flap physics, blast radius, change correlation, and config drift."""
         body = request.get_json(silent=True) or {}
@@ -1361,7 +1435,7 @@ def create_app() -> Flask:
         return jsonify(bundle.payload)
 
     @app.route("/api/itsm/servicenow/sync", methods=["POST"])
-    @require_api_token
+    @require_role("operator", "itsm.servicenow.sync", _body_fields("dry_run", "instance_url"))
     def api_servicenow_sync():
         """Preview or upsert one ServiceNow incident. Defaults to dry-run."""
         body = request.get_json(silent=True) or {}
@@ -1397,6 +1471,177 @@ def create_app() -> Flask:
         return jsonify(result.to_dict())
 
     # Auto-load env-configured sources on app boot (idempotent).
+    # ── Identity + audit trail ────────────────────────────────────────────
+    @app.route("/api/whoami", methods=["GET"])
+    @require_role("viewer")
+    def api_whoami():
+        actor = audit.current_actor()
+        return jsonify({"name": actor.name, "role": actor.role,
+                        "auth": "rbac" if rbac.auth_enabled(API_TOKEN) else "dev"})
+
+    @app.route("/api/audit", methods=["GET"])
+    @require_role("admin")
+    def api_audit():
+        """Newest-first audit rows. Filters: ?actor=, ?action= (``*`` wildcard), ?since=, ?limit=."""
+        if not audit.is_enabled():
+            return jsonify({"enabled": False, "entries": [],
+                            "hint": "set AI_LOG_ANALYZER_STATE_DB or AI_LOG_ANALYZER_AUDIT_DB"})
+        try:
+            since = float(request.args.get("since") or 0)
+            limit = int(request.args.get("limit") or 100)
+        except ValueError:
+            return jsonify({"error": "since and limit must be numbers"}), 400
+        return jsonify({"enabled": True, "entries": audit.query(
+            limit=limit, actor=request.args.get("actor", ""), action=request.args.get("action", ""),
+            since=since)})
+
+    @app.route("/api/audit/verify", methods=["GET"])
+    @require_role("admin")
+    def api_audit_verify():
+        return jsonify(audit.verify())
+
+    # ── Incident resolution (feeds retrieval precedents) ──────────────────
+    @app.route("/api/incidents/<incident_id>/resolve", methods=["POST"])
+    @require_role("operator", "incident.resolve", _body_fields("resolution"))
+    def api_incident_resolve(incident_id: str):
+        from ai_log_analyzer.memory import get_store
+        body = request.get_json(silent=True) or {}
+        resolution = str(body.get("resolution") or "").strip()
+        if not resolution:
+            return jsonify({"error": "resolution is required"}), 400
+        store = get_store()
+        if store is None:
+            return jsonify({"error": "incident store not configured"}), 400
+        rec = store.resolve(incident_id, resolution, resolved_by=audit.current_actor().name)
+        if rec is None:
+            return jsonify({"error": f"unknown incident {incident_id}"}), 404
+        return jsonify({"ok": True, "incident": rec})
+
+    # ── Retrieval index (configs, drift, topology, runbooks, incidents) ───
+    def _rag_or_400():
+        from ai_log_analyzer import rag
+        index = rag.get_index()
+        if index is None:
+            abort(make_response(jsonify({"error": "retrieval index not configured "
+                                                  "(set AI_LOG_ANALYZER_RAG_DB or AI_LOG_ANALYZER_STATE_DB)"}), 400))
+        return index
+
+    @app.route("/api/rag/search", methods=["GET"])
+    @require_role("viewer")
+    def api_rag_search():
+        from ai_log_analyzer import rag
+        q = (request.args.get("q") or "").strip()
+        if not q:
+            return jsonify({"error": "q is required"}), 400
+        hosts = [h for h in (request.args.get("hosts") or "").split(",") if h.strip()]
+        kinds = [k for k in (request.args.get("kinds") or "").split(",") if k.strip()] or None
+        try:
+            k = min(int(request.args.get("k") or 8), 50)
+        except ValueError:
+            return jsonify({"error": "k must be an integer"}), 400
+        hits = _rag_or_400().search(q, k=k, kinds=kinds, hosts=hosts)
+        return jsonify({"query": q, "hits": rag.public_evidence(
+            [{**h, "id": f"S{i}"} for i, h in enumerate(hits, 1)])})
+
+    @app.route("/api/rag/stats", methods=["GET"])
+    @require_role("viewer")
+    def api_rag_stats():
+        return jsonify(_rag_or_400().stats())
+
+    @app.route("/api/rag/reindex", methods=["POST"])
+    @require_role("admin", "rag.reindex", _body_fields("netbox"))
+    def api_rag_reindex():
+        from ai_log_analyzer import rag
+        body = request.get_json(silent=True) or {}
+        golden = os.environ.get("AI_LOG_ANALYZER_GOLDEN_DIR", "").strip() or None
+        report = rag.build_default_index(_rag_or_400(), sites_dir=SITES_DIR, golden_dir=golden,
+                                         netbox=_parse_bool(body.get("netbox"), default=False))
+        return jsonify({"ok": True, **report})
+
+    @app.route("/api/rag/drift", methods=["POST"])
+    @require_role("operator")
+    def api_rag_drift():
+        """Running vs golden config drift. Body: {running, golden} or {site, hostname} with
+        AI_LOG_ANALYZER_GOLDEN_DIR / <site>/golden/ holding the golden file."""
+        from ai_log_analyzer import rag
+        body = request.get_json(silent=True) or {}
+        running, golden = body.get("running"), body.get("golden")
+        if not (isinstance(running, str) and isinstance(golden, str)):
+            site, host = str(body.get("site") or ""), str(body.get("hostname") or "")
+            safe_site = Path(site).name
+            devices, manifest = _load_site_devices(safe_site) if safe_site else (None, None)
+            dev = next((d for d in devices or [] if d.get("hostname") == host), None)
+            file_of = {d.get("hostname"): d.get("file") for d in (manifest or {}).get("devices", [])}
+            if dev is None:
+                return jsonify({"error": "give running+golden text, or a known site + hostname"}), 400
+            gdir = os.environ.get("AI_LOG_ANALYZER_GOLDEN_DIR", "").strip()
+            candidates = [SITES_DIR / safe_site / "golden"] + ([Path(gdir) / safe_site, Path(gdir)] if gdir else [])
+            golden = None
+            for d in candidates:
+                for name in (file_of.get(host) or "", f"{host}.txt", f"{host}.cfg"):
+                    if name and (d / Path(name).name).is_file():
+                        golden = (d / Path(name).name).read_text(encoding="utf-8", errors="replace")
+                        break
+                if golden is not None:
+                    break
+            if golden is None:
+                return jsonify({"error": f"no golden config found for {host}"}), 404
+            running = dev.get("config_text") or ""
+        drift = rag.config_drift(running, golden)
+        for h in drift["hunks"]:   # never echo secrets that differ between the two files
+            h["added"] = [sanitize_line(x) for x in h["added"]]
+            h["removed"] = [sanitize_line(x) for x in h["removed"]]
+        return jsonify(drift)
+
+    # ── Streaming triage worker ───────────────────────────────────────────
+    def _worker_or_400():
+        from ai_log_analyzer.triage_worker import get_worker
+        worker = get_worker()
+        if worker is None:
+            abort(make_response(jsonify({"error": "streaming triage needs AI_LOG_ANALYZER_STATE_DB "
+                                                  "(the syslog spool)"}), 400))
+        return worker
+
+    @app.route("/api/triage/stream/status", methods=["GET"])
+    @require_role("viewer")
+    def api_triage_stream_status():
+        from ai_log_analyzer.triage_worker import get_worker
+        worker = get_worker(create=False)
+        if worker is None:
+            from ai_log_analyzer.state_store import get_state_db
+            return jsonify({"running": False, "configured": get_state_db() is not None})
+        try:
+            limit = max(1, min(int(request.args.get("limit") or 50), 500))
+        except ValueError:
+            return jsonify({"error": "limit must be an integer"}), 400
+        tickets = worker.db.triage_all(limit=limit)
+        return jsonify({**worker.status(), "tickets": tickets})
+
+    @app.route("/api/triage/stream/start", methods=["POST"])
+    @require_role("admin", "triage.worker.start")
+    def api_triage_stream_start():
+        worker = _worker_or_400()
+        return jsonify({"ok": True, "started": worker.start(), **worker.status()})
+
+    @app.route("/api/triage/stream/stop", methods=["POST"])
+    @require_role("admin", "triage.worker.stop")
+    def api_triage_stream_stop():
+        worker = _worker_or_400()
+        worker.stop()
+        return jsonify({"ok": True, **worker.status()})
+
+    @app.route("/api/triage/stream/tick", methods=["POST"])
+    @require_role("admin", "triage.worker.tick")
+    def api_triage_stream_tick():
+        """Run one triage tick now (useful for cron-style deployments)."""
+        return jsonify(_worker_or_400().run_once())
+
+    if _parse_bool(os.environ.get("AI_LOG_ANALYZER_TRIAGE_WORKER"), default=False):
+        from ai_log_analyzer.triage_worker import get_worker
+        worker = get_worker()
+        if worker is not None:
+            worker.start()   # every Gunicorn worker may start it; the lease keeps one active
+
     try:
         source_manager.load_from_env()
     except Exception:
@@ -1413,8 +1658,8 @@ def main() -> None:
     # via ANALYZER_HOST=0.0.0.0, and should set AI_LOG_ANALYZER_API_TOKEN
     # before doing so.
     host = os.environ.get("ANALYZER_HOST", "127.0.0.1")
-    if host == "0.0.0.0" and not API_TOKEN:
-        print("[WARN] Binding 0.0.0.0 without AI_LOG_ANALYZER_API_TOKEN — "
+    if host == "0.0.0.0" and not rbac.auth_enabled(API_TOKEN):
+        print("[WARN] Binding 0.0.0.0 without AI_LOG_ANALYZER_API_TOKEN or RBAC tokens — "
               "all routes are unauthenticated.")
     app.run(host=host, port=port, debug=False)
 

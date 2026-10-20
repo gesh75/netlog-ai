@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import heapq
 import json
+import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from ai_log_analyzer import kb, llm
+from ai_log_analyzer import kb, llm, rag
 from ai_log_analyzer.adapters.file import parse_lines
 from ai_log_analyzer.bgp_anomaly import BgpAnomalyCollector
 from ai_log_analyzer.causal import (
@@ -45,6 +46,8 @@ from ai_log_analyzer.sanitize import sanitize, sanitize_report
 from ai_log_analyzer.sanitize_vault import SanitizeVault
 from ai_log_analyzer.stability import StabilityTracker
 from ai_log_analyzer.suppression import load_topology, suppress_alerts, suppressed_entity_map
+
+logger = logging.getLogger(__name__)
 
 # Recovery events are classified as medium because they're useful in the
 # timeline view, but they should NEVER produce action items / runbooks —
@@ -266,9 +269,16 @@ def deep_analyze(
     sample_messages: list[str],
     platform_hint: str | None = None,
     skip_llm: bool = False,
+    evidence: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Produce a phased deep-analysis result. Tries LLM, falls back to KB."""
+    """Produce a phased deep-analysis result. Tries LLM, falls back to KB.
+
+    ``evidence`` (from ``rag.retrieve_evidence``) is attached to the playbook
+    either way; the LLM sees it as numbered sources it must cite as ``[S#]``,
+    and labels it invents are reported under ``citations.invalid``.
+    """
     fallback = kb.lookup(category, description)
+    evidence = evidence or []
 
     if len(devices) == 1:
         dev_ctx = f"Single device affected: {devices[0]}. Likely isolated issue."
@@ -311,16 +321,27 @@ def deep_analyze(
             f"Affected devices ({len(devices)}): {', '.join(devices[:5]) if devices else 'unknown'}\n"
             f"Platform hint: {platform_hint or 'mixed (frr/junos/eos)'}\n"
             f"Sample log lines:\n{llm.wrap_untrusted(samples, 'log_samples')}\n\n"
-            f"Produce the 5-phase incident playbook now."
         )
+        if evidence:
+            safe_evidence, _ = sanitize(rag.evidence_block(evidence), mask_pii=True)
+            user_prompt += (f"EVIDENCE (numbered sources):\n"
+                            f"{llm.wrap_untrusted(safe_evidence, 'evidence')}\n{rag.CITATION_RULES}\n\n")
+        user_prompt += "Produce the 5-phase incident playbook now."
         with llm.entity_hints(hosts=devices):
             text = llm.query(_DEEP_SYSTEM_PROMPT, user_prompt, max_tokens=1500)
         if text:
             llm_result = _try_parse_json(text)
 
     if llm_result:
-        return _shape(llm_result, fallback, dev_ctx, urgency, sample_messages, llm_powered=True)
-    return _shape({}, fallback, dev_ctx, urgency, sample_messages, llm_powered=False)
+        shaped = _shape(llm_result, fallback, dev_ctx, urgency, sample_messages, llm_powered=True)
+        cites = rag.check_citations(json.dumps(llm_result), evidence)
+    else:
+        shaped = _shape({}, fallback, dev_ctx, urgency, sample_messages, llm_powered=False)
+        cites = {"cited": [], "invalid": []}
+    if evidence:
+        shaped["evidence"] = rag.public_evidence(evidence)
+        shaped["citations"] = cites
+    return shaped
 
 
 def _shape(parsed: dict, fallback: dict, dev_ctx: str, urgency: str,
@@ -499,9 +520,15 @@ def build_action_items(events: Iterable[ClassifiedEvent], llm_top_n: int = 3) ->
     return _finalize_action_items(seen, llm_top_n, tracker.report())
 
 
+def _evidence_query(b: dict, messages: list[str]) -> str:
+    names = sorted({e[2] for e in b.get("entities") or () if len(e) > 2 and e[2]})[:8]
+    return " ".join([b["description"], b["category"], *names, *messages[:3]])
+
+
 def _finalize_action_items(seen: dict, llm_top_n: int = 3,
                            entity_report: dict | None = None,
-                           suppressed: dict | None = None) -> list[ActionItem]:
+                           suppressed: dict | None = None,
+                           rag_index: rag.RagIndex | None = None) -> list[ActionItem]:
     report = entity_report or {}
     states = {k: group_state(b.get("entities", ()), report) for k, b in seen.items()}
     suppressed = suppressed or {}
@@ -523,6 +550,8 @@ def _finalize_action_items(seen: dict, llm_top_n: int = 3,
         devices = sorted(b["devices"])[:10]
         # Heap → newest-first message list (ts desc, then arrival order)
         messages = [m for _, _, m in sorted(b["msg_heap"], reverse=True)]
+        evidence = (rag.retrieve_evidence(rag_index, _evidence_query(b, messages), hosts=devices)
+                    if rag_index is not None else None)
         deep = deep_analyze(
             category=b["category"],
             description=b["description"],
@@ -530,6 +559,7 @@ def _finalize_action_items(seen: dict, llm_top_n: int = 3,
             count=b["count"],
             sample_messages=messages,
             skip_llm=(idx >= llm_top_n),
+            evidence=evidence,
         )
         items.append(ActionItem(
             severity=b["severity"],
@@ -808,6 +838,7 @@ def analyze(
     dedup: bool | None = None,
     evpn_causal: bool | None = None,
     site_manifest: dict | None = None,
+    rag_index: rag.RagIndex | None = None,
 ) -> AnalysisResult:
     """End-to-end pipeline: classify → action items → score → executive summary.
 
@@ -823,6 +854,11 @@ def analyze(
     `evpn_causal=True` runs the protocol-aware EVPN overlay (lowest-layer
     root, higher-layer suppression). Default is off (or
     `AI_LOG_ANALYZER_EVPN_CAUSAL`). Pass ``site_manifest`` to seed adjacency.
+
+    Every playbook carries ``deep_analysis.evidence`` (config stanzas with
+    line numbers, golden-config drift, topology, runbooks, past incidents)
+    when a retrieval index is available: ``rag_index`` or the configured one
+    (``AI_LOG_ANALYZER_RAG_DB`` / ``AI_LOG_ANALYZER_STATE_DB``).
     """
     token = set_dedup_enabled(dedup if dedup is not None else is_dedup_enabled())
     try:
@@ -832,6 +868,7 @@ def analyze(
             llm_top_n=llm_top_n,
             evpn_causal=evpn_causal,
             site_manifest=site_manifest,
+            rag_index=rag_index,
         )
     finally:
         reset_dedup_enabled(token)
@@ -843,7 +880,10 @@ def _analyze_inner(
     llm_top_n: int,
     evpn_causal: bool | None = None,
     site_manifest: dict | None = None,
+    rag_index: rag.RagIndex | None = None,
 ) -> AnalysisResult:
+    from ai_log_analyzer.memory import get_store
+
     if is_dedup_enabled():
         events = _dedup_events(events)
     top_events, sev_counts, cat_counts, groups, by_host, miner, tracker, config_events, extras = (
@@ -858,6 +898,15 @@ def _analyze_inner(
 
     effective_llm = use_llm and llm.is_enabled()
     score, grade, grade_label = health_score(sev_counts)
+    store = get_store()
+    index = rag_index if rag_index is not None else rag.get_index()
+    if index is not None:
+        # Index past incidents BEFORE this run is journaled, so an item never
+        # cites itself as precedent.
+        try:
+            rag.sync_incidents(index, store)
+        except Exception as exc:  # sqlite3.Error — evidence is best-effort
+            logger.warning("incident sync for retrieval failed: %s", exc)
     # One vault per analysis run: <IP_3> / <HOST_2> mean the same entity in
     # every LLM call of this incident (playbooks and executive summary).
     with llm.entity_hints(vault=SanitizeVault()):
@@ -866,6 +915,7 @@ def _analyze_inner(
             llm_top_n=llm_top_n if effective_llm else 0,
             entity_report=entity_report,
             suppressed=suppressed_entity_map(suppression),
+            rag_index=index,
         )
         summary, summary_llm = _executive_summary(
             sev_counts, cat_counts, score, grade, grade_label, action_items,
@@ -878,8 +928,6 @@ def _analyze_inner(
 
     # Opt-in incident memory: stamp each action item with its recurrence
     # history from prior runs, then journal this run (env-gated, local-only).
-    from ai_log_analyzer.memory import get_store
-    store = get_store()
     repeats: list[dict] = []
     if store is not None:
         for a in action_items:

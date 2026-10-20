@@ -26,6 +26,7 @@ Backends:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -61,6 +62,16 @@ def _parse_stamp(stamp: str) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def incident_id(record: dict) -> str:
+    """Stable citation id: ``INC-000042`` for SQLite rows, a content hash for JSONL."""
+    row_id = record.get("id")
+    if isinstance(row_id, int):
+        return f"INC-{row_id:06d}"
+    raw = "|".join([str(record.get("description", "")), str(record.get("generated_at", "")),
+                    ",".join(record.get("devices") or [])])
+    return "INC-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10].upper()
 
 
 class IncidentStore:
@@ -179,6 +190,44 @@ class IncidentStore:
             for s, r in scored[:top_n]
         ]
 
+    def records(self) -> list[dict]:
+        """Snapshot of the journal, oldest first, each with its ``incident_id``."""
+        return [{**r, "incident_id": incident_id(r)} for r in self._records]
+
+    def get(self, inc_id: str) -> dict | None:
+        for r in self._records:
+            if incident_id(r) == inc_id:
+                return {**r, "incident_id": inc_id}
+        return None
+
+    def resolve(self, inc_id: str, resolution: str, resolved_by: str = "") -> dict | None:
+        """Attach the operator's resolution note to a past incident.
+
+        Resolved incidents are what the RAG index cites as precedent
+        ("INC-000042: fixed by replacing the optic on et-0/0/3").
+        """
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        fields = {"resolution": resolution.strip()[:2000], "resolved_at": stamp,
+                  "resolved_by": resolved_by[:200]}
+        hit = None
+        try:
+            with self._locked():
+                on_disk = self._read_file()
+                for r in on_disk:
+                    if incident_id(r) == inc_id:
+                        r.update(fields)
+                        hit = r
+                if hit is None:
+                    return None
+                tmp = self.path.with_suffix(self.path.suffix + f".{os.getpid()}.tmp")
+                tmp.write_text("\n".join(json.dumps(r) for r in on_disk) + "\n", encoding="utf-8")
+                tmp.replace(self.path)
+            self._records = on_disk[-_MAX_RECORDS:]
+        except OSError as exc:
+            logger.warning("could not resolve incident in %s: %s", self.path, exc)
+            return None
+        return {**hit, "incident_id": inc_id}
+
     # ── record ────────────────────────────────────────────────────────────
 
     def record(self, action_items: list[dict], generated_at: str) -> int:
@@ -242,10 +291,21 @@ class SqliteIncidentStore(IncidentStore):
     def _persist(self, new: list[dict]) -> int:
         try:
             self.db.incidents_append(new, cap=_MAX_RECORDS)
+            self._load()  # pick up row ids (citation ids) and other workers' rows
         except Exception as exc:  # sqlite3.Error / OSError — never break an analysis
             logger.warning("could not persist incident store to %s: %s", self.path, exc)
-        self._records = (self._records + new)[-_MAX_RECORDS:]
+            self._records = (self._records + new)[-_MAX_RECORDS:]
         return len(new)
+
+    def resolve(self, inc_id: str, resolution: str, resolved_by: str = "") -> dict | None:
+        if not inc_id.startswith("INC-") or not inc_id[4:].isdigit():
+            return None
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        if not self.db.incidents_resolve(int(inc_id[4:]), resolution.strip()[:2000], stamp,
+                                         resolved_by[:200]):
+            return None
+        self._load()
+        return self.get(inc_id)
 
 
 _SQLITE_SUFFIXES = (".db", ".sqlite", ".sqlite3")
