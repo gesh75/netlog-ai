@@ -49,6 +49,11 @@ function highlightCli(text) {
   const lines = String(text).split("\n");
   lines.forEach((line, idx) => {
     if (idx > 0) frag.appendChild(document.createTextNode("\n"));
+    // SafetyGuardrail placeholders get a distinct warning treatment (v2.js)
+    if (typeof NV2 !== "undefined" && NV2.isBlocked(line)) {
+      frag.appendChild(NV2.blockedLine(line));
+      return;
+    }
     // Comments (whole-line)
     if (/^\s*[#!]/.test(line)) {
       frag.appendChild(el("span", { className: "cli-cmt", text: line }));
@@ -842,7 +847,8 @@ function render(r) {
           el("span", { className: "row-msg",
             text: `↻ seen ${rec.count}× before (last ${String(rec.last_seen || "").slice(0, 10)})` }))
       : el("td", { text: item.description });
-    const tr = el("tr", { className: "action" },
+    if (typeof NV2 !== "undefined") NV2.actionRowExtras(item).forEach((c) => descCell.appendChild(c));
+    const tr = el("tr", { className: item.suppressed_by ? "action suppressed-row" : "action" },
       el("td", {}, sevBadge(item.severity)),
       descCell,
       el("td", { text: String(item.count) }),
@@ -1081,9 +1087,9 @@ function render(r) {
     // Source-origin badge (SCRT recording, FRR docker, etc.) — shown next to
     // the hostname so it's grouped with the device, not the description.
     const srcBadge = sourceBadge(e.appname);
-    const hostCell = srcBadge
-      ? el("td", {}, document.createTextNode(e.hostname || ""), srcBadge)
-      : el("td", { text: e.hostname || "" });
+    const hostCell = el("td", {}, document.createTextNode(e.hostname || ""));
+    if (srcBadge) hostCell.appendChild(srcBadge);
+    if (typeof NV2 !== "undefined") NV2.eventBadges(e).forEach((b) => hostCell.appendChild(b));
     // Severity-tinted row for scannability
     const tr = el("tr", { className: `sev-row-${e.severity || "info"}` },
       el("td", {}, sevBadge(e.severity)),
@@ -1094,6 +1100,7 @@ function render(r) {
     );
     eTbody.appendChild(tr);
   });
+  if (typeof NV2 !== "undefined") NV2.onAnalysis(r);
 }
 
 // ── Phased incident playbook (the deep-dive panel) ───────────────────────────
@@ -1107,9 +1114,12 @@ function togglePhasedPlan(rowEl, item) {
     text: d.llm_powered ? "LLM" : "KB",
   });
 
+  const rootCause = typeof NV2 !== "undefined"
+    ? NV2.playbookEvidence(d)
+    : [el("div", { text: d.root_cause || "—" })];
   const deep = el("div", { className: "deep" },
     el("h3", {}, "Root Cause ", llmBadge),
-    el("div", { text: d.root_cause || "—" }),
+    ...rootCause,
     el("h3", { text: "Risk" }),
     el("div", { text: d.risk || "—" }),
     el("h3", { text: "Context" }),
@@ -1121,7 +1131,9 @@ function togglePhasedPlan(rowEl, item) {
     el("h3", { text: "Incident Playbook (5 phases)" }),
     ...renderPhases(d.phases || [], item.devices),
     el("h3", { text: "Preventive Config" }),
-    el("pre", { text: (d.preventive_config || []).join("\n") || "—" }),
+    (d.preventive_config || []).length
+      ? codeBlock((d.preventive_config || []).join("\n"))
+      : el("div", { text: "—" }),
     el("h3", { text: "Monitoring Recommendations" }),
     renderListOrDash(d.monitoring),
     el("h3", { text: "Sample Log Lines" }),
@@ -1212,7 +1224,8 @@ function renderAction(action, devices) {
 
   const platformSel = el("select", { style: { width: "auto", padding: "2px 6px", fontSize: "11px" } });
   platforms.forEach((p) => {
-    platformSel.appendChild(el("option", { text: p, attrs: { value: p } }));
+    const blocked = typeof NV2 !== "undefined" && NV2.isBlocked(cliDict[p]);
+    platformSel.appendChild(el("option", { text: blocked ? `⛔ ${p}` : p, attrs: { value: p } }));
   });
   platformSel.value = activePlatform;
   platformSel.addEventListener("change", () => {
@@ -1228,7 +1241,7 @@ function renderAction(action, devices) {
   const outputBox = el("div", { className: "action-output", style: { display: "none" } });
 
   const runBtn = el("button", {
-    className: "tiny",
+    className: "tiny run-btn",
     text: "▶ Run",
     style: { background: "var(--ok)", color: "#0d1117" },
     on: {
@@ -1257,13 +1270,23 @@ function renderAction(action, devices) {
     },
   });
 
-  card.appendChild(el("div", { className: "action-cli" },
+  const cliRow = el("div", { className: "action-cli" },
     codeEl,
     copyBtn,
     platformSel,
     hostInput,
     runBtn,
-  ));
+  );
+  // A command the SafetyGuardrail withheld is never sent to a device.
+  const syncBlocked = () => {
+    const blocked = typeof NV2 !== "undefined" && NV2.isBlocked(cliDict[activePlatform]);
+    runBtn.disabled = blocked;
+    runBtn.title = blocked ? "Withheld by SafetyGuardrail: requires manual engineering review" : "";
+    cliRow.classList.toggle("blocked", blocked);
+  };
+  platformSel.addEventListener("change", syncBlocked);
+  syncBlocked();
+  card.appendChild(cliRow);
   if (action.expected) {
     card.appendChild(el("div", { className: "action-meta" },
       el("span", { className: "expected", text: "✓ expected: " }),
@@ -2626,13 +2649,15 @@ async function askCopilot() {
   setStatus(`Copilot: asking…`);
   $("copilot-panel").style.display = "block";
   $("copilot-answer").textContent = "Thinking…";
+  if ($("copilot-evidence")) clear($("copilot-evidence"));
   const clearProgress = showPanelProgress("copilot-panel", "Asking copilot");
   try {
     const r = await fetchJSON("/api/copilot", {
       method: "POST",
       body: JSON.stringify({ question: q, site_id: id }),
     });
-    $("copilot-answer").textContent = r.answer || "(no answer)";
+    if (typeof NV2 !== "undefined") NV2.renderCopilot(r);
+    else $("copilot-answer").textContent = r.answer || "(no answer)";
     $("copilot-engine").textContent = r.llm_powered ? "LLM" : "OFF";
     $("copilot-engine").className = "ai-badge " + (r.llm_powered ? "" : "kb-badge");
     setStatus(`Copilot: done.`);
@@ -3400,33 +3425,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("sitedoc-html-btn").addEventListener("click", () => downloadSiteDoc("html"));
   $("site-wide-btn").addEventListener("click", runSiteWideOptimize);
 
-  const remGenBtn = $("remediation-generate-btn");
-  if (remGenBtn) {
-    remGenBtn.addEventListener("click", async () => {
-      const dev = $("remediation-device-select")?.value;
-      const vendor = $("remediation-vendor-select")?.value || "arista_eos";
-      const action = $("remediation-action-select")?.value || "drain";
-      const cardOut = $("remediation-card-out");
-      if (!dev) return;
-      try {
-        if (cardOut) {
-          cardOut.style.display = "block";
-          cardOut.textContent = "Generating vendor-safe remediation plan with rollback timer...";
-        }
-        const res = await fetch("/api/remediation", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ device: dev, vendor, action }),
-        });
-        const data = await res.json();
-        if (cardOut) {
-          cardOut.textContent = data.ok ? data.markdown_card : `Error: ${data.error || "Failed"}`;
-        }
-      } catch (err) {
-        if (cardOut) cardOut.textContent = `Error: ${err.message}`;
-      }
-    });
-  }
+  // "⚡ Generate Safe Plan" is wired in v2.js (vendor CLI / Ansible / Nornir tabs).
 
   const itsmBtn = $("itsm-preview-btn");
   if (itsmBtn) {

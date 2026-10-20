@@ -311,6 +311,17 @@ class StateDB:
             "SELECT id, received_at, sender, line FROM syslog_spool WHERE source=? AND id > ? "
             "ORDER BY id LIMIT ?", (source, int(after_id), int(limit))).fetchall()
 
+    def spool_stats(self) -> list[dict[str, Any]]:
+        """Per-source spool depth for the dashboard: rows, newest row id and receive time."""
+        rows = self.conn().execute(
+            "SELECT source, COUNT(*), MAX(id), MAX(received_at) FROM syslog_spool GROUP BY source "
+            "ORDER BY source").fetchall()
+        return [{"source": src, "rows": int(n), "max_id": int(mx or 0), "last_received_at": float(ts or 0.0)}
+                for src, n, mx, ts in rows]
+
+    def triage_count(self) -> int:
+        return int(self.conn().execute("SELECT COUNT(*) FROM triage_tickets").fetchone()[0])
+
     def spool_sources(self) -> list[str]:
         return [r[0] for r in self.conn().execute("SELECT DISTINCT source FROM syslog_spool")]
 
