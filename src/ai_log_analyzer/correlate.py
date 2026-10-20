@@ -247,14 +247,94 @@ _LAYER_BY_EVENT_TYPE: dict[str, tuple[int, str]] = {
 _IP_ATTRS = ("remip", "locip", "tunnelip", "local_ip", "system_ip", "local_tloc_ip",
              "remote_tloc_ip", "src_ip", "dst_ip")
 _P2P_EVENT_TYPES = frozenset({"bgp_session", "bgp_max_prefix", "ospf_adjacency"})
+# shared_asn / same_vrf are deliberately not "strong": two drops towards the
+# same transit AS are worth grouping, but on their own they do not prove a
+# common cause the way a shared address or tunnel does.
 _STRONG_EVIDENCE = frozenset({"shared_ip", "p2p_subnet", "same_interface", "same_tunnel"})
+
+# ── ASN / VRF joins ─────────────────────────────────────────────────────────
+# Event types whose ASN names the remote / origin AS (the parsers take it from
+# "External AS 65010", "VRF default AS 65101", "remote-as", "origin AS").
+_ASN_EVENT_TYPES = frozenset({"bgp_session", "bgp_max_prefix", "bgp_path_change", "omp_peer"})
+# Not a real peer AS: unset, AS_TRANS (RFC 6793), and the last 16/32-bit ASNs.
+_RESERVED_ASNS = frozenset({0, 23456, 65535, 4294967295})
+# Routing tables every device has. Sharing one says nothing about a common
+# cause, so these join only alongside a second routing identity (see below).
+DEFAULT_VRF_NAMES = frozenset({
+    "default", "global", "main", "0", "root", "mgmt",
+    # vendor spellings of the same tables
+    "master", "inet.0", "management", "mgmt-vrf", "default-vrf",
+})
+_ANOMALY_LAYERS = frozenset({"transport", "routing"})
+_IBGP_RE = re.compile(r"\bInternal\s+AS\b|\biBGP\b", re.IGNORECASE)
+
+
+def normalize_asn(value: Any) -> str:
+    """Canonical asplain ASN string, or "" when unusable.
+
+    Accepts "65010", "AS65010", "as65010" and asdot "1.10" (= 65546).
+    Reserved / placeholder ASNs come back as "".
+    """
+    raw = str(value or "").strip().lower().removeprefix("as").strip()
+    if not raw:
+        return ""
+    try:
+        if "." in raw:
+            hi, lo = raw.split(".", 1)
+            num = int(hi) * 65536 + int(lo)
+        else:
+            num = int(raw)
+    except ValueError:
+        return ""
+    if num in _RESERVED_ASNS or not 0 < num < 2**32:
+        return ""
+    return str(num)
+
+
+def normalize_vrf(value: Any) -> str:
+    """Lowercased VRF / virtual-router name ("" when unset)."""
+    return str(value or "").strip().lower()
+
+
+def _active_anomaly(ev: Any) -> bool:
+    """A routing or transport failure that is still down (not a recovery or a notice)."""
+    layer = _layer(ev)
+    if layer is None or layer[1] not in _ANOMALY_LAYERS:
+        return False
+    state = getattr(ev, "state", "") or ""
+    return state == "down" or (not state and ev.event_type in ("bgp_max_prefix", "bgp_path_change"))
+
+
+def _is_ibgp(ev: Any) -> bool:
+    return bool(_IBGP_RE.search(getattr(ev, "message", "") or ""))
+
+
+def _local_asns(events: Iterable[Any]) -> frozenset[str]:
+    """ASNs seen on iBGP sessions in this batch: the network's own AS(es)."""
+    return frozenset(a for ev in events
+                     if getattr(ev, "event_type", "") in _ASN_EVENT_TYPES and _is_ibgp(ev)
+                     and (a := normalize_asn(getattr(ev, "asn", ""))))
+
+
+def _peer_asn(ev: Any, local_asns: frozenset[str] = frozenset()) -> str:
+    """The remote / origin AS of a routing event, or "" for iBGP and unknowns.
+
+    iBGP sessions report the network's own AS, which every iBGP session
+    shares, so they never join on it. Some vendors (EOS, FRR) do not mark a
+    session as iBGP, so an AS that appears on any iBGP session in the batch
+    is treated as local too.
+    """
+    if ev.event_type not in _ASN_EVENT_TYPES or _is_ibgp(ev):
+        return ""
+    asn = normalize_asn(getattr(ev, "asn", ""))
+    return "" if asn in local_asns else asn
 
 
 def _layer(ev: Any) -> tuple[int, str] | None:
     return _LAYER_BY_EVENT_TYPE.get(getattr(ev, "event_type", "") or "")
 
 
-def _join_keys(ev: Any) -> list[tuple[str, str]]:
+def _join_keys(ev: Any, local_asns: frozenset[str] = frozenset()) -> list[tuple[str, str]]:
     """(evidence, key) pairs an event can be joined on."""
     from ai_log_analyzer.parsers.entities import valid_ip
 
@@ -276,6 +356,19 @@ def _join_keys(ev: Any) -> list[tuple[str, str]]:
         keys.append(("same_interface", f"if:{host}:{ev.interface.lower()}"))
     if ev.tunnel_id:
         keys.append(("same_tunnel", f"tun:{host}:{ev.tunnel_id.lower()}"))
+    # Several devices losing sessions to the same external / origin AS at once
+    # (a transit or peer outage, a route leak) is one incident.
+    asn = _peer_asn(ev, local_asns)
+    if asn and _active_anomaly(ev):
+        keys.append(("shared_asn", f"asn:{asn}"))
+    # A tenant VRF failing on several devices is one incident. Default-like
+    # tables are on every device: they join only paired with an active
+    # routing / tunnel anomaly towards the same peer AS, never on their own.
+    vrf = normalize_vrf(getattr(ev, "vrf", ""))
+    if vrf and vrf not in DEFAULT_VRF_NAMES:
+        keys.append(("same_vrf", f"vrf:{vrf}"))
+    elif vrf and asn and _active_anomaly(ev):
+        keys.append(("same_vrf", f"vrf:{vrf}|AS{asn}"))
     return keys
 
 
@@ -292,15 +385,24 @@ def correlate_entities(
     Considers events with a known layer (platform → physical → transport →
     routing → overlay) that are not recoveries. Two events join when they
     share an entity key (IP, /30-/31 p2p subnet, device interface, device
-    tunnel) within ``window_s``, or sit on the same device within
-    ``same_device_window_s`` with the later one at the same or a higher layer.
+    tunnel, external / origin ASN, tenant VRF) within ``window_s``, or sit on
+    the same device within ``same_device_window_s`` with the later one at the
+    same or a higher layer.
     A transport → routing step on one device may take up to ``hold_window_s``
     (a BGP hold timer expires up to 180-240 s after the tunnel under it dies).
     Each cluster that spans >= 2 devices, vendors or layers is an incident;
     its root is the lowest-layer, earliest event.
+
+    ASN and VRF joins carry noise guardrails: ASNs join only on active
+    (non-recovered) routing / transport failures and never for iBGP, the
+    local AS or reserved ASNs; default-like VRFs (``DEFAULT_VRF_NAMES``) never
+    join on their own, only paired with the same external AS. Neither counts
+    as strong evidence, so an ASN- or VRF-only incident stays "medium".
     """
     from ai_log_analyzer.causal import _reference_dt, event_time
 
+    events = list(events)
+    local_asns = _local_asns(events)
     pool = [e for e in events
             if _layer(e) is not None and getattr(e, "state", "") != "up"
             and getattr(e, "severity", "info") in ("critical", "high", "medium")]
@@ -339,7 +441,7 @@ def correlate_entities(
     by_key: dict[str, list[int]] = {}
     evidence_of: dict[str, str] = {}
     for i, ev in enumerate(pool):
-        for evidence, key in _join_keys(ev):
+        for evidence, key in _join_keys(ev, local_asns):
             by_key.setdefault(key, []).append(i)
             evidence_of[key] = evidence
     for key, members in by_key.items():
@@ -417,6 +519,12 @@ def _incident(pool, ordered, root, times, hosts, vendors, evidence, confidence) 
     summary = (f"{r['description']} on {r['hostname']} ({r['vendor'] or 'unknown'}, {r['layer']}) → "
                f"{len(symptoms)} downstream event(s) across {len(hosts)} device(s)"
                + (f" [{', '.join(effect_layers)}]" if effect_layers else ""))
+    shared_asns = sorted({k for t, k in evidence if t == "shared_asn"}, key=int)
+    shared_vrfs = sorted({k.split("|", 1)[0] for t, k in evidence if t == "same_vrf"})
+    if shared_asns:
+        summary += f"; shared peer AS {', '.join(f'AS{a}' for a in shared_asns)}"
+    if shared_vrfs:
+        summary += f"; VRF {', '.join(shared_vrfs)}"
     return {
         "root_cause": r,
         "chain": chain[:15],
@@ -426,6 +534,7 @@ def _incident(pool, ordered, root, times, hosts, vendors, evidence, confidence) 
         "device_count": len(hosts),
         "event_count": len(ordered),
         "evidence": [{"type": k, "key": v} for k, v in evidence[:20]],
+        "shared": {"asn": shared_asns, "vrf": shared_vrfs},
         "confidence": confidence,
         "summary": summary,
     }
