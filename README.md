@@ -32,6 +32,13 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
+## What's new (unreleased) — evidence-grounded RCA, streaming triage, RBAC
+
+- **Every RCA cites its evidence**: a local BM25 index (SQLite, no external service) over device configs, running-vs-golden drift, NetBox topology, KB runbooks and resolved past incidents. Playbooks and Copilot answers carry `[S1]`-style citations such as `leaf1 running-config L102-L118` or `INC-000042 (2026-10-01, resolved)`; invented citations and line numbers are flagged — see [docs/OPERATIONS.md](docs/OPERATIONS.md#retrieval-index-rag).
+- **Continuous streaming triage**: a background worker tails the syslog spool, correlates and suppresses over a sliding window, and opens or updates ServiceNow / Jira / webhook tickets with the RCA and a check-mode Ansible plan attached, with per-incident cooldowns and a global rate limit against ticket storms.
+- **RBAC + audit trail**: `viewer` / `operator` / `admin` tokens separate dashboards from analysis and from privileged actions (`/api/run`, LLM toggles, configuration); an append-only, hash-chained audit log records who ran what, including every external LLM call.
+- **Golden-incident eval harness**: `ai-log-analyzer eval --golden` replays labeled EVPN, BGP leak/flap, FortiGate SD-WAN/IPsec and PAN-OS HA incidents and scores RCA accuracy, de-tokenization, guardrail compliance and evidence.
+
 ## What's new (unreleased) — durable ingest, suppression, Ansible
 
 - **Durable, multi-worker syslog**: TCP/TLS with RFC 6587 framing and concurrent connections, sender-IP attribution, allow-list, and a SQLite WAL spool shared by every Gunicorn worker (also used for incident memory and LLM toggles) — see [docs/OPERATIONS.md](docs/OPERATIONS.md).
@@ -468,7 +475,9 @@ src/ai_log_analyzer/
   - IPsec pre-shared keys
   - Public IPv4 addresses (mapped to RFC-5737 doc prefixes for the LLM context)
 - **Localhost bind by default** — set `ANALYZER_HOST=0.0.0.0` to expose; the server warns if you bind publicly without an API token.
-- **API-token gate** — set `AI_LOG_ANALYZER_API_TOKEN=...` to require the token on every POST, supplied as either `X-API-Token: <token>` or `Authorization: Bearer <token>`.
+- **API-token gate** — set `AI_LOG_ANALYZER_API_TOKEN=...` to require the token on every POST, supplied as either `X-API-Token: <token>` or `Authorization: Bearer <token>`. That shared token is the `admin` role.
+- **Role-based access** — `AI_LOG_ANALYZER_VIEWER_TOKENS` / `_OPERATOR_TOKENS` / `_ADMIN_TOKENS` (`name:token,...`) or `AI_LOG_ANALYZER_RBAC_FILE` (SHA-256 token hashes). Viewers read dashboards, operators analyze and work incidents, only admins run commands, change LLM providers or edit configuration.
+- **Audit trail** — with `AI_LOG_ANALYZER_STATE_DB` (or `AI_LOG_ANALYZER_AUDIT_DB`) set, privileged actions, denied attempts, external LLM calls and triage tickets are written to an append-only, hash-chained `audit_log` table (`GET /api/audit`, `/api/audit/verify`).
 - **CORS allow-list** — `AI_LOG_ANALYZER_CORS_ORIGINS=https://a.com,https://b.com`.
 - **File-ingest confinement** — `AI_LOG_ANALYZER_FILE_ROOTS=~:/var/log` bounds what `{source:"file"}` may read.
 - **No telemetry** — outbound calls go only to (a) the LLM provider you select and (b) the local Docker socket if you analyze FRR-lab containers.
@@ -494,7 +503,10 @@ src/ai_log_analyzer/
 - [x] Causal timeline, blast-radius estimator, change-window correlator
 - [x] Incident memory — local journal with recurrence badges + `/api/incidents/similar`
 - [x] One-command demo mode (`ai-log-analyzer demo [--serve]`)
-- [ ] Snapshot / replay analysis runs for regression testing
+- [x] Golden-incident replay for regression testing (`ai-log-analyzer eval --golden`)
+- [x] Config + incident retrieval with cited evidence in every RCA (`ai-log-analyzer rag`)
+- [x] Streaming triage worker with ServiceNow / Jira / webhook ticketing and storm controls
+- [x] RBAC (viewer / operator / admin) and an append-only audit trail
 - [x] Unknown-pattern template mining — Drain-style clustering of unmatched lines, surfaced in UI/API/MCP
 - [x] Cross-run template persistence — `AI_LOG_ANALYZER_TEMPLATE_STORE` flags never-before-seen shapes (🆕)
 - [x] Fabric stability scoring — flap/burst/trend detection + 24h risk band per device

@@ -1,4 +1,4 @@
-# Operations: durable ingest, multi-worker state, suppression, automation export
+# Operations: durable ingest, multi-worker state, suppression, automation export, retrieval, triage, RBAC
 
 ## Shared state for multi-worker deployments
 
@@ -112,3 +112,131 @@ Check-mode and diff support depend on the collection version, so run the dry
 run against a lab device first. The Nornir export uses `nornir_napalm`
 (`napalm_configure(dry_run=True)` by default, `--apply` to commit) for IOS,
 EOS, Junos and NX-OS.
+
+## Retrieval index (RAG)
+
+Every playbook and Copilot answer can cite evidence an engineer can open:
+
+| Kind | Source | Citation |
+|---|---|---|
+| `config` | running config stanza, original line numbers | `leaf1 running-config L102-L118 \`router bgp 65001\`` |
+| `drift` | running vs golden diff hunk | `leaf1 drift vs golden L115-L115 \`router bgp 65001\`` |
+| `topology` | NetBox devices + cables, or a site `manifest.json` | `NetBox device leaf1 (role leaf, site DC1)` |
+| `runbook` | curated KB playbooks | `KB runbook routing/bgp_hold_timer` |
+| `incident` | incident store; resolutions are precedents | `INC-000042 (2026-10-01, resolved)` |
+
+```bash
+AI_LOG_ANALYZER_STATE_DB=/var/lib/netlog-ai/state.db \
+AI_LOG_ANALYZER_GOLDEN_DIR=/etc/netlog-ai/golden \
+ai-log-analyzer rag index --netbox          # KB + site configs + drift + NetBox + incidents
+ai-log-analyzer rag search "neighbor 10.0.1.0 hold timer" --hosts leaf1
+ai-log-analyzer rag drift running.cfg golden.cfg
+```
+
+* **Storage:** SQLite tables `rag_docs` / `rag_postings` in `AI_LOG_ANALYZER_RAG_DB`
+  or the state DB. Ranking is BM25 computed locally; nothing leaves the host.
+* **Golden configs:** `<golden_dir>/<site>/<host>.txt`, `<golden_dir>/<host>.txt`, or
+  a `golden/` folder inside a site bundle. Banner lines that change on every
+  commit (last-change stamps, "Building configuration") are ignored.
+* **Secrets:** stanza bodies are passed through `sanitize()` before they are stored.
+* **Incidents:** each analysis syncs new and changed incident-store records
+  before it runs, so an item never cites itself. Record the fix with
+  `POST /api/incidents/<id>/resolve {"resolution": "..."}` to turn an incident into
+  a precedent.
+* **In playbooks:** `deep_analysis.evidence` lists S1..Sn for the affected devices
+  (configs and drift only for those devices). With the LLM on, the model gets
+  the evidence as fenced numbered sources and must cite `[S#]`;
+  `deep_analysis.citations.invalid` lists labels it invented.
+* **Off switch:** `AI_LOG_ANALYZER_RAG=0`.
+
+## Streaming triage worker
+
+The worker turns the spool into tickets without anyone uploading logs:
+
+```bash
+AI_LOG_ANALYZER_STATE_DB=/var/lib/netlog-ai/state.db \
+AI_LOG_ANALYZER_TRIAGE_SINKS=servicenow,webhook \
+ai-log-analyzer triage-worker            # or AI_LOG_ANALYZER_TRIAGE_WORKER=true with the web app
+```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `AI_LOG_ANALYZER_TRIAGE_WINDOW_S` | 300 | sliding correlation window |
+| `AI_LOG_ANALYZER_TRIAGE_POLL_S` | 15 | tick interval |
+| `AI_LOG_ANALYZER_TRIAGE_MIN_SEVERITY` | high | lowest severity that opens a ticket |
+| `AI_LOG_ANALYZER_TRIAGE_COOLDOWN_S` | 900 | per-incident quiet period after a send |
+| `AI_LOG_ANALYZER_TRIAGE_MAX_TICKETS_PER_HOUR` | 30 | global send budget; excess is deferred |
+| `AI_LOG_ANALYZER_TRIAGE_SINKS` | dry-run | `jira`, `servicenow`, `webhook`, `dry-run` |
+| `AI_LOG_ANALYZER_TRIAGE_USE_LLM` | false | LLM playbooks (KB playbooks otherwise) |
+
+Per tick: new spool rows (oldest first, from a cursor stored in the state DB)
+→ parse → drop exact duplicates within 5 s → classify → window → entity
+pairing, topology-aware suppression and grouping → one incident per root and
+per remaining unsuppressed group at or above the minimum severity.
+
+* **Ticket identity** is site + device + layer, so an incident keeps one ticket
+  when it gains dependents or a second interface.
+* **Cooldown:** within the cooldown new events are held. A severity escalation
+  or a state change (for example, all entities recovered) bypasses it. After
+  the cooldown an update is sent only if events arrived since the last send.
+* **Self-healed** groups (down then up inside the window) never open a ticket.
+* **Rate limit:** sends beyond the hourly budget are deferred to later ticks;
+  failed deliveries are retried on the next tick.
+* **One active worker:** a lease in the state DB elects the worker that
+  processes the spool; the others report `standby`.
+* **Payload:** the RCA card, the playbook's commands per phase, cited
+  evidence, sample events, related alerts and, for interface faults with a
+  known vendor, a guarded drain plan plus its Ansible playbook (run with
+  `--check --diff` first). Nothing is executed on devices.
+
+## RBAC and audit trail
+
+| Role | Can |
+|---|---|
+| `viewer` | incident search, live tail, triage status, retrieval search, full `/api/llm/status` |
+| `operator` | viewer + analyze, correlate, triage, copilot, remediation plans, ITSM enrichment, resolve incidents, drift |
+| `admin` | operator + `/api/run`, LLM provider / toggle, sources and rules, triage worker control, index rebuild, audit log |
+
+```bash
+AI_LOG_ANALYZER_OPERATOR_TOKENS="alice:$(openssl rand -hex 24)"
+AI_LOG_ANALYZER_RBAC_FILE=/etc/netlog-ai/rbac.json
+# {"users": [{"name": "noc-wall", "role": "viewer", "token_sha256": "<sha256 of the token>"}]}
+```
+
+* Send the token as `Authorization: Bearer <token>` or `X-API-Token`; the SSE live
+  tail also accepts `?token=`.
+* `AI_LOG_ANALYZER_API_TOKEN` keeps working as the `admin` role.
+* With no principal configured the API stays in dev mode (open, localhost bind).
+
+The audit log lives in the state DB (or `AI_LOG_ANALYZER_AUDIT_DB`):
+
+* **Append-only:** triggers reject UPDATE and DELETE.
+* **Tamper-evident:** every row stores the SHA-256 of the previous row and itself,
+  so `GET /api/audit/verify` finds an edit made outside SQLite.
+* **Recorded:** `/api/run` (host and command), LLM provider/toggle changes,
+  source and rule changes, ITSM writes, incident resolutions, triage worker
+  control and tickets, denied attempts (`authz.denied`), and every cloud LLM
+  call (provider, prompt size, redaction count, never content).
+  Set `AI_LOG_ANALYZER_AUDIT_LLM=all` to include local providers.
+* **Query:** `GET /api/audit?actor=alice&action=llm.*&since=<epoch>&limit=100`.
+
+## Golden-incident evaluation
+
+```bash
+ai-log-analyzer eval --golden --min-golden 0.99   # CI gate
+```
+
+Replays the labeled incidents in `src/ai_log_analyzer/data/eval/` (EVPN
+underlay cascade, BGP route leak + flap, FortiGate SD-WAN/IPsec cascade,
+PAN-OS HA failover) offline. The LLM is a deterministic stub, so the run
+measures the pipeline around the model:
+
+| Dimension | Passes when |
+|---|---|
+| `rca` | the labeled root is the top live item; required alerts found, false positives absent; dependents suppressed under the expected root kind; expected states and BGP anomaly classes reported |
+| `detokenize` | no raw IP or affected hostname reaches the (cloud) provider prompt, and echoed tokens are restored in the playbook |
+| `guardrail` | the destructive CLI the stub injects (zeroize, reload, clear bgp *, factory reset, private-data reset, write erase) never reaches a playbook |
+| `evidence` | the expected config / drift evidence is attached and every `[S#]` citation resolves |
+
+Add a case by dropping a JSON file with `logs`, optional `configs` / `golden` /
+`site`, and an `expect` block into that directory (or pass `--cases DIR`).

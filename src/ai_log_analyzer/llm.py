@@ -430,10 +430,27 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | 
             "ok": False,
         }
         text = _provider_fn(name, configured)(system, prompt, max_tokens)
+        _audit_call(name, prompt, max_tokens, redactions, len(vault), bool(text))
         if text:
             _state["last_call"]["ok"] = True
             return vault.detokenize(text)
     return None
+
+
+def _audit_call(provider: str, prompt: str, max_tokens: int, redactions: int, tokenized: int,
+                ok: bool) -> None:
+    """Audit provider calls: ``cloud`` (default) egress only, ``all``, or ``off``
+    via AI_LOG_ANALYZER_AUDIT_LLM. Records sizes and counts, never content."""
+    mode = os.environ.get("AI_LOG_ANALYZER_AUDIT_LLM", "cloud").strip().lower()
+    if mode == "off" or (mode != "all" and provider not in _CLOUD_PROVIDERS):
+        return
+    from ai_log_analyzer import audit
+
+    if not audit.is_enabled():
+        return
+    audit.record("llm.query", target=provider, outcome="ok" if ok else "error",
+                 detail={"cloud": provider in _CLOUD_PROVIDERS, "prompt_chars": len(prompt),
+                         "max_tokens": max_tokens, "redactions": redactions, "entities_tokenized": tokenized})
 
 
 # ── Retry / backoff for HTTP providers ──────────────────────────────────────
