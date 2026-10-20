@@ -32,14 +32,34 @@ class RemediationActionType(str, Enum):
     CUSTOM_SAFE_CONFIG = "custom_safe_config"
 
 
-# Destructive CLI patterns strictly blocked from automated or copy-paste generation
+# Destructive CLI patterns strictly blocked from automated or copy-paste generation.
+# Patterns are matched per command *segment*: a CLI string is split on
+# newlines, `;`, `&&`, `||` and `vtysh -c '...'` boundaries first, so
+# anchored rules still catch `vtysh -c 'reload'` or a second line `reboot`.
 _FORBIDDEN_CLI_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("erase_storage", re.compile(r"\b(?:write\s+erase|erase\s+startup-config|format\s+flash:)\b", re.IGNORECASE)),
-    ("system_zeroize", re.compile(r"\brequest\s+system\s+(?:zeroize|halt|power-off)\b", re.IGNORECASE)),
-    ("unscoped_reload", re.compile(r"^\s*(?:reload|reboot)\b", re.IGNORECASE)),
+    ("erase_storage", re.compile(r"\b(?:write\s+erase|erase\s+(?:startup-config|nvram:|flash:|bootflash:)|format\s+(?:flash|bootflash|disk\d*|usb\d*):?)", re.IGNORECASE)),
+    ("system_zeroize", re.compile(r"\brequest\s+system\s+(?:zeroize|halt|power-off|reboot|snapshot\s+delete)\b", re.IGNORECASE)),
+    ("unscoped_reload", re.compile(r"^\s*(?:sudo\s+)?(?:reload|reboot|shutdown\s+-[hr]|halt|poweroff)\b", re.IGNORECASE)),
     ("wipe_bgp_asn", re.compile(r"^\s*no\s+router\s+(?:bgp|ospf|isis)\b", re.IGNORECASE)),
     ("delete_root_config", re.compile(r"^\s*delete\s*$", re.IGNORECASE)),
+    # Junos: deleting a whole top-level stanza (≤1 qualifier, e.g. `delete protocols bgp`).
+    ("delete_config_stanza", re.compile(r"^\s*delete\s+(?:protocols|routing-options|routing-instances|interfaces|security|system|policy-options|firewall|chassis)(?:\s+\S+)?\s*$", re.IGNORECASE)),
+    # Hard reset of every BGP session (soft refresh is allowed).
+    # Junos `clear bgp neighbor` with no peer resets every session too.
+    ("clear_all_bgp", re.compile(r"^\s*clear\s+(?:ip\s+)?bgp\s+(?:(?:neighbor\s+)?(?:\*|all)(?!\S)(?!.*\bsoft\b)|neighbor\s*$)", re.IGNORECASE)),
+    ("load_override", re.compile(r"^\s*load\s+(?:override|factory-default)\b", re.IGNORECASE)),
+    ("shell_wipe", re.compile(r"\brm\s+-[a-z]*r[a-z]*f?\s+/(?:\s|$)|\bmkfs\b|\bdd\s+if=.*\bof=/dev/", re.IGNORECASE)),
 ]
+
+_SEGMENT_SPLIT_RE = re.compile(r"\n|;|&&|\|\||\bvtysh\b|-c\s+")
+
+BLOCKED_CLI_PLACEHOLDER = "# BLOCKED by SafetyGuardrail ({rule}): command withheld — requires manual engineering review"
+
+
+def _command_segments(cmd: str) -> list[str]:
+    """Split one CLI string into the individual commands it would run."""
+    parts = _SEGMENT_SPLIT_RE.split(cmd or "")
+    return [p.strip().strip("'\"").strip() for p in parts if p and p.strip().strip("'\"").strip()]
 
 
 class SafetyViolationError(ValueError):
@@ -108,11 +128,64 @@ class SafetyGuardrail:
             )
 
         for cmd in commands:
+            rule_name = cls.violation(cmd)
+            if rule_name:
+                raise SafetyViolationError(
+                    f"Command '{cmd}' blocked by safety guardrail '{rule_name}'."
+                )
+
+    @staticmethod
+    def violation(cmd: str) -> str | None:
+        """Name of the first guardrail rule ``cmd`` violates, or None if safe."""
+        if not isinstance(cmd, str):
+            return None
+        for segment in [cmd, *_command_segments(cmd)]:
             for rule_name, pattern in _FORBIDDEN_CLI_PATTERNS:
-                if pattern.search(cmd):
-                    raise SafetyViolationError(
-                        f"Command '{cmd}' blocked by safety guardrail '{rule_name}'."
-                    )
+                if pattern.search(segment):
+                    return rule_name
+        return None
+
+    @classmethod
+    def screen(cls, commands: list[str] | tuple[str, ...]) -> tuple[list[str], list[dict[str, str]]]:
+        """Non-raising filter for model-generated CLI.
+
+        Returns (commands with violations replaced by a visible placeholder,
+        [{"command", "rule"}] for each blocked command).
+        """
+        safe: list[str] = []
+        blocked: list[dict[str, str]] = []
+        for cmd in commands or []:
+            text = str(cmd)
+            rule = cls.violation(text)
+            if rule:
+                blocked.append({"command": text, "rule": rule})
+                safe.append(BLOCKED_CLI_PLACEHOLDER.format(rule=rule))
+            else:
+                safe.append(text)
+        return safe, blocked
+
+
+def screen_llm_cli(value: Any, blocked: list[dict[str, str]] | None = None) -> Any:
+    """Recursively screen LLM output (str / list / dict of CLI) through the guardrail.
+
+    Strings are treated as one command (multi-line strings are screened per
+    segment); dict keys (platform or hostname) are preserved. Violations are
+    replaced with ``BLOCKED_CLI_PLACEHOLDER`` and appended to ``blocked``.
+    """
+    sink = blocked if blocked is not None else []
+    if isinstance(value, str):
+        rule = SafetyGuardrail.violation(value)
+        if rule:
+            sink.append({"command": value, "rule": rule})
+            return BLOCKED_CLI_PLACEHOLDER.format(rule=rule)
+        return value
+    if isinstance(value, list):
+        return [screen_llm_cli(v, sink) for v in value]
+    if isinstance(value, tuple):
+        return tuple(screen_llm_cli(v, sink) for v in value)
+    if isinstance(value, dict):
+        return {k: screen_llm_cli(v, sink) for k, v in value.items()}
+    return value
 
 
 class RemediationGenerator:

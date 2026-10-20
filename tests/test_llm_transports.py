@@ -95,8 +95,12 @@ def test_ollama_success_cleans_and_clears_error(monkeypatch):
 
 @pytest.mark.unit
 def test_ollama_http_error_recorded(monkeypatch):
-    monkeypatch.setattr(llm, "_SESSION", _Session(_Resp(500, text="boom")))
+    # 5xx is retried (max_retries=2 by default) before the error is recorded.
+    sess = _Session(*[_Resp(500, text="boom") for _ in range(3)])
+    monkeypatch.setattr(llm, "_SESSION", sess)
+    monkeypatch.setattr(llm, "_sleep", lambda _s: None)
     assert llm._query_ollama("sys", "user", 100) is None
+    assert len(sess.calls) == 3
     assert "HTTP 500" in llm._state["last_errors"]["ollama"]
 
 
@@ -162,8 +166,11 @@ def test_query_disabled_short_circuits(monkeypatch):
 
 @pytest.mark.unit
 def test_query_falls_back_in_order(monkeypatch):
+    # Cloud fallback is opt-in; this pins the order once it is allowed.
+    # The default (no cloud) is covered in test_llm_gateway.py.
     llm._state["enabled"] = True
     llm._state["provider"] = "ollama"
+    llm._state["allow_cloud_fallback"] = True
     called: list[str] = []
     monkeypatch.setitem(llm._PROVIDERS, "ollama", lambda *a: called.append("ollama"))
     monkeypatch.setitem(llm._PROVIDERS, "local", lambda *a: called.append("local"))

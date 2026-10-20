@@ -6,6 +6,24 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Security
+
+- **Central LLM gateway** (`llm.query()`). Every LLM call — analyzer, copilot, diff, judge, site_doc, site_optimize — now passes one boundary that re-applies secret/PII redaction, so no caller can forget it.
+- **No silent cloud egress.** `ollama` / `local` no longer fall back to Claude or Grok unless `ALLOW_CLOUD_FALLBACK=true`; an explicitly selected cloud provider may fall back to local runtimes, not to a second cloud vendor.
+- **Reversible, indexed entity tokens** (`sanitize_vault.py`). IPs, IPv6, MACs, ASNs and hinted hostnames become `<IP_1>`, `<IP6_1>`, `<MAC_1>`, `<ASN_1>`, `<HOST_1>` instead of one generic placeholder, so the model can tell BGP/EVPN peers apart. Answers are detokenized for the operator. One vault per analysis run keeps numbering consistent across playbooks and the executive summary. The vault is LRU/TTL-bounded.
+- **New redaction rules** (`sanitize.py`): interface/neighbor `description`, SNMP `location` / `contact`, SNMPv3 auth/priv keys, and chassis serial numbers.
+- **Prompt-injection fencing.** Raw log and config text is wrapped in `<untrusted_data>` blocks (embedded delimiters neutralized) and the gateway adds a data-handling rule to every system prompt.
+- **SafetyGuardrail on model-generated CLI.** Deep-analysis phases and `preventive_config`, `optimize_config` patches/rollbacks, site `fix_per_device`, and site-optimize `config_changes` are screened; violations are replaced with a visible `# BLOCKED by SafetyGuardrail (...)` line and listed in `guardrail_blocked`. New rules: Junos stanza deletes, `clear bgp *` / bare `clear bgp neighbor`, `load override`, `request system reboot`, shell wipes; multi-command strings are checked per segment.
+
+### Added
+
+- Per-provider prompt budgets (`LLM_MAX_PROMPT_CHARS[_<PROVIDER>]`, visible head+tail truncation), optional `OLLAMA_NUM_CTX`, and retry with exponential backoff on HTTP 408/429/5xx/529 honouring `Retry-After` (`LLM_MAX_RETRIES`, `LLM_BACKOFF_BASE`, `LLM_BACKOFF_MAX`).
+- `/api/llm/status` exposes `allow_cloud_fallback`, `tokenize_hostnames` and `last_call` metadata (provider, prompt size, redactions, entities tokenized, truncation — never content).
+
+### Changed
+
+- `llm.prepare_log_samples()` no longer masks addresses itself; the gateway tokenizes the whole prompt with one vault.
+
 ## [1.3.0] - 2026-10-16
 
 ### Added
