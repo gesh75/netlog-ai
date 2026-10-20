@@ -1471,6 +1471,58 @@ def create_app() -> Flask:
         return jsonify(result.to_dict())
 
     # Auto-load env-configured sources on app boot (idempotent).
+    # ── Dashboard status bar ──────────────────────────────────────────────
+    @app.route("/api/status/overview", methods=["GET"])
+    @require_role("viewer")
+    def api_status_overview():
+        """One cheap poll for the header: spool depth, triage worker, LLM egress
+        policy and vault stats, and who the caller is. No provider probing."""
+        import time as _time
+
+        from ai_log_analyzer.state_store import get_state_db
+        from ai_log_analyzer.triage_worker import get_worker
+
+        now = _time.time()
+        db = get_state_db()
+        spool: dict = {"enabled": db is not None, "sources": []}
+        if db is not None:
+            try:
+                for row in db.spool_stats():
+                    row["age_s"] = round(now - row["last_received_at"], 1) if row["last_received_at"] else None
+                    spool["sources"].append(row)
+                spool["rows"] = sum(r["rows"] for r in spool["sources"])
+            except Exception as exc:   # sqlite3.Error — the bar must still render
+                spool["error"] = str(exc)[:200]
+        for sid in source_manager.list_ids():
+            src = source_manager.get(sid)
+            if hasattr(src, "stats"):
+                try:
+                    spool.setdefault("listeners", []).append({"id": sid, **src.stats()})
+                except Exception:
+                    pass
+        worker = get_worker(create=False)
+        triage: dict = {"configured": db is not None, "running": False}
+        if worker is not None:
+            st = worker.status()
+            triage.update(running=st["running"], role=st["role"], sinks=st["sinks"],
+                          window_events=st["window_events"], totals=st["totals"],
+                          last_tick_at=(st.get("last_tick") or {}).get("at"))
+        if db is not None:
+            try:
+                triage["tickets"] = db.triage_count()
+            except Exception:
+                pass
+        actor = audit.current_actor()
+        return jsonify({
+            "generated_at": now,
+            "spool": spool,
+            "triage": triage,
+            "llm": llm.egress_policy(),
+            "identity": {"name": actor.name, "role": actor.role,
+                         "auth": "rbac" if rbac.auth_enabled(API_TOKEN) else "dev"},
+            "audit": audit.is_enabled(),
+        })
+
     # ── Identity + audit trail ────────────────────────────────────────────
     @app.route("/api/whoami", methods=["GET"])
     @require_role("viewer")

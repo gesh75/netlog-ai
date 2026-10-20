@@ -32,6 +32,14 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
+## What's new (unreleased) — V2 dashboard
+
+- **Sign in with a role token** from the header; the UI works on RBAC deployments (viewer / operator / admin).
+- **Live status bar**: syslog spool depth, streaming-triage state and tickets, the LLM egress policy (*Local only · no cloud fallback* vs *Cloud enabled*) and vault tokenization stats.
+- **Root-cause incident cards** with the shared peer IPs, ASNs, tunnels and VRFs, and the suppressed downstream alerts one click away; FortiOS / PAN-OS / SD-WAN vendor and event-type badges.
+- **Remediation as Vendor CLI, Ansible (check-mode dry run first) or Nornir**, downloadable; commands withheld by the SafetyGuardrail are flagged ⛔ and cannot be run.
+- **Clickable RAG citations** (config lines, golden drift, NetBox, past incidents) in playbooks and Copilot, plus an admin audit-log viewer.
+
 ## What's new (unreleased) — evidence-grounded RCA, streaming triage, RBAC
 
 - **Every RCA cites its evidence**: a local BM25 index (SQLite, no external service) over device configs, running-vs-golden drift, NetBox topology, KB runbooks and resolved past incidents. Playbooks and Copilot answers carry `[S1]`-style citations such as `leaf1 running-config L102-L118` or `INC-000042 (2026-10-01, resolved)`; invented citations and line numbers are flagged — see [docs/OPERATIONS.md](docs/OPERATIONS.md#retrieval-index-rag).

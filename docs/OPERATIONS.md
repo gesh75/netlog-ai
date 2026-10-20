@@ -240,3 +240,28 @@ measures the pipeline around the model:
 
 Add a case by dropping a JSON file with `logs`, optional `configs` / `golden` /
 `site`, and an `expect` block into that directory (or pass `--cases DIR`).
+
+## Dashboard (V2)
+
+* **Sign in:** with RBAC on, click the 👤 chip next to the brand and paste a token.
+  * The token stays in this browser tab (`sessionStorage`) and is sent as `Authorization: Bearer` to `/api/*`, or as `?token=` for the live tail.
+  * A viewer sees dashboards; operator and admin unlock their routes.
+  * The 📜 Audit log button appears for admins.
+* **Status bar** (`GET /api/status/overview`, polled every 10 s; it never probes LLM providers):
+
+| Chip | Shows | Green when |
+|---|---|---|
+| Spool | rows in the SQLite WAL spool, newest line age, listener counters | newest line < 5 min old |
+| Triage | worker role (`active` / `standby` / `off`) and ticket count | this process holds the lease |
+| Egress | 🔒 *Local only · no cloud fallback*, ☁ *Cloud fallback enabled*, ☁ *Cloud: provider* | local only |
+| Vault | entities tokenized and secrets redacted on the last LLM call | last call succeeded |
+
+* **Incident cards:** one per suppression root (platform, device unreachable, transport) and per cross-vendor cluster that no root explains.
+  * Each card shows the shared peer IPs, ASNs, tunnels, VRFs, /30–/31 subnets and interfaces.
+  * The suppressed downstream alerts are behind an expandable section.
+  * In Action Items, suppressed rows are hidden by default; their "↳ suppressed by ROOT-…" chip jumps to the card.
+* **Remediation:** pick device, vendor, action and interface, or use "Guarded plan for this link" on a card. Switch between Vendor CLI, Ansible (YAML, with the `check_mode: true` dry-run task) and Nornir, and download the file.
+* **Guardrail:** any `# BLOCKED by SafetyGuardrail` line is badged ⛔ GUARDRAIL, and its ▶ Run button is disabled.
+* **Evidence:** `[S#]` in a playbook's root cause or a Copilot answer opens the cited item.
+  * Drift items show the running (+) and golden (−) lines.
+  * Labels the model invented are struck through and flagged unverified.

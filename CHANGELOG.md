@@ -6,6 +6,31 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Added — V2 dashboard
+
+- **API-token sign-in.** The UI now works on RBAC deployments: a 👤 chip next to the brand takes a viewer / operator / admin token. The token is kept in `sessionStorage` and sent as `Authorization: Bearer` on every `/api/*` call, or as `?token=` for the SSE live tail. Before this, the dashboard could not call protected routes once tokens were configured.
+- **Header status bar** from the new `GET /api/status/overview` (viewer). One cheap poll every 10 s, with no provider probing, shows:
+  - spool depth and age per source, plus listener counters;
+  - the streaming triage worker's role and ticket count;
+  - the LLM egress policy: 🔒 *Local only · no cloud fallback*, ☁ *Cloud fallback enabled* or ☁ *Cloud: provider*;
+  - vault stats from the last call: entities tokenized and secrets redacted.
+- **Remediation card.** Remediations can be viewed as Vendor CLI, Ansible playbook (YAML) or Nornir script tabs, each with download and copy.
+  - Badges mark the check-mode dry run and the rollback timer.
+  - The panel gains an interface field and FortiOS / PAN-OS / SD-WAN vendors.
+  - Exports a vendor cannot support show the reason, for example SD-WAN → vManage.
+- **SafetyGuardrail highlighting.** `# BLOCKED` lines carry a ⛔ GUARDRAIL badge wherever CLI is shown.
+  - Platforms whose command was withheld are marked in the selector, and their ▶ Run button is disabled.
+  - Playbooks list the withheld commands and the rules that caught them.
+- **Vendor and event-type badges** (FortiOS, PAN-OS, SD-WAN, Junos, EOS, IOS-XE, NX-OS, FRR, …; SLA, IPsec, IKE P1/P2, HA, BGP, BFD, OMP, …) on event rows and incident cards.
+- **Root-cause incident cards** for every topology-suppression root and every uncovered cross-vendor correlation cluster.
+  - Cards show the shared peer IPs, ASNs, tunnels, VRFs, point-to-point subnets and interfaces, with a collapsible table of suppressed downstream alerts.
+  - Suppressed action items are hidden behind a toggle and link back to their root.
+  - A "Guarded plan for this link" button prefills the remediation panel.
+- **RAG evidence.** Playbooks and Copilot answers render `[S#]` as links that open the matching evidence: config stanza with line numbers, drift with green/red ± lines, NetBox topology, KB runbook, or past incident with its resolution.
+  - Invented citations are struck through and flagged unverified.
+  - Copilot `host Lnn` references are checked against the config that was sent.
+- **Audit log panel** for admins (and dev mode with an audit store): filter by actor or action, verify the hash chain.
+
 ### Added — evidence-grounded RCA, streaming triage, RBAC and evaluation
 
 - **Retrieval index** (`rag.py`): zero-dependency BM25 over SQLite (`AI_LOG_ANALYZER_RAG_DB`, default the state DB) with a network-aware tokenizer (interface-name canonicalization, IPs/ASNs as whole terms). Indexes config stanzas with original line numbers (Junos braces and `set`, IOS/NX-OS/EOS/FRR/FortiOS indentation), running-vs-golden drift hunks (`config_drift`), NetBox / site-manifest topology, every KB runbook, and the incident store (incremental sync; resolved incidents are precedents). Config bodies are secret-scrubbed at rest. CLI `rag index|search|stats|drift`; `GET /api/rag/search`, `/api/rag/stats`, `POST /api/rag/reindex`, `/api/rag/drift`.

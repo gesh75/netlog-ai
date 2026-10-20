@@ -212,6 +212,33 @@ def get_state() -> dict[str, object]:
     }
 
 
+def egress_policy() -> dict[str, object]:
+    """Where prompts may go, for the dashboard. Cheap: no provider probing.
+
+    ``mode`` is ``local-only`` (local runtime, no cloud fallback),
+    ``cloud-fallback`` (local first, cloud allowed when it fails) or
+    ``cloud`` (a cloud provider is selected).
+    """
+    _sync_shared_state()
+    provider = str(_state["provider"])
+    order = provider_order(provider)
+    if provider in _CLOUD_PROVIDERS or provider == "claude-only":
+        mode = "cloud"
+    elif any(p in _CLOUD_PROVIDERS for p in order):
+        mode = "cloud-fallback"
+    else:
+        mode = "local-only"
+    return {
+        "provider": provider,
+        "enabled": bool(_state["enabled"]),
+        "mode": mode,
+        "order": order,
+        "allow_cloud_fallback": bool(_state.get("allow_cloud_fallback")),
+        "tokenize_hostnames": _state.get("tokenize_hostnames", "auto"),
+        "last_call": dict(_state.get("last_call", {})),
+    }
+
+
 def _record_error(provider: str, msg: str) -> None:
     errors = _state.setdefault("last_errors", {})
     if isinstance(errors, dict):
