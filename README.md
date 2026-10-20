@@ -32,6 +32,13 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
+## What's new (unreleased) — multi-vendor security & SD-WAN
+
+- **Fortinet FortiOS, Palo Alto PAN-OS and Cisco Catalyst SD-WAN** parsers on a pluggable parser registry, with a canonical event schema (vendor, event type, peer IP, ASN, VRF, VNI, interface, tunnel, down/up state, UTC time) across every vendor — see [docs/PARSERS.md](docs/PARSERS.md).
+- **Cross-vendor correlation**: a FortiGate SD-WAN SLA miss → IPsec drop → Junos BGP hold-timer expiry is reported as one incident with its root cause, joined on shared IPs and point-to-point subnets.
+- **BGP anomaly detection**: NOTIFICATION code decoding (RFC 4271/4486), RFC 8203 shutdown messages (planned vs unplanned), max-prefix, origin/AS-path changes, route-flap storms.
+- **Recovered ≠ outage**: a down followed by a matching up is flagged `recovered` (or `flapping`), not an active hard outage.
+
 ## What's new in v1.3.0
 
 - **Deep network analytics** (`analytics.py`): RFC 2439 exponential flap dampening (periodic timer vs bursty physical noise), Tarjan articulation-point blast radius, and config-to-log drift correlation. Stdlib only.
