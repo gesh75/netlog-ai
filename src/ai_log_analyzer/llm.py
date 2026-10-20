@@ -139,13 +139,62 @@ _DOCKER_SOCKETS: list[str] = [
 ]
 
 
+# ── Runtime toggles shared across workers (AI_LOG_ANALYZER_STATE_DB) ─────────
+# Only operator-mutable runtime settings are shared — never API keys.
+_SHARED_KEYS = ("provider", "enabled", "allow_cloud_fallback", "tokenize_hostnames")
+_SHARED_TTL_S = 1.0
+_shared_synced_at: float = 0.0
+
+
+def _shared_db():
+    from ai_log_analyzer.state_store import get_state_db
+    return get_state_db()
+
+
+def _sync_shared_state(force: bool = False) -> None:
+    """Pull runtime toggles another worker set (cached for ~1 s)."""
+    global _shared_synced_at
+    now = time.monotonic()
+    if not force and now - _shared_synced_at < _SHARED_TTL_S:
+        return
+    _shared_synced_at = now
+    db = _shared_db()
+    if db is None:
+        return
+    try:
+        shared = db.kv_get_all("llm")
+    except Exception:  # unreadable DB must never break the LLM path
+        return
+    if shared.get("provider") in _VALID_PROVIDERS:
+        _state["provider"] = shared["provider"]
+    for key in ("enabled", "allow_cloud_fallback"):
+        if isinstance(shared.get(key), bool):
+            _state[key] = shared[key]
+    if shared.get("tokenize_hostnames") in ("auto", "always", "never"):
+        _state["tokenize_hostnames"] = shared["tokenize_hostnames"]
+
+
+def _publish_shared(key: str, value: object) -> None:
+    global _shared_synced_at
+    db = _shared_db()
+    if db is None or key not in _SHARED_KEYS:
+        return
+    try:
+        db.kv_set("llm", key, value)
+        _shared_synced_at = time.monotonic()
+    except Exception:
+        pass
+
+
 def is_enabled() -> bool:
     """Fast enabled check — no provider probing. Use in hot paths."""
+    _sync_shared_state()
     return bool(_state.get("enabled", False))
 
 
 def get_state() -> dict[str, object]:
     """Snapshot of current LLM state — safe to expose via /api/llm/status."""
+    _sync_shared_state()
     return {
         "provider":            _state["provider"],
         "enabled":             _state["enabled"],
@@ -185,17 +234,20 @@ def set_provider(provider: str) -> tuple[bool, str]:
     if p == "grok" and not _state["xai_api_key"]:
         return False, "XAI_API_KEY not configured — cannot select grok provider"
     _state["provider"] = p
+    _publish_shared("provider", p)
     return True, p
 
 
 def set_enabled(enabled: bool) -> bool:
     _state["enabled"] = bool(enabled)
+    _publish_shared("enabled", _state["enabled"])
     return _state["enabled"]
 
 
 def set_allow_cloud_fallback(allowed: bool) -> bool:
     """Explicitly opt in (or out) of local → cloud provider fallback."""
     _state["allow_cloud_fallback"] = bool(allowed)
+    _publish_shared("allow_cloud_fallback", _state["allow_cloud_fallback"])
     return _state["allow_cloud_fallback"]
 
 
@@ -349,6 +401,7 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | 
       grok     → ollama        → docker-runner → [claude]
       claude-only → claude only (no fallback)
     """
+    _sync_shared_state()
     if not _state["enabled"]:
         return None
 
