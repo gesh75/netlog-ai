@@ -932,7 +932,10 @@ def _analyze_inner(
     if store is not None:
         for a in action_items:
             a.recurrence = store.recurrence(a.description)
-        store.record([a.to_dict() for a in action_items], generated_at)
+        try:
+            store.record([a.to_dict() for a in action_items], generated_at)
+        except Exception:
+            logger.exception("could not persist incident store")
         repeats = store.repeats(now=datetime.now(timezone.utc))
 
     stab = tracker.report()

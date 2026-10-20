@@ -12,6 +12,7 @@ import multiprocessing
 import os
 import shutil
 import socket
+import sqlite3
 import ssl
 import subprocess
 import time
@@ -91,14 +92,43 @@ def test_sqlite_incident_store_concurrent_workers(tmp_path):
     assert store.recurrence("w3-r39-2")["count"] == 1
 
 
+def test_sqlite_reload_failure_does_not_undo_a_committed_append(tmp_path):
+    """A failed SELECT after COMMIT must not look like a lost write."""
+    db = StateDB(tmp_path / "state.db")
+    store = memory.SqliteIncidentStore(db)
+
+    def boom(_limit: int):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    db.incidents_all = boom  # type: ignore[method-assign]
+    assert store.record([{"description": "reload-after-write", "devices": ["r1"]}], "t") == 1
+    assert StateDB(tmp_path / "state.db").incidents_count() == 1
+
+
+def test_analyze_survives_incident_store_persist_error(tmp_path, monkeypatch):
+    from ai_log_analyzer.analyzer import analyze
+    from ai_log_analyzer.classifier import LogEvent
+
+    monkeypatch.setenv("AI_LOG_ANALYZER_STATE_DB", str(tmp_path / "state.db"))
+
+    def boom(self, *args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(memory.SqliteIncidentStore, "record", boom)
+    ev = LogEvent(
+        timestamp="Jan  1 00:00:01", hostname="spine-01", appname="rpd",
+        severity_raw="err", message="bgp peer 10.0.0.1 down hold timer expired",
+    )
+    result = analyze(iter([ev]), use_llm=False)
+    assert result.action_items
+
+
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="POSIX fork only")
 def test_no_sqlite_connection_survives_a_fork(tmp_path):
     """Regression: a connection still open at fork() (e.g. unreachable but not
     yet garbage-collected) was inherited; when the child finalized it, the
     close dropped the child's POSIX locks on the database and sibling
     workers lost committed rows."""
-    import sqlite3
-
     db = StateDB(tmp_path / "state.db")
     inherited = db.conn()
     pid = os.fork()

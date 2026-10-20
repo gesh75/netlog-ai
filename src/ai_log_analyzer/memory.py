@@ -232,7 +232,14 @@ class IncidentStore:
 
     def record(self, action_items: list[dict], generated_at: str) -> int:
         """Append this run's action items; rewrites the journal when it
-        outgrows the cap. Failures are logged, never raised."""
+        outgrows the cap.
+
+        JSONL failures are logged, never raised. SQLite insert errors
+        propagate after lock retries (swallowing them dropped concurrent
+        writes); reload-after-write errors are logged only. Analysis
+        callers catch persist errors so a finished run is not failed by
+        the journal.
+        """
         new = []
         for a in action_items:
             new.append({
@@ -289,14 +296,16 @@ class SqliteIncidentStore(IncidentStore):
         return self.db.incidents_count()
 
     def _persist(self, new: list[dict]) -> int:
-        """Write through to SQLite. ``StateDB.write`` retries lock errors;
-        this method must not swallow them — that is how rows were lost."""
+        """Write through to SQLite. Insert errors are not swallowed — that
+        is how concurrent workers lost rows. ``_load`` is best-effort: the
+        append already committed, so a failed SELECT must not look like a
+        lost write.
+        """
+        self.db.incidents_append(new, cap=_MAX_RECORDS)
         try:
-            self.db.incidents_append(new, cap=_MAX_RECORDS)
             self._load()  # pick up row ids (citation ids) and other workers' rows
         except Exception:
-            logger.exception("could not persist incident store to %s", self.path)
-            raise
+            logger.exception("could not reload incident store from %s after persist", self.path)
         return len(new)
 
     def resolve(self, inc_id: str, resolution: str, resolved_by: str = "") -> dict | None:
@@ -337,4 +346,7 @@ def annotate_and_record(result_dict_items: list[dict], generated_at: str) -> Non
         rec = store.recurrence(a.get("description", ""))
         if rec:
             a["recurrence"] = rec
-    store.record(result_dict_items, generated_at)
+    try:
+        store.record(result_dict_items, generated_at)
+    except Exception:
+        logger.exception("could not persist incident store")
