@@ -92,14 +92,14 @@
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 8px;
     flex-wrap: wrap;
     position: sticky;
     top: 0;
     z-index: 100;
     backdrop-filter: blur(10px);
   }
-  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-right: 8px; }
   .brand-logo {
     width: 32px; height: 32px; border-radius: 8px;
     background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
@@ -1140,6 +1140,112 @@
     width: calc(100% - 32px);
   }
   #snow-preview-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+
+  /* ── V2: status bar, auth, vendor badges, incidents, evidence, remediation, audit ── */
+  .chip.muted { opacity: 0.6; }
+  .role-chip { cursor: pointer; font-family: inherit; width: auto; margin: 0; line-height: inherit; }
+  .role-chip:hover, .role-chip:focus-visible { border-color: var(--accent); color: var(--fg); }
+  .role-chip.locked { color: var(--warn); border-color: rgba(210,153,34,0.4); }
+  .auth-popover {
+    position: absolute; top: 52px; left: 24px; z-index: 200; width: 300px;
+    background: var(--panel); border: 1px solid var(--border-hi); border-radius: 8px;
+    padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  }
+  .auth-popover label { display: block; font-size: 11px; color: var(--muted); margin: 6px 0 4px; }
+  .auth-popover input { width: 100%; padding: 6px 8px; font-size: 12px; }
+  .auth-popover .auth-who { font-size: 12px; color: var(--fg); font-weight: 600; }
+  .auth-actions { display: flex; gap: 6px; margin: 8px 0 4px; flex-wrap: wrap; }
+  .auth-actions button { width: auto; padding: 4px 10px; font-size: 11px; }
+
+  .vbadge, .etype, .kind-badge, .ev-kind, .guard-badge, .dryrun-badge, .state-chip, .supp-chip, .ent-chip {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+    padding: 1px 6px; border-radius: 8px; margin-left: 4px; vertical-align: middle;
+    border: 1px solid var(--border-hi); color: var(--fg-dim); background: var(--bg-2);
+    white-space: nowrap;
+  }
+  .vbadge.v-fortinet   { color: #ff6b6b; border-color: rgba(238,49,36,0.5);  background: rgba(238,49,36,0.10); }
+  .vbadge.v-paloalto   { color: #ffa94d; border-color: rgba(250,88,45,0.5);  background: rgba(250,88,45,0.10); }
+  .vbadge.v-cisco_sdwan{ color: #4dabf7; border-color: rgba(4,159,217,0.5);  background: rgba(4,159,217,0.10); }
+  .vbadge.v-juniper    { color: #74c0fc; border-color: rgba(116,192,252,0.4); }
+  .vbadge.v-arista     { color: #63e6be; border-color: rgba(99,230,190,0.4); }
+  .vbadge.v-cisco_ios, .vbadge.v-cisco_nxos { color: #66d9e8; border-color: rgba(102,217,232,0.4); }
+  .vbadge.v-frr        { color: #b197fc; border-color: rgba(177,151,252,0.4); }
+  .etype { font-weight: 600; color: var(--muted); }
+  .kind-badge.k-platform { color: var(--crit); border-color: rgba(255,68,68,0.45); }
+  .kind-badge.k-device_unreachable { color: var(--high); border-color: rgba(255,140,0,0.45); }
+  .kind-badge.k-transport { color: var(--med); border-color: rgba(255,215,0,0.45); }
+  .kind-badge.k-correlated { color: var(--accent); border-color: rgba(88,166,255,0.45); }
+  .state-chip.s-flapping { color: var(--warn); }
+  .state-chip.s-recovered, .state-chip.s-up { color: var(--ok); }
+  .supp-chip { cursor: pointer; color: var(--muted); }
+  .supp-chip:hover { color: var(--accent); border-color: var(--accent); }
+  tr.suppressed-row td { opacity: 0.55; }
+  .h2-toggle { font-size: 11px; font-weight: 500; color: var(--muted); margin-left: 12px; cursor: pointer; }
+  .h2-toggle input { width: auto; margin: 0 4px 0 0; vertical-align: middle; }
+
+  .incident-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+                   background: var(--bg-2); }
+  .incident-card.flash { box-shadow: 0 0 0 2px var(--accent); }
+  .incident-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+  .incident-head strong { color: var(--fg); }
+  .incident-summary { font-size: 12px; color: var(--fg-dim); margin: 6px 0; }
+  .ent-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px; }
+  .ent-chip { margin-left: 0; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .ent-chip .ent-k { color: var(--muted); font-weight: 500; margin-right: 4px; font-family: inherit; }
+  .incident-card details summary { cursor: pointer; font-size: 12px; color: var(--accent); margin-top: 4px; }
+  .incident-card table { margin-top: 6px; font-size: 12px; }
+  .incident-actions { margin-top: 6px; display: flex; gap: 6px; }
+  .incident-actions button { width: auto; padding: 3px 10px; font-size: 11px; }
+
+  .cli-blocked { color: var(--crit); background: rgba(255,68,68,0.10); border-left: 3px solid var(--crit);
+                 padding-left: 4px; display: inline-block; }
+  .guard-badge { color: #fff; background: var(--crit); border-color: var(--crit); }
+  .guard-banner { border: 1px solid rgba(255,68,68,0.45); background: rgba(255,68,68,0.08); color: var(--fg);
+                  border-radius: 6px; padding: 6px 10px; margin: 6px 0; font-size: 12px; }
+  .dryrun-badge { color: var(--ok); border-color: rgba(63,185,80,0.5); background: rgba(63,185,80,0.08); }
+  .action-cli.blocked button.run-btn { opacity: 0.4; cursor: not-allowed; }
+
+  .rem-card { border: 1px solid var(--border); border-radius: 8px; margin-top: 8px; background: var(--bg-2); }
+  .rem-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 10px; font-size: 12px;
+              border-bottom: 1px solid var(--border); }
+  .rem-head strong { color: var(--fg); }
+  .rem-tabs { display: flex; gap: 4px; padding: 6px 10px 0; }
+  .rem-tabs button { width: auto; padding: 4px 10px; font-size: 11px; border-radius: 6px 6px 0 0; }
+  .rem-tabs button[aria-selected="true"] { background: var(--accent); color: #0d1117; }
+  .rem-body { padding: 6px 10px 10px; }
+  .rem-body .rem-note { font-size: 11px; color: var(--muted); margin: 4px 0; }
+  .rem-body .code-block pre { max-height: 440px; overflow: auto; }
+  .rem-tools { display: flex; gap: 6px; margin-top: 6px; }
+  .rem-tools button { width: auto; padding: 3px 10px; font-size: 11px; }
+
+  .evidence-list { list-style: none; padding: 0; margin: 4px 0; }
+  .evidence-list li { margin: 3px 0; }
+  .evidence-list details { border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; background: var(--bg-2); }
+  .evidence-list details[open] { border-color: var(--border-hi); }
+  .evidence-list summary { cursor: pointer; font-size: 12px; }
+  .evidence-list .ev-id { font-weight: 700; color: var(--accent); margin-right: 4px; }
+  .evidence-list .ev-cited { color: var(--ok); }
+  .evidence-list pre { margin: 6px 0 2px; max-height: 220px; overflow: auto; font-size: 11px; }
+  .ev-kind.ev-config   { color: #74c0fc; }
+  .ev-kind.ev-drift    { color: var(--warn); border-color: rgba(210,153,34,0.5); }
+  .ev-kind.ev-topology { color: #63e6be; }
+  .ev-kind.ev-runbook  { color: #b197fc; }
+  .ev-kind.ev-incident { color: var(--high); }
+  .drift-add { color: var(--ok); }
+  .drift-del { color: var(--crit); }
+  .cite-link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0 1px;
+               font: inherit; font-weight: 700; width: auto; margin: 0; text-decoration: underline dotted; }
+  .cite-link.invalid { color: var(--crit); text-decoration: line-through; cursor: help; }
+  .lineref { font-size: 11px; margin: 2px 4px 2px 0; }
+
+  .audit-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .audit-filters input { width: 200px; padding: 4px 8px; font-size: 12px; }
+  .audit-filters button { width: auto; padding: 4px 10px; font-size: 11px; }
+  #audit-table td { font-size: 11px; vertical-align: top; }
+  #audit-table td.audit-detail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+                                 max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .outcome-ok { color: var(--ok); }
+  .outcome-bad { color: var(--crit); font-weight: 700; }
 </style>
 </head>
 <body>
@@ -1166,11 +1272,27 @@
       <span class="brand-version">v1.3.0</span>
     </div>
   </div>
+  <button type="button" class="chip role-chip" id="role-badge" aria-haspopup="dialog" aria-expanded="false" aria-controls="auth-popover"><span>👤 …</span></button>
+  <div id="auth-popover" class="auth-popover" role="dialog" aria-label="API access" hidden>
+    <div class="auth-who" id="auth-who">Not signed in</div>
+    <label for="auth-token-input">API token</label>
+    <input type="password" id="auth-token-input" autocomplete="off" spellcheck="false" placeholder="viewer / operator / admin token">
+    <div class="auth-actions">
+      <button type="button" class="tiny" id="auth-save">Use token</button>
+      <button type="button" class="tiny secondary" id="auth-clear">Sign out</button>
+      <button type="button" class="tiny secondary" id="auth-audit" hidden>📜 Audit log</button>
+    </div>
+    <p class="row-msg">Kept in this browser tab only (sessionStorage) and sent as <code>Authorization: Bearer</code> to <code>/api/*</code>.</p>
+  </div>
   <div class="header-spacer"></div>
   <span class="status-label" aria-hidden="true">Status</span>
   <span class="chip" id="llm-badge" role="status" aria-live="polite" aria-label="LLM status"><span class="pulse"></span><span>LLM: …</span></span>
   <span class="chip" id="prov-badge" role="status" aria-live="polite" aria-label="LLM provider"><span>Provider: …</span></span>
   <span class="chip" id="ntool-badge" role="status" aria-live="polite" aria-label="Network tool connectivity"><span class="pulse"></span><span>NetTool: …</span></span>
+  <span class="chip" id="spool-badge" role="status" aria-live="polite" aria-label="Syslog spool ingest"><span class="pulse"></span><span>Spool: …</span></span>
+  <span class="chip" id="triage-badge" role="status" aria-live="polite" aria-label="Streaming triage worker"><span class="pulse"></span><span>Triage: …</span></span>
+  <span class="chip" id="egress-badge" role="status" aria-live="polite" aria-label="LLM egress policy"><span>Egress: …</span></span>
+  <span class="chip" id="vault-badge" role="status" aria-live="polite" aria-label="Entity tokenization"><span>Vault: …</span></span>
 </header>
 
 <!-- Toast notification stack — populated by app.js -->
@@ -1544,9 +1666,16 @@
       <ul class="summary" id="summary-list"></ul>
     </div>
 
+    <div class="panel" id="incidents-panel" style="display:none;">
+      <h2>🎯 Root-cause incidents &amp; correlation <span class="h2-count" id="incidents-count"></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Topology-aware suppression groups dependent alerts under the failure that caused them; cross-vendor correlation shows the shared peer IPs, ASNs, tunnels and VRFs that tie them together. Expand a card to see the suppressed downstream alerts.</p>
+      <div id="incidents-list"></div>
+    </div>
+
     <div class="panel" id="actions-panel" style="display:none;">
-      <h2>Action Items <span class="h2-count" id="action-count"></span></h2>
-      <p class="row-msg" style="margin:0 0 8px;">Click any row to expand the 5-phase incident playbook.</p>
+      <h2>Action Items <span class="h2-count" id="action-count"></span>
+        <label class="h2-toggle" id="hide-suppressed-wrap" hidden><input type="checkbox" id="hide-suppressed" checked> Hide <span id="suppressed-count">0</span> suppressed</label></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Click any row to expand the 5-phase incident playbook with its cited evidence.</p>
       <table id="actions-table">
         <thead>
           <tr><th>Severity</th><th>Description</th><th>Count</th><th>Devices</th></tr>
@@ -1617,7 +1746,7 @@
 
     <div class="panel" id="remediation-panel" style="display:none;">
       <h2>🛡 Vendor-Safe Remediation & ITSM <span class="h2-count" id="remediation-count"></span></h2>
-      <p class="row-msg" style="margin:0 0 8px;">Rollback-protected remediation plans generated with commit timers (Arista EOS, Juniper Junos, Cisco NX-OS/IOS-XE, FRR) and two-way Jira / ServiceNow enrichment.</p>
+      <p class="row-msg" style="margin:0 0 8px;">Rollback-protected remediation plans (Arista EOS, Juniper Junos, Cisco NX-OS/IOS-XE, FRR, FortiOS, PAN-OS, SD-WAN) as vendor CLI or as Ansible / Nornir automation with a dry-run (check mode) first, plus two-way Jira / ServiceNow enrichment. Commands withheld by the SafetyGuardrail are flagged ⛔.</p>
       <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap;">
         <label style="font-size:12px;color:var(--muted);">Target Device:
           <select id="remediation-device-select" style="padding:4px 8px;font-size:12px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;"></select>
@@ -1629,7 +1758,13 @@
             <option value="cisco_nxos">Cisco NX-OS (checkpoint/rollback)</option>
             <option value="cisco_ios">Cisco IOS-XE (revert timer)</option>
             <option value="frr">FRRouting (vtysh auto-revert)</option>
+            <option value="fortinet_fortios">Fortinet FortiOS (revert mode)</option>
+            <option value="paloalto_panos">Palo Alto PAN-OS (snapshot + manual rollback)</option>
+            <option value="cisco_sdwan">Cisco Catalyst SD-WAN (commit confirmed)</option>
           </select>
+        </label>
+        <label style="font-size:12px;color:var(--muted);">Interface:
+          <input id="remediation-interface-input" placeholder="Ethernet1" style="width:120px;padding:4px 8px;font-size:12px;">
         </label>
         <label style="font-size:12px;color:var(--muted);">Action:
           <select id="remediation-action-select" style="padding:4px 8px;font-size:12px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;">
@@ -1640,10 +1775,28 @@
         <button id="remediation-generate-btn" class="tiny secondary" style="width:auto;padding:4px 10px;font-size:11px;">⚡ Generate Safe Plan</button>
         <button id="itsm-preview-btn" class="tiny secondary" style="width:auto;padding:4px 10px;font-size:11px;">🎫 Preview ITSM Payload</button>
       </div>
+      <div id="remediation-v2"></div>
       <pre id="remediation-card-out" class="row-msg" style="white-space:pre-wrap;max-height:300px;overflow:auto;background:var(--bg-dark);padding:10px;border-radius:6px;font-family:monospace;font-size:12px;display:none;"></pre>
       <div id="itsm-preview-out" style="display:none;margin-top:10px;">
         <h3 style="font-size:13px;margin:4px 0;">Jira / ServiceNow Enrichment Card (<span id="itsm-fingerprint"></span>)</h3>
         <pre id="itsm-markdown-out" class="row-msg" style="white-space:pre-wrap;max-height:200px;overflow:auto;background:var(--bg-dark);padding:10px;border-radius:6px;font-family:monospace;font-size:11px;"></pre>
+      </div>
+    </div>
+
+    <div class="panel" id="audit-panel" style="display:none;">
+      <h2>📜 Audit log <span class="h2-count" id="audit-count"></span> <span class="chip" id="audit-chain"><span>chain: not verified</span></span></h2>
+      <p class="row-msg" style="margin:0 0 8px;">Append-only, hash-chained record of privileged actions: <code>/api/run</code>, configuration and LLM changes, denied attempts, ITSM writes, triage tickets and every cloud LLM call. Admins only.</p>
+      <div class="audit-filters">
+        <input id="audit-actor" placeholder="actor (e.g. alice)">
+        <input id="audit-action" placeholder="action (e.g. llm.* or run.command)">
+        <button type="button" class="tiny" id="audit-refresh">↻ Refresh</button>
+        <button type="button" class="tiny secondary" id="audit-verify">🔗 Verify chain</button>
+      </div>
+      <div class="events-scroll-cap">
+        <table id="audit-table">
+          <thead><tr><th>When</th><th>Actor</th><th>Role</th><th>Action</th><th>Target</th><th>Outcome</th><th>Detail</th></tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
     </div>
 
@@ -1797,6 +1950,7 @@
         <div class="chat-msg ai">
           <div class="role">Copilot</div>
           <pre id="copilot-answer"></pre>
+          <div id="copilot-evidence"></div>
         </div>
       </div>
     </div>
@@ -1851,7 +2005,8 @@
   </section>
 </main>
 
-<!-- `defer` keeps execution order (cytoscape → elkjs → cytoscape-elk → app.js)
+<!-- `defer` keeps execution order (cytoscape → elkjs → cytoscape-elk → v2.js → app.js);
+     v2.js must run first because it attaches the API token to every /api/ call.
      while letting the parser work uninterrupted. All scripts run after
      DOMContentLoaded, which the app's init handler already expects.
      - cytoscape is the topology engine (D3 was dropped — app.js never used it).
@@ -1861,6 +2016,7 @@
 <script src="vendor/cytoscape.min.js" defer></script>
 <script src="vendor/elk.bundled.js" defer></script>
 <script src="vendor/cytoscape-elk.js" defer></script>
+<script src="v2.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>
