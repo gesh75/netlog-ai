@@ -44,6 +44,7 @@ from ai_log_analyzer.remediation import screen_llm_cli
 from ai_log_analyzer.sanitize import sanitize, sanitize_report
 from ai_log_analyzer.sanitize_vault import SanitizeVault
 from ai_log_analyzer.stability import StabilityTracker
+from ai_log_analyzer.suppression import load_topology, suppress_alerts, suppressed_entity_map
 
 # Recovery events are classified as medium because they're useful in the
 # timeline view, but they should NEVER produce action items / runbooks —
@@ -106,6 +107,9 @@ class ActionItem:
     # recovered | up | "" (no entity identity extracted).
     state: str = ""
     entity_states: dict[str, Any] = field(default_factory=dict)
+    # Root incident id when every entity of this item is a dependent alert of
+    # an upstream failure (see suppression.py).
+    suppressed_by: str = ""
 
     def to_dict(self) -> dict:
         d = {
@@ -122,6 +126,8 @@ class ActionItem:
         if self.state:
             d["state"] = self.state
             d["entity_states"] = self.entity_states
+        if self.suppressed_by:
+            d["suppressed_by"] = self.suppressed_by
         return d
 
 
@@ -151,6 +157,7 @@ class AnalysisResult:
     entity_states: dict = field(default_factory=dict)
     bgp_anomalies: dict = field(default_factory=dict)
     entity_correlation: dict = field(default_factory=dict)
+    suppression: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -178,6 +185,7 @@ class AnalysisResult:
             "entity_states": self.entity_states,
             "bgp_anomalies": self.bgp_anomalies,
             "entity_correlation": self.entity_correlation,
+            "suppression": self.suppression,
         }
 
 
@@ -492,12 +500,21 @@ def build_action_items(events: Iterable[ClassifiedEvent], llm_top_n: int = 3) ->
 
 
 def _finalize_action_items(seen: dict, llm_top_n: int = 3,
-                           entity_report: dict | None = None) -> list[ActionItem]:
+                           entity_report: dict | None = None,
+                           suppressed: dict | None = None) -> list[ActionItem]:
     report = entity_report or {}
     states = {k: group_state(b.get("entities", ()), report) for k, b in seen.items()}
+    suppressed = suppressed or {}
+    roots: dict = {}
+    for k, b in seen.items():
+        ents = b.get("entities") or set()
+        ids = {suppressed.get(e) for e in ents}
+        if ents and None not in ids:
+            roots[k] = sorted(ids)[0]
     sorted_keys = sorted(
         seen.keys(),
-        key=lambda k: (SEV_ORDER.get(k[0], 5), _STATE_RANK.get(states[k][0], 0), -seen[k]["count"]),
+        key=lambda k: (SEV_ORDER.get(k[0], 5), 1 if k in roots else 0,
+                       _STATE_RANK.get(states[k][0], 0), -seen[k]["count"]),
     )
 
     items: list[ActionItem] = []
@@ -524,6 +541,7 @@ def _finalize_action_items(seen: dict, llm_top_n: int = 3,
             deep_analysis=deep,
             state=states[key][0],
             entity_states=states[key][1],
+            suppressed_by=roots.get(key, ""),
         ))
     return items
 
@@ -832,6 +850,7 @@ def _analyze_inner(
         _aggregate_stream_ex(iter_classify(events))
     )
     entity_report = extras["entities"].report()
+    suppression = suppress_alerts(extras["corr_pool"], load_topology(site_manifest))
     causal_events = _with_reserved_config(top_events, config_events)
     # Opt-in cross-run persistence: flags templates never seen in ANY prior
     # run (AI_LOG_ANALYZER_TEMPLATE_STORE) — the classic AIOps early-warning.
@@ -846,6 +865,7 @@ def _analyze_inner(
             groups,
             llm_top_n=llm_top_n if effective_llm else 0,
             entity_report=entity_report,
+            suppressed=suppressed_entity_map(suppression),
         )
         summary, summary_llm = _executive_summary(
             sev_counts, cat_counts, score, grade, grade_label, action_items,
@@ -921,6 +941,7 @@ def _analyze_inner(
         bgp_anomalies=extras["bgp"].report(entity_report.values()),
         entity_correlation={**correlate_entities(extras["corr_pool"]),
                             "dropped": extras["corr_dropped"]},
+        suppression=suppression,
     )
     result.handoff = incident_handoff(result.to_dict())
     return result

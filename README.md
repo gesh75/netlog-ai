@@ -32,6 +32,12 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
 
+## What's new (unreleased) — durable ingest, suppression, Ansible
+
+- **Durable, multi-worker syslog**: TCP/TLS with RFC 6587 framing and concurrent connections, sender-IP attribution, allow-list, and a SQLite WAL spool shared by every Gunicorn worker (also used for incident memory and LLM toggles) — see [docs/OPERATIONS.md](docs/OPERATIONS.md).
+- **Topology-aware suppression**: a dead core router, firewall HA failover or SD-WAN transport loss is one root incident, not a storm of child alerts.
+- **Ansible / Nornir export** of every remediation plan with a check-mode diff first and a rollback `rescue` block.
+
 ## What's new (unreleased) — multi-vendor security & SD-WAN
 
 - **Fortinet FortiOS, Palo Alto PAN-OS and Cisco Catalyst SD-WAN** parsers on a pluggable parser registry, with a canonical event schema (vendor, event type, peer IP, ASN, VRF, VNI, interface, tunnel, down/up state, UTC time) across every vendor — see [docs/PARSERS.md](docs/PARSERS.md).

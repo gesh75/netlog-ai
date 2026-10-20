@@ -81,8 +81,10 @@ def build_payload(result: dict[str, Any], source: str, fmt: str, min_severity: s
             "count": a.get("count", 0),
             "devices": [_sanitize_text(device) for device in a.get("devices", [])[:5]],
         }
-        for a in result.get("action_items", [])[:_MAX_ACTION_ITEMS]
+        # Dependent alerts of an upstream root are grouped under it, not paged separately.
+        for a in [a for a in result.get("action_items", []) if not a.get("suppressed_by")][:_MAX_ACTION_ITEMS]
     ]
+    suppressed = (result.get("suppression") or {}).get("suppressed_events", 0)
     if fmt == "slack":
         alerting = _alerting_counts(result, min_severity)
         sev_line = ", ".join(f"{n} {sev}" for sev, n in alerting.items()) or "events"
@@ -95,6 +97,8 @@ def build_payload(result: dict[str, Any], source: str, fmt: str, min_severity: s
             f"(×{a['count']} on {', '.join(_slack_text(d) for d in a['devices']) or 'n/a'})"
             for a in top_actions
         ]
+        if suppressed:
+            lines.append(f"_{suppressed} dependent alert(s) grouped under upstream root incidents_")
         return {"text": "\n".join(lines)}
     return {
         "source": "netlog-ai",
@@ -104,6 +108,7 @@ def build_payload(result: dict[str, Any], source: str, fmt: str, min_severity: s
         "grade": result.get("grade"),
         "severity_counts": result.get("severity_counts", {}),
         "action_items": top_actions,
+        "suppressed_alerts": suppressed,
         "generated_at": result.get("generated_at", ""),
     }
 

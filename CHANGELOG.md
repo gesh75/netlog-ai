@@ -6,6 +6,19 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Added — durable ingest, multi-worker state, suppression, automation export
+
+- **Shared SQLite WAL state** (`state_store.py`, `AI_LOG_ANALYZER_STATE_DB`): syslog spool, incident memory and LLM runtime toggles shared by every Gunicorn worker and kept across restarts. See `docs/OPERATIONS.md`.
+- **Syslog listener rewrite** (`sources/syslog.py`): asyncio loop with concurrent non-blocking TCP, RFC 6587 octet-counting + LF framing, optional TLS / mutual TLS (RFC 5425), tuned `SO_RCVBUF`, sender IP/CIDR allow-list, oversize-frame and connection limits, `stats()`. Header-less lines are attributed to the sender IP (was the literal `syslog`); every event carries `attrs.sender_ip`. Durable spool; a worker that cannot bind the port reads the shared spool instead of splitting traffic.
+- **Topology-aware suppression** (`suppression.py`, `AnalysisResult.suppression`): dependent alerts of a failed core/WAN router (inferred from the addresses peers lose, even when the router logs nothing), firewall HA pair, or SD-WAN / IPsec transport are grouped under one root; action items carry `suppressed_by` and rank below live roots; webhooks page roots only. Optional dependency map (`AI_LOG_ANALYZER_DEPENDENCIES`).
+- **Ansible / Nornir export** (`remediation_export.py`): `cisco.ios`, `cisco.nxos`, `arista.eos`, `junipernetworks.junos` (commit confirmed + rollback), `fortinet.fortios`, `paloaltonetworks.panos` and FRR playbooks with a check-mode diff task, guarded apply → verify → persist, and rescue rollback; Nornir/NAPALM dry-run scripts. Re-screened by `SafetyGuardrail`. Exposed via `remediation --format ansible|nornir`, `POST /api/remediation {"export": ...}` and the MCP tool.
+
+### Fixed
+
+- `IncidentStore` JSONL: appends and cap rewrites hold an `fcntl` lock and re-read the file, so concurrent workers no longer interleave lines or drop records. `*.db` paths use the SQLite backend.
+- UDP syslog no longer sets `SO_REUSEADDR` (two workers could bind the same port and split datagrams).
+- CLI `remediation --vendor` accepts the FortiOS, PAN-OS and SD-WAN vendors.
+
 ### Added — multi-vendor schema, parsers and BGP intelligence
 
 - **Canonical event schema.** `LogEvent` / `ClassifiedEvent` gain optional `vendor`, `event_type`, `interface`, `peer_ip`, `asn`, `vrf`, `vni`, `tunnel_id`, `action` (`vendor_action` on `ClassifiedEvent`), `state`, `normalized_utc_ts` and an `attrs` map. The five-field constructor is unchanged; `ClassifiedEvent.to_dict()` adds an `entities` key only when fields are known.

@@ -109,9 +109,13 @@ def test_control_only_line_does_not_become_an_event():
 
 @pytest.mark.unit
 def test_syslog_ingest_strips_controls_and_skips_blank():
+    from collections import Counter
+
     src = object.__new__(SyslogListenerSource)
     src._buffer = []
     src._total_ingested = 0
+    src._stats = Counter()
+    src._db = None  # memory mode
 
     class _Lock:
         def __enter__(self):
@@ -125,4 +129,5 @@ def test_syslog_ingest_strips_controls_and_skips_blank():
     src._ingest(b"\x00\x01")
     src._ingest(b"")
     assert src._total_ingested == 1
-    assert src._buffer == ["Mar  3 12:00:01 router1 rpd: hello"]
+    # The buffer keeps (line, sender_ip) so header-less lines can be attributed.
+    assert src._buffer == [("Mar  3 12:00:01 router1 rpd: hello", "")]
