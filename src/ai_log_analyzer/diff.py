@@ -139,9 +139,10 @@ def explain_diff(before: str, after: str, hostname: str = "", platform: str = "j
             f"PLATFORM: {platform}\n"
             f"LINES ADDED: {struct['lines_added']}  REMOVED: {struct['lines_removed']}\n"
             f"SECTIONS TOUCHED: {struct['additions_by_section']}\n\n"
-            f"UNIFIED DIFF:\n```\n{truncated}\n```\n\nReturn the JSON now."
+            f"UNIFIED DIFF:\n{llm.wrap_untrusted(truncated, 'config_diff')}\n\nReturn the JSON now."
         )
-        text = llm.query(_DIFF_SYSTEM_PROMPT, user_prompt, max_tokens=1500)
+        with llm.entity_hints(hosts=[hostname] if hostname else []):
+            text = llm.query(_DIFF_SYSTEM_PROMPT, user_prompt, max_tokens=1500)
         if text:
             parsed = _try_parse_json(text)
             if parsed:

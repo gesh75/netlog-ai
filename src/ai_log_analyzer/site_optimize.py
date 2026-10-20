@@ -19,6 +19,7 @@ import re
 from collections import Counter
 
 from ai_log_analyzer import compliance, llm, site_diagram, site_doc
+from ai_log_analyzer.remediation import screen_llm_cli
 
 # Roles considered ISP-gateways (firewalls or WAN routers)
 _GATEWAY_ROLES: frozenset[str] = frozenset({"firewall", "router", "gateway"})
@@ -670,6 +671,7 @@ def _validate_gaps(
         if not isinstance(changes, dict):
             changes = {}
         clean_changes: dict[str, list[str]] = {}
+        blocked: list[dict[str, str]] = []
         for host, cmds in changes.items():
             if not isinstance(cmds, list):
                 continue
@@ -678,9 +680,10 @@ def _validate_gaps(
             # the LLM from inventing placeholders (CR-01, BR-01, spine-X, etc.).
             if allowed_lc and host_str.lower() not in allowed_lc:
                 continue
-            clean_changes[host_str] = [
+            # Model-generated CLI never bypasses the destructive-command guardrail.
+            clean_changes[host_str] = screen_llm_cli([
                 str(c) for c in cmds if isinstance(c, (str, int, float))
-            ][:20]
+            ][:20], blocked)
 
         valid.append({
             "category": category,
@@ -694,6 +697,7 @@ def _validate_gaps(
             "estimated_effort": str(g.get("estimated_effort") or "M (1-5 days)"),
             "roi": roi,
             "requires_human_review": True,  # always set — LLM commands are illustrative
+            "guardrail_blocked": blocked,
         })
 
     valid.sort(key=lambda g: (
@@ -840,13 +844,15 @@ def _failure_response(
     return base
 
 
-def _safe_llm_query(system: str, user: str, max_tokens: int) -> tuple[str, str | None]:
+def _safe_llm_query(system: str, user: str, max_tokens: int,
+                    hosts: list[str] | None = None) -> tuple[str, str | None]:
     """Call llm.query() with exception handling.
 
     Returns (text, error_class_name). On success, error is None.
     """
     try:
-        text = llm.query(system, user, max_tokens=max_tokens) or ""
+        with llm.entity_hints(hosts=hosts or []):
+            text = llm.query(system, user, max_tokens=max_tokens) or ""
         return text, None
     except Exception as exc:
         return "", type(exc).__name__
@@ -867,9 +873,10 @@ def analyze_site_wide(site_id: str, devices: list[dict]) -> dict:
         )
         return result
 
+    hosts = _allowed_hostnames(facts)
     # First attempt
     text, err = _safe_llm_query(_SITE_WIDE_SYSTEM_PROMPT, _build_user_prompt(facts),
-                                  max_tokens=8192)
+                                  max_tokens=8192, hosts=hosts)
     last_text = text
     if err:
         result = _deterministic_advice(site_id, facts)
@@ -877,14 +884,13 @@ def analyze_site_wide(site_id: str, devices: list[dict]) -> dict:
         result["llm_error"] = err
         return result
 
-    hosts = _allowed_hostnames(facts)
     parsed = _try_parse_json(text) if text else None
     validated = _validate_analysis(parsed, allowed_hostnames=hosts)
 
     # Retry once with a stricter prompt
     if not validated:
         text2, err2 = _safe_llm_query(_SITE_WIDE_SYSTEM_PROMPT, _build_retry_prompt(facts),
-                                        max_tokens=4096)
+                                        max_tokens=4096, hosts=hosts)
         if text2:
             last_text = text2
             parsed = _try_parse_json(text2)

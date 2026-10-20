@@ -218,15 +218,22 @@ flowchart LR
 
 ## 5. LLM Provider Fallback (state machine)
 
-`llm.query()` walks a provider fallback chain so the dashboard always returns *something*. If every model path
-is exhausted or disabled, control returns `None` and the caller drops to the deterministic rule-based KB —
-the tool never hard-fails on a missing model.
+`llm.query()` is the single LLM gateway. Before any provider is called it re-applies secret/PII redaction,
+tokenizes IPs / MACs / ASNs (and, for cloud providers, hostnames) into reversible `<IP_1>`-style pseudonyms,
+fits the prompt to the provider's budget, and appends a prompt-injection guard; the answer is detokenized
+and model-generated CLI is screened by `SafetyGuardrail` before callers return it.
+
+It then walks a provider fallback chain so the dashboard always returns *something*. **Local providers never
+fall back to a cloud API unless `ALLOW_CLOUD_FALLBACK=true`.** If every permitted model path is exhausted or
+disabled, control returns `None` and the caller drops to the deterministic rule-based KB — the tool never
+hard-fails on a missing model.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Ollama: provider ollama
     Ollama --> DMR: no response
-    DMR --> Claude: no response or no socket
+    DMR --> RuleKB: no response (default policy)
+    DMR --> Claude: ALLOW_CLOUD_FALLBACK=true
     Claude --> Grok: no response or no key
     Grok --> RuleKB: API error or disabled
 

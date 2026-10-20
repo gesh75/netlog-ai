@@ -41,7 +41,8 @@ def ask(question: str, context_blocks: list[dict], max_chars_per_device: int = 8
         safe_cfg, n = sanitize(raw_cfg, mask_pii=True)
         total_redactions += n
         cfg = safe_cfg[:max_chars_per_device]
-        blocks.append(f"\n========== {host} ({plat}) ==========\n{cfg}")
+        blocks.append(f"\n========== {host} ({plat}) ==========\n"
+                      f"{llm.wrap_untrusted(cfg, 'device_config')}")
 
     user_prompt = (
         f"QUESTION: {question}\n"
@@ -50,7 +51,8 @@ def ask(question: str, context_blocks: list[dict], max_chars_per_device: int = 8
         f"\nAnswer the question now."
     )
 
-    text = llm.query(_COPILOT_SYSTEM_PROMPT, user_prompt, max_tokens=1500)
+    with llm.entity_hints(hosts=[cb.get("hostname", "") for cb in context_blocks]):
+        text = llm.query(_COPILOT_SYSTEM_PROMPT, user_prompt, max_tokens=1500)
     if not text:
         return {"answer": "LLM call failed — see /api/llm/status for last error.",
                 "llm_powered": False}

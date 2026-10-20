@@ -166,8 +166,9 @@ def judge_playbook_llm(deep: dict, devices: list[str] | None = None) -> dict[str
     safe_devices, _ = sanitize(json.dumps(devices or ["unknown"]), mask_pii=True)
     safe_deep, _ = sanitize(json.dumps(deep, indent=1), mask_pii=True)
     prompt = (f"AFFECTED DEVICES: {safe_devices}\n\n"
-              f"PLAYBOOK JSON:\n{safe_deep[:6000]}\n\nScore it now.")
-    text = llm.query(_LLM_JUDGE_PROMPT, prompt, max_tokens=200)
+              f"PLAYBOOK JSON:\n{llm.wrap_untrusted(safe_deep[:6000], 'playbook')}\n\nScore it now.")
+    with llm.entity_hints(hosts=devices or []):
+        text = llm.query(_LLM_JUDGE_PROMPT, prompt, max_tokens=200)
     if not text:
         return None
     try:

@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import threading
+from collections import OrderedDict
 
 # Each rule: (description, pattern, replacement). $1 preserves the key/keyword.
 _RULES: list[tuple[str, re.Pattern[str], str]] = [
@@ -76,6 +78,16 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
      re.compile(r'\b(neighbor\s+\S+\s+password)\s+(?:7\s+)?\S+',
                 re.IGNORECASE),
      r'\1 <REDACTED>'),
+    # SNMPv3 USM keys — EOS/IOS `snmp-server user U G v3 auth sha KEY priv aes KEY`
+    # and Junos `authentication-password "..."` / `privacy-password "..."`.
+    ("snmpv3-auth-priv-key",
+     re.compile(r'\b(auth\s+(?:md5|sha\d*)|priv\s+(?:des|3des|aes\d*)(?:\s+\d+)?)\s+(?!<REDACTED>)\S+',
+                re.IGNORECASE),
+     r'\1 <REDACTED>'),
+    ("junos-snmpv3-password",
+     re.compile(r'\b(authentication-password|privacy-password)\s+(?:"[^"]*"|\S+)',
+                re.IGNORECASE),
+     r'\1 "<REDACTED>"'),
     # ── Generic encrypted blobs ──────────────────────────────────────────
     ("openssh-host-key",
      re.compile(r'(?:ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp\d+)\s+[A-Za-z0-9+/=]{40,}',
@@ -130,7 +142,44 @@ _PII_RULES: list = [
      re.compile(r'\b(full-name)\s+"[^"]+"',
                 re.IGNORECASE),
      r'\1 "<REDACTED-NAME>"'),
+    # Interface / neighbor descriptions carry circuit IDs, customer names and
+    # carrier references. Statement-anchored (start of line or after `{`/`;`,
+    # optional Junos `set ...` prefix) and lowercase so prose like
+    # "Description: ..." in a prompt header is left alone.
+    ("config-description",
+     re.compile(r'(?m)((?:^|[{;])[ \t]*(?:set [^\n]*?\s)?description)[ \t]+(?:"[^"\n]*"|[^;{}\n]+)'),
+     r'\1 "<REDACTED-DESC>"'),
+    # SNMP sysLocation / sysContact — street addresses, rack IDs, people.
+    ("snmp-location-contact",
+     re.compile(r'(?m)((?:^|[{;])[ \t]*(?:snmp-server\s+|set\s+snmp\s+)?(?:location|contact))[ \t]+(?:"[^"\n]*"|[^;{}\n]+)'),
+     r'\1 "<REDACTED>"'),
+    # Chassis / module serial numbers (asset identifiers). The value must
+    # contain a digit so `serial console` / `interface Serial0/0` survive.
+    ("serial-number",
+     re.compile(r'(?i)\b(serial[ _-]?(?:number|num|no)?|s/n)(\s*[:=#]?\s*)(?=[A-Za-z0-9-]*\d)[A-Za-z0-9][A-Za-z0-9-]{4,}\b'),
+     r'\1\2<REDACTED-SERIAL>'),
 ]
+
+
+# Bounded local memory of PUB-token → raw IP so the LLM gateway can map a
+# pseudonymized public address back for the operator (never sent anywhere).
+_PUBLIC_TOKEN_MAX = 4096
+_public_tokens: OrderedDict[str, str] = OrderedDict()
+_public_tokens_lock = threading.Lock()
+
+
+def _remember_public_token(token: str, ip_text: str) -> None:
+    with _public_tokens_lock:
+        _public_tokens[token] = ip_text
+        _public_tokens.move_to_end(token)
+        while len(_public_tokens) > _PUBLIC_TOKEN_MAX:
+            _public_tokens.popitem(last=False)
+
+
+def resolve_public_token(token: str) -> str | None:
+    """Raw IP for a ``PUB-xxxxxxxx`` token minted in this process, if remembered."""
+    with _public_tokens_lock:
+        return _public_tokens.get(token)
 
 
 def _mask_public_ipv4(text: str, mapping: dict[str, str] | None = None) -> tuple[str, int]:
@@ -155,6 +204,7 @@ def _mask_public_ipv4(text: str, mapping: dict[str, str] | None = None) -> tuple
             return ip_text
         if ip_text not in mapping:
             mapping[ip_text] = f"PUB-{_hash_token(ip_text)}"
+        _remember_public_token(mapping[ip_text], ip_text)
         replacements += 1
         return mapping[ip_text]
 
@@ -163,8 +213,12 @@ def _mask_public_ipv4(text: str, mapping: dict[str, str] | None = None) -> tuple
     return out, replacements
 
 
-def sanitize(text: str, mask_pii: bool = False) -> tuple[str, int]:
+def sanitize(text: str, mask_pii: bool = False,
+             mask_public_ip: bool | None = None) -> tuple[str, int]:
     """Redact secrets (and optionally PII) from a config blob.
+
+    ``mask_public_ip`` defaults to ``mask_pii``. The LLM gateway passes
+    ``False`` because its reversible vault tokenizes every address instead.
 
     Returns (sanitized_text, total_redactions).
     """
@@ -177,6 +231,7 @@ def sanitize(text: str, mask_pii: bool = False) -> tuple[str, int]:
         for _name, pat, repl in _PII_RULES:
             out, n = pat.subn(repl, out)
             total += n
+    if mask_pii if mask_public_ip is None else mask_public_ip:
         out, n = _mask_public_ipv4(out)
         total += n
     return out, total
