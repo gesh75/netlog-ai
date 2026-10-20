@@ -102,6 +102,10 @@ class RemediationPlan:
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    # Raw change (no vendor transaction wrapper) and its inverse — used by the
+    # Ansible / Nornir exporters. Child lines are indented under their parent.
+    body_commands: list[str] = field(default_factory=list)
+    inverse_commands: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -209,6 +213,22 @@ def screen_llm_cli(value: Any, blocked: list[dict[str, str]] | None = None) -> A
     if isinstance(value, dict):
         return {k: screen_llm_cli(v, sink) for k, v in value.items()}
     return value
+
+
+def _drain_inverse(vendor: VendorOS, interface: str, bgp_neighbor_ip: str | None) -> list[str]:
+    """Commands that undo ``build_graceful_link_drain`` (used for Ansible rescue)."""
+    peer = bgp_neighbor_ip or "peer"
+    if vendor == VendorOS.JUNIPER_JUNOS:
+        return [f"delete protocols bgp group UNDERLAY neighbor {peer} import DRAIN-IN",
+                f"delete protocols bgp group UNDERLAY neighbor {peer} export DRAIN-OUT",
+                f"delete interfaces {interface} disable"]
+    if vendor == VendorOS.ARISTA_EOS:
+        return [f"interface {interface}", "   no bgp session tracker", "   no shutdown"]
+    if vendor == VendorOS.FORTINET_FORTIOS:
+        return ["config system interface", f"    edit {interface}", "        set status up", "    next", "end"]
+    if vendor == VendorOS.PALOALTO_PANOS:
+        return [f"set network interface ethernet {interface} link-state auto"]
+    return [f"interface {interface}", " no shutdown"]
 
 
 class RemediationGenerator:
@@ -383,7 +403,7 @@ class RemediationGenerator:
             post = ["show sdwan bfd sessions", "show sdwan control connections"]
         else:
             pre = [f"show interface {interface}", "show ip bgp summary"]
-            body = [f"interface {interface}", "shutdown"]
+            body = [f"interface {interface}", " shutdown"]
             post = [f"show interface {interface} status", "show ip bgp summary"]
 
         SafetyGuardrail.validate(body, timer)
@@ -403,6 +423,8 @@ class RemediationGenerator:
             confirm_commit_commands=confirm,
             manual_rollback_commands=rb,
             blast_radius_notes=f"Drains ECMP member {interface} on {device}; verify >=1 alternate spine path is Up.",
+            body_commands=list(body),
+            inverse_commands=_drain_inverse(vendor, interface, bgp_neighbor_ip),
         )
 
     def build_qos_copp_remediation(
@@ -440,7 +462,7 @@ class RemediationGenerator:
             post = [f"show qos interfaces {interface} queue", "show bfd peers"]
         else:
             pre = [f"show queuing interface {interface}", "show bfd neighbors"]
-            body = [f"interface {interface}", "priority-queue out"]
+            body = [f"interface {interface}", " priority-queue out"]
             post = [f"show queuing interface {interface}", "show bfd neighbors"]
 
         SafetyGuardrail.validate(body, timer)
@@ -460,6 +482,7 @@ class RemediationGenerator:
             confirm_commit_commands=confirm,
             manual_rollback_commands=rb,
             blast_radius_notes=f"Non-disruptive QoS scheduler update on {device} ({interface}).",
+            body_commands=list(body),
         )
 
     def build_custom_safe_plan(
@@ -493,6 +516,7 @@ class RemediationGenerator:
             post_checks=post_checks,
             confirm_commit_commands=confirm,
             manual_rollback_commands=rb,
+            body_commands=list(commands),
         )
 
 

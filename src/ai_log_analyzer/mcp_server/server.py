@@ -49,6 +49,20 @@ from ai_log_analyzer.sources.solarwinds import SolarWindsConnector
 
 log = logging.getLogger(__name__)
 
+
+def _plan_export(plan: Any, export: str) -> dict[str, Any]:
+    """Optional Ansible / Nornir export block for remediation tool results."""
+    fmt = (export or "").strip().lower()
+    if not fmt:
+        return {}
+    from ai_log_analyzer.remediation import SafetyViolationError
+    from ai_log_analyzer.remediation_export import ExportUnsupportedError, export_plan
+    try:
+        return {"export": {"format": fmt, "content": export_plan(plan, fmt)}}
+    except (ExportUnsupportedError, SafetyViolationError) as exc:
+        return {"export": {"format": fmt, "error": str(exc)}}
+
+
 def _resolve_sites_dir() -> Path:
     """Same resolution order as the web app: env override → packaged data
     (present in pip/Docker installs) → legacy repo-root layout. The old
@@ -491,11 +505,15 @@ def _build_server():
         post_checks: list[str] | None = None,
         rollback_minutes: int = 5,
         rationale: str = "",
+        export: str = "",
     ) -> dict[str, Any]:
         """Generate vendor-safe configuration change plan with rollback guardrails.
 
-        Supported vendors: 'arista_eos', 'juniper_junos', 'cisco_nxos', 'cisco_ios', 'frr'.
+        Supported vendors: 'arista_eos', 'juniper_junos', 'cisco_nxos', 'cisco_ios', 'frr',
+        'fortinet_fortios', 'paloalto_panos', 'cisco_sdwan'.
         Supported actions: 'drain' (graceful link drain), 'copp' (control-plane QoS boost), 'custom'.
+        export: '' | 'ansible' | 'nornir' — also return a ready-to-run playbook / script
+        (dry-run diff task first, rollback in a rescue block; screened by SafetyGuardrail).
         """
         from ai_log_analyzer.remediation import (
             RemediationActionType,
@@ -559,6 +577,7 @@ def _build_server():
             "rollback_minutes": plan.rollback_minutes,
             "plan": plan.to_dict(),
             "markdown_card": plan.to_markdown_card(),
+            **_plan_export(plan, export),
         }
 
     @mcp.tool()
