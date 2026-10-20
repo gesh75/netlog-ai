@@ -37,7 +37,9 @@ from ai_log_analyzer.handoff import incident_handoff
 from ai_log_analyzer.netbox import enrich_hosts
 from ai_log_analyzer.netbox import is_enabled as netbox_is_enabled
 from ai_log_analyzer.patterns import TemplateMiner, apply_template_store
+from ai_log_analyzer.remediation import screen_llm_cli
 from ai_log_analyzer.sanitize import sanitize, sanitize_report
+from ai_log_analyzer.sanitize_vault import SanitizeVault
 from ai_log_analyzer.stability import StabilityTracker
 
 # Recovery events are classified as medium because they're useful in the
@@ -214,7 +216,7 @@ Output STRICT JSON with this exact shape — no markdown, no preamble, no traili
 
 CRITICAL RULES:
 1. Every action MUST include `cli` as a dict keyed by platform ("frr", "junos", "eos"). Include at least one platform; include all three when applicable.
-2. Use placeholders <like-this> for IPs/interfaces/ASNs the operator will substitute.
+2. Reuse the <IP_n>/<ASN_n>/<HOST_n>/<MAC_n> tokens from the input for entities it names (they are mapped back to real values for the operator); use <like-this> placeholders only for values the input does not contain.
 3. The "Optimize" phase MUST propose at least one concrete config-as-code change that prevents recurrence — not just commentary.
 4. "preventive_config" is a copy-pasteable config block, not prose.
 5. "monitoring" entries are precise alert rules with thresholds.
@@ -264,17 +266,20 @@ def deep_analyze(
         # Descriptions are usually KB constants, but severity-promoted events
         # (raw crit/emerg/alert with no KB match) carry a raw message snippet.
         safe_description, _ = sanitize(description, mask_pii=True)
+        # Raw log text is attacker-influenced (usernames, interface
+        # descriptions, BGP notification payloads) — fence it as data.
         user_prompt = (
             f"INCIDENT CONTEXT\n"
             f"Category: {category}\n"
-            f"Description: {safe_description}\n"
+            f"Description:\n{llm.wrap_untrusted(safe_description, 'event_description')}\n"
             f"Occurrences: {count}\n"
             f"Affected devices ({len(devices)}): {', '.join(devices[:5]) if devices else 'unknown'}\n"
             f"Platform hint: {platform_hint or 'mixed (frr/junos/eos)'}\n"
-            f"Sample log lines:\n{samples}\n\n"
+            f"Sample log lines:\n{llm.wrap_untrusted(samples, 'log_samples')}\n\n"
             f"Produce the 5-phase incident playbook now."
         )
-        text = llm.query(_DEEP_SYSTEM_PROMPT, user_prompt, max_tokens=1500)
+        with llm.entity_hints(hosts=devices):
+            text = llm.query(_DEEP_SYSTEM_PROMPT, user_prompt, max_tokens=1500)
         if text:
             llm_result = _try_parse_json(text)
 
@@ -285,18 +290,45 @@ def deep_analyze(
 
 def _shape(parsed: dict, fallback: dict, dev_ctx: str, urgency: str,
            sample_messages: list[str], llm_powered: bool) -> dict[str, Any]:
+    # Model-generated CLI passes the destructive-command guardrail; the
+    # curated KB fallback is human-reviewed content and is left as-is.
+    blocked: list[dict[str, str]] = []
+    llm_phases = _normalize_phases(parsed.get("phases") or [])
+    if llm_phases:
+        phases = screen_phases(llm_phases, blocked)
+    else:
+        phases = _normalize_phases(fallback.get("phases", []))
+    preventive = parsed.get("preventive_config")
+    if preventive:
+        preventive = screen_llm_cli(preventive, blocked)
+    else:
+        preventive = fallback.get("preventive_config", [])
     return {
         "root_cause":        parsed.get("root_cause") or fallback.get("root_cause", ""),
         "risk":              parsed.get("risk") or fallback.get("risk", ""),
-        "phases":            _normalize_phases(parsed.get("phases") or fallback.get("phases", [])),
-        "preventive_config": parsed.get("preventive_config") or fallback.get("preventive_config", []),
+        "phases":            phases,
+        "preventive_config": preventive,
         "monitoring":        parsed.get("monitoring") or fallback.get("monitoring", []),
         "timeline":          parsed.get("timeline") or fallback.get("timeline", "P3"),
         "device_context":    dev_ctx,
         "urgency":           urgency,
         "sample_messages":   sample_messages[:5],
         "llm_powered":       llm_powered,
+        "guardrail_blocked": blocked,
     }
+
+
+def screen_phases(phases: list[dict], blocked: list[dict[str, str]] | None = None) -> list[dict]:
+    """Run every action's per-platform CLI through the SafetyGuardrail."""
+    sink = blocked if blocked is not None else []
+    out: list[dict] = []
+    for phase in phases:
+        actions = [
+            {**a, "cli": screen_llm_cli(a.get("cli", {}), sink)}
+            for a in phase.get("actions", [])
+        ]
+        out.append({**phase, "actions": actions})
+    return out
 
 
 def _normalize_phases(raw: list) -> list[dict]:
@@ -526,6 +558,7 @@ def _executive_summary(
             f"({a.count}× on {', '.join(a.devices[:5]) if a.devices else 'unknown'})"
             for a in items[:5]
         ]
+        top_block = "\n".join(f"  - {t}" for t in top) if top else "  (none)"
         user_prompt = (
             f"ALLOWED_HOSTNAMES (use only these exact names): {allowed_hostnames}\n\n"
             f"Additional hostname references omitted: {omitted_hostnames}\n"
@@ -533,9 +566,10 @@ def _executive_summary(
             f"Severity: critical={sev_counts.get('critical', 0)}, "
             f"high={sev_counts.get('high', 0)}, medium={sev_counts.get('medium', 0)}\n"
             f"Top categories: {dict(sorted(cat_counts.items(), key=lambda x: -x[1])[:5])}\n"
-            f"Top action items:\n" + ("\n".join(f"  - {t}" for t in top) if top else "  (none)")
+            f"Top action items:\n" + llm.wrap_untrusted(top_block, "action_items")
         )
-        text = llm.query(sys_prompt, user_prompt, max_tokens=400)
+        with llm.entity_hints(hosts=allowed_hostnames):
+            text = llm.query(sys_prompt, user_prompt, max_tokens=400)
         if text:
             bullets = [line.strip().lstrip("•- ").strip() for line in text.split("\n") if line.strip()]
             bullets = [b for b in bullets if b][:6]
@@ -743,15 +777,18 @@ def _analyze_inner(
     apply_template_store(miner)
 
     effective_llm = use_llm and llm.is_enabled()
-    action_items = _finalize_action_items(
-        groups,
-        llm_top_n=llm_top_n if effective_llm else 0,
-    )
     score, grade, grade_label = health_score(sev_counts)
-    summary, summary_llm = _executive_summary(
-        sev_counts, cat_counts, score, grade, grade_label, action_items,
-        use_llm=effective_llm,
-    )
+    # One vault per analysis run: <IP_3> / <HOST_2> mean the same entity in
+    # every LLM call of this incident (playbooks and executive summary).
+    with llm.entity_hints(vault=SanitizeVault()):
+        action_items = _finalize_action_items(
+            groups,
+            llm_top_n=llm_top_n if effective_llm else 0,
+        )
+        summary, summary_llm = _executive_summary(
+            sev_counts, cat_counts, score, grade, grade_label, action_items,
+            use_llm=effective_llm,
+        )
 
     any_llm = summary_llm or any(a.deep_analysis.get("llm_powered") for a in action_items)
     top_devices = _finalize_top_devices(by_host)
@@ -904,13 +941,14 @@ def optimize_config(
     user_prompt = (
         f"DEVICE: {hostname}\n"
         f"PLATFORM: {platform}\n"
-        f"{events_section}\n\n"
-        f"RUNNING CONFIG:\n```\n{cfg_truncated}\n```\n\n"
+        f"{llm.wrap_untrusted(events_section, 'recent_events') if events_section else ''}\n\n"
+        f"RUNNING CONFIG:\n{llm.wrap_untrusted(cfg_truncated, 'running_config')}\n\n"
         f"Analyze the config + events. Identify resilience gaps, security weaknesses, "
         f"missing monitoring, and convergence improvements. Output the JSON now."
     )
 
-    text = llm.query(_OPTIMIZE_SYSTEM_PROMPT, user_prompt, max_tokens=4096)
+    with llm.entity_hints(hosts=[hostname]):
+        text = llm.query(_OPTIMIZE_SYSTEM_PROMPT, user_prompt, max_tokens=4096)
     if not text:
         return {
             "summary": "LLM unavailable — no optimization recommendations generated.",
@@ -933,6 +971,15 @@ def optimize_config(
 
     parsed["llm_powered"] = True
     parsed["redactions_applied"] = redactions
+    blocked: list[dict[str, str]] = []
+    if isinstance(parsed.get("findings"), list):
+        parsed["findings"] = [
+            {**f, **{k: screen_llm_cli(f[k], blocked)
+                     for k in ("patch", "rollback", "verify_cli") if k in f}}
+            if isinstance(f, dict) else f
+            for f in parsed["findings"]
+        ]
+    parsed["guardrail_blocked"] = blocked
     parsed.setdefault("findings", [])
     parsed.setdefault("monitoring_gaps", [])
     parsed.setdefault("summary", "")
@@ -1053,7 +1100,7 @@ def analyze_site(
         block = (
             f"\n\n========== DEVICE: {d['hostname']} ==========\n"
             f"FUNCTION: {d.get('function', 'unknown')}  |  PLATFORM: {d.get('platform', 'unknown')}\n"
-            f"```\n{trimmed}\n```"
+            f"{llm.wrap_untrusted(trimmed, 'running_config')}"
         )
         if running_total + len(block) > TOTAL_BUDGET:
             block = (
@@ -1071,7 +1118,8 @@ def analyze_site(
         f"Produce the cross-device analysis JSON now."
     )
 
-    text = llm.query(_SITE_SYSTEM_PROMPT, user_prompt, max_tokens=6144)
+    with llm.entity_hints(hosts=devices_seen):
+        text = llm.query(_SITE_SYSTEM_PROMPT, user_prompt, max_tokens=6144)
     if not text:
         return {
             "site_id": site_id,
@@ -1101,6 +1149,15 @@ def analyze_site(
     parsed["llm_powered"] = True
     parsed.setdefault("topology", {"devices_seen": devices_seen})
     parsed.setdefault("cross_device_findings", parsed.pop("findings", []) if "findings" in parsed else [])
+    blocked: list[dict[str, str]] = []
+    if isinstance(parsed.get("cross_device_findings"), list):
+        parsed["cross_device_findings"] = [
+            {**f, **{k: screen_llm_cli(f[k], blocked)
+                     for k in ("fix_per_device", "verify_cli") if k in f}}
+            if isinstance(f, dict) else f
+            for f in parsed["cross_device_findings"]
+        ]
+    parsed["guardrail_blocked"] = blocked
     parsed.setdefault("monitoring_gaps", [])
     parsed.setdefault("site_summary", parsed.pop("summary", "") if "summary" in parsed else "")
     parsed.setdefault("site_score", parsed.pop("score", 0) if "score" in parsed else 0)

@@ -779,7 +779,8 @@ def _executive_summary(site: str, profiles: list[DeviceProfile],
             "Write the executive summary now."
         )
         try:
-            text = llm.query(sys, usr, max_tokens=1800)
+            with llm.entity_hints(hosts=[p.hostname for p in profiles]):
+                text = llm.query(sys, usr, max_tokens=1800)
         except Exception:
             text = ""  # Don't let report generation fail on a flaky LLM
         if text:
