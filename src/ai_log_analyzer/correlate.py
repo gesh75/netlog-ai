@@ -8,7 +8,9 @@ surfaces actionable (>= medium) events from >=2 distinct sources is `confirmed`
 """
 from __future__ import annotations
 
+import ipaddress
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -221,4 +223,209 @@ def correlate_from_manager(
     return {
         **correlate_sources(events_by_source, min_severity=min_severity),
         "skipped": skipped,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cross-vendor entity correlation
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Joins failure events across devices and vendors on the *entities* the
+# parsers extracted — not on hostnames. Example: a FortiGate SD-WAN SLA miss
+# on wan1 → FortiGate IPsec HQ-DC1 down (same egress interface) → Junos KMD
+# VPN down (peer IP = FortiGate locip) → FortiGate BGP 169.254.10.1 down and
+# Junos BGP 169.254.10.2 Idle (same /30 point-to-point subnet).
+
+_LAYER_BY_EVENT_TYPE: dict[str, tuple[int, str]] = {
+    "conserve_mode": (0, "platform"), "session_table": (0, "platform"), "ha_state": (0, "platform"),
+    "interface_link": (1, "physical"), "lag_member": (1, "physical"), "optical": (1, "physical"),
+    "sdwan_sla": (2, "transport"), "ipsec_tunnel": (2, "transport"), "ike_phase1": (2, "transport"),
+    "ike_phase2": (2, "transport"), "bfd_session": (2, "transport"), "control_connection": (2, "transport"),
+    "bgp_session": (3, "routing"), "bgp_max_prefix": (3, "routing"), "bgp_path_change": (3, "routing"),
+    "ospf_adjacency": (3, "routing"), "omp_peer": (3, "routing"), "evpn": (4, "overlay"),
+}
+_IP_ATTRS = ("remip", "locip", "tunnelip", "local_ip", "system_ip", "local_tloc_ip",
+             "remote_tloc_ip", "src_ip", "dst_ip")
+_P2P_EVENT_TYPES = frozenset({"bgp_session", "bgp_max_prefix", "ospf_adjacency"})
+_STRONG_EVIDENCE = frozenset({"shared_ip", "p2p_subnet", "same_interface", "same_tunnel"})
+
+
+def _layer(ev: Any) -> tuple[int, str] | None:
+    return _LAYER_BY_EVENT_TYPE.get(getattr(ev, "event_type", "") or "")
+
+
+def _join_keys(ev: Any) -> list[tuple[str, str]]:
+    """(evidence, key) pairs an event can be joined on."""
+    from ai_log_analyzer.parsers.entities import valid_ip
+
+    host = _short_host(ev.hostname)
+    attrs = getattr(ev, "attrs", {}) or {}
+    ips = {valid_ip(ev.peer_ip)} | {valid_ip(attrs.get(k)) for k in _IP_ATTRS}
+    ips.discard("")
+    keys: list[tuple[str, str]] = [("shared_ip", f"ip:{ip}") for ip in sorted(ips)]
+    # Both ends of a /30 or /31 point-to-point routing session name each
+    # other's address. Only session peers qualify — system IPs / TLOCs are
+    # loopback-style identifiers and would join unrelated devices.
+    p2p = {valid_ip(ev.peer_ip)} if ev.event_type in _P2P_EVENT_TYPES else set()
+    p2p |= {valid_ip(attrs.get("tunnelip"))}
+    for ip in sorted(p2p - {""}):
+        if ipaddress.ip_address(ip).version == 4:
+            for plen in (30, 31):
+                keys.append(("p2p_subnet", f"p2p:{ipaddress.ip_network(f'{ip}/{plen}', strict=False)}"))
+    if ev.interface:
+        keys.append(("same_interface", f"if:{host}:{ev.interface.lower()}"))
+    if ev.tunnel_id:
+        keys.append(("same_tunnel", f"tun:{host}:{ev.tunnel_id.lower()}"))
+    return keys
+
+
+def correlate_entities(
+    events: Iterable[Any],
+    *,
+    window_s: float = 300.0,
+    same_device_window_s: float = 60.0,
+    hold_window_s: float = 240.0,
+    max_events: int = 2000,
+) -> dict[str, Any]:
+    """Cluster failure events that share entities into cross-vendor incidents.
+
+    Considers events with a known layer (platform → physical → transport →
+    routing → overlay) that are not recoveries. Two events join when they
+    share an entity key (IP, /30-/31 p2p subnet, device interface, device
+    tunnel) within ``window_s``, or sit on the same device within
+    ``same_device_window_s`` with the later one at the same or a higher layer.
+    A transport → routing step on one device may take up to ``hold_window_s``
+    (a BGP hold timer expires up to 180-240 s after the tunnel under it dies).
+    Each cluster that spans >= 2 devices, vendors or layers is an incident;
+    its root is the lowest-layer, earliest event.
+    """
+    from ai_log_analyzer.causal import _reference_dt, event_time
+
+    pool = [e for e in events
+            if _layer(e) is not None and getattr(e, "state", "") != "up"
+            and getattr(e, "severity", "info") in ("critical", "high", "medium")]
+    dropped = max(0, len(pool) - max_events)
+    pool = pool[:max_events]
+    if not pool:
+        return {"incidents": [], "events_considered": 0, "dropped": dropped}
+
+    ref = _reference_dt(pool)
+    times = [event_time(e, ref) for e in pool]
+    parent = list(range(len(pool)))
+    edges: dict[int, set[tuple[str, str]]] = {}
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a: int, b: int, evidence: tuple[str, str]) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+        edges.setdefault(a, set()).add(evidence)
+        edges.setdefault(b, set()).add(evidence)
+
+    def close(a: int, b: int, limit: float) -> bool:
+        ta, tb = times[a], times[b]
+        if ta is None or tb is None:
+            return True
+        return abs((tb - ta).total_seconds()) <= limit
+
+    def order(idx: list[int]) -> list[int]:
+        return sorted(idx, key=lambda i: (times[i] is None, times[i] or 0, i))
+
+    by_key: dict[str, list[int]] = {}
+    evidence_of: dict[str, str] = {}
+    for i, ev in enumerate(pool):
+        for evidence, key in _join_keys(ev):
+            by_key.setdefault(key, []).append(i)
+            evidence_of[key] = evidence
+    for key, members in by_key.items():
+        if len(members) < 2:
+            continue
+        ordered = order(members)
+        for a, b in zip(ordered, ordered[1:]):
+            if close(a, b, window_s):
+                union(a, b, (evidence_of[key], key.split(":", 1)[1]))
+
+    by_host: dict[str, list[int]] = {}
+    for i, ev in enumerate(pool):
+        by_host.setdefault(_short_host(ev.hostname), []).append(i)
+    for host, members in by_host.items():
+        ordered = order(members)
+        for a, b in zip(ordered, ordered[1:]):
+            la, lb = _layer(pool[a]), _layer(pool[b])
+            if not (la and lb and la[0] <= lb[0]):
+                continue
+            limit = hold_window_s if la[1] == "transport" and lb[1] == "routing" else same_device_window_s
+            if close(a, b, limit):
+                union(a, b, ("same_device_temporal", host))
+
+    clusters: dict[int, list[int]] = {}
+    for i in range(len(pool)):
+        clusters.setdefault(find(i), []).append(i)
+
+    incidents: list[dict[str, Any]] = []
+    for members in clusters.values():
+        if len(members) < 2:
+            continue
+        hosts = {_short_host(pool[i].hostname) for i in members}
+        vendors = {pool[i].vendor for i in members if pool[i].vendor}
+        layers = {_layer(pool[i])[0] for i in members}
+        if len(hosts) < 2 and len(vendors) < 2 and len(layers) < 2:
+            continue
+        ordered = order(members)
+        root = min(members, key=lambda i: (_layer(pool[i])[0], times[i] is None, times[i] or 0, i))
+        evidence = sorted({e for i in members for e in edges.get(i, ())})
+        kinds = {e[0] for e in evidence}
+        root_first = all(times[root] is None or times[i] is None or times[root] <= times[i] for i in members)
+        # Cross-device joins are always entity-based; "high" needs at least one
+        # entity join and a root that really came first.
+        confidence = "high" if kinds & _STRONG_EVIDENCE and root_first else "medium"
+        incidents.append(_incident(pool, ordered, root, times, hosts, vendors, evidence, confidence))
+
+    incidents.sort(key=lambda inc: (-inc["device_count"], -inc["event_count"]))
+    return {"incidents": incidents, "events_considered": len(pool), "dropped": dropped}
+
+
+def _incident(pool, ordered, root, times, hosts, vendors, evidence, confidence) -> dict[str, Any]:
+    def step(i: int) -> dict[str, Any]:
+        ev = pool[i]
+        layer = _layer(ev)
+        return {
+            "hostname": ev.hostname, "vendor": ev.vendor, "event_type": ev.event_type,
+            "layer": layer[1] if layer else "", "description": ev.description,
+            "severity": ev.severity, "timestamp": ev.timestamp,
+            "entity": ev.peer_ip or ev.tunnel_id or ev.interface or "",
+        }
+
+    seen: set[tuple[str, str, str]] = set()
+    chain: list[dict[str, Any]] = []
+    for i in ordered:
+        s = step(i)
+        sig = (s["hostname"], s["event_type"], s["entity"])
+        if sig in seen:
+            continue
+        seen.add(sig)
+        chain.append(s)
+    r = step(root)
+    symptoms = [c for c in chain if (c["hostname"], c["event_type"], c["entity"]) !=
+                (r["hostname"], r["event_type"], r["entity"])]
+    effect_layers = sorted({c["layer"] for c in symptoms if c["layer"]})
+    summary = (f"{r['description']} on {r['hostname']} ({r['vendor'] or 'unknown'}, {r['layer']}) → "
+               f"{len(symptoms)} downstream event(s) across {len(hosts)} device(s)"
+               + (f" [{', '.join(effect_layers)}]" if effect_layers else ""))
+    return {
+        "root_cause": r,
+        "chain": chain[:15],
+        "symptoms": symptoms[:15],
+        "devices": sorted(hosts),
+        "vendors": sorted(vendors),
+        "device_count": len(hosts),
+        "event_count": len(ordered),
+        "evidence": [{"type": k, "key": v} for k, v in evidence[:20]],
+        "confidence": confidence,
+        "summary": summary,
     }

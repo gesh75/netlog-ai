@@ -10,48 +10,19 @@ from pathlib import Path
 
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.ingest import (
-    clean_timestamp,
     iter_file_lines,
     iter_sanitized_lines,
 )
+from ai_log_analyzer.parsers import registry as _registry
+from ai_log_analyzer.parsers.base import JUNOS_RE, RFC3164_RE, RFC5424_RE, SEV_NAMES, pri_to_severity
+from ai_log_analyzer.parsers.generic import SCRT_RE
 
-# RFC3164: "<PRI>Mmm dd HH:MM:SS host appname[pid]: message"
-_RFC3164_RE = re.compile(
-    r"^(?:<(?P<pri>\d+)>)?"
-    r"(?P<ts>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"
-    r"(?P<host>\S+)\s+"
-    r"(?P<app>[\w\-./]+)(?:\[\d+\])?:\s*"
-    r"(?P<msg>.*)$"
-)
-
-# RFC5424: "<PRI>1 timestamp host appname pid msgid sd msg"
-_RFC5424_RE = re.compile(
-    r"^<(?P<pri>\d+)>1\s+"
-    r"(?P<ts>\S+)\s+"
-    r"(?P<host>\S+)\s+"
-    r"(?P<app>\S+)\s+"
-    r"(?P<pid>\S+)\s+"
-    r"(?P<msgid>\S+)\s+"
-    r"(?:-|\[.*?\])\s+"
-    r"(?P<msg>.*)$"
-)
-
-# Junos-style: "Mmm dd HH:MM:SS host process: tag: message"
-_JUNOS_RE = re.compile(
-    r"^(?P<ts>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"
-    r"(?P<host>\S+)\s+"
-    r"(?P<app>\S+?):\s+"
-    r"(?:%-?\w+-\d+-\w+:\s+)?"
-    r"(?P<msg>.*)$"
-)
-
-# SecureCRT terminal session recordings: "HH:MM:SS.ss §<output line>".
-# The § character is what SecureCRT uses to separate its synthetic timestamp
-# from the captured terminal data. Match either § or the (rare) plain space-
-# delimited variant.
-_SCRT_RE = re.compile(
-    r"^(?P<ts>\d{1,2}:\d{2}:\d{2}\.\d{2})\s*§\s*(?P<msg>.*)$"
-)
+# Envelope regexes now live in the parser registry; re-exported here for
+# backward compatibility with code that imported them from this module.
+_RFC3164_RE = RFC3164_RE
+_RFC5424_RE = RFC5424_RE
+_JUNOS_RE = JUNOS_RE
+_SCRT_RE = SCRT_RE
 
 # Filename pattern SecureCRT uses: "<hostname> (<ip>) -- YYYY-MM-DD_HH-MM"
 _SCRT_FILENAME_RE = re.compile(r"^(?P<host>[A-Za-z0-9][\w.\-]*)\s*\(")
@@ -168,60 +139,18 @@ def count_directory_files(path: str | Path, pattern: str = "*.log",
 
 
 def _parse_line(line: str, default_host: str) -> LogEvent | None:
-    # Strip BOM and any leading/trailing whitespace.
-    line = line.lstrip("﻿").strip()
-    if not line:
-        return None
+    """Parse one line through the parser plugin registry.
 
-    # Try standard syslog formats first.
-    for regex in (_RFC5424_RE, _RFC3164_RE, _JUNOS_RE):
-        m = regex.match(line)
-        if m:
-            return _from_match(m, default_host)
-
-    # SecureCRT terminal recording — strip the synthetic timestamp + § and
-    # treat the captured terminal text as the message. The downstream
-    # classifier still runs its regexes against `appname + " " + message`
-    # so BGP/OSPF/license patterns in captured `show` command output will
-    # fire correctly.
-    m = _SCRT_RE.match(line)
-    if m:
-        msg = (m.group("msg") or "").strip()
-        if not msg:
-            return None  # empty `§` line — just terminal padding
-        return LogEvent(
-            timestamp=clean_timestamp(m.group("ts")),
-            hostname=default_host,
-            appname="scrt-session",
-            severity_raw="info",
-            message=msg,
-        )
-
-    # Fallback: whole line as the message, preserve hostname guess
-    return LogEvent(
-        timestamp="",
-        hostname=default_host,
-        appname="syslog",
-        severity_raw="info",
-        message=line,
-    )
+    Vendor plugins (FortiOS kv, PAN-OS CSV, Cisco SD-WAN) claim their own
+    formats; the generic syslog plugin keeps the legacy RFC 5424 / RFC 3164 /
+    Junos field semantics and adds structured entity fields.
+    """
+    return _registry.parse(line, default_host)
 
 
-def _from_match(m: re.Match[str], default_host: str) -> LogEvent:
-    pri = m.groupdict().get("pri")
-    sev_raw = _pri_to_severity(int(pri)) if pri else "info"
-    return LogEvent(
-        timestamp=clean_timestamp(m.group("ts")),
-        hostname=m.group("host") or default_host,
-        appname=m.group("app"),
-        severity_raw=sev_raw,
-        message=m.group("msg").strip(),
-    )
-
-
-# Syslog priority → severity-text mapping
-_SEV_NAMES = ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"]
+# Syslog priority → severity-text mapping (kept for backward compatibility)
+_SEV_NAMES = SEV_NAMES
 
 
 def _pri_to_severity(pri: int) -> str:
-    return _SEV_NAMES[pri & 0x07]
+    return pri_to_severity(pri)

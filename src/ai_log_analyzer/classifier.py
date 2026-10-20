@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 
 import regex
@@ -15,6 +15,66 @@ import regex
 # (regex, severity, category, description) — first match wins.
 # Patterns tested against f"{appname} {message}".lower()
 _KB_PATTERNS: list[tuple[str, str, str, str]] = [
+    # ── Security / SD-WAN vendors (gated on parser appnames / vendor tokens) ──
+    # FortiOS appnames are "fortios-<subtype>", PAN-OS "panos-<subtype>";
+    # Cisco SD-WAN lines carry bfd-/omp-/control-connection- notifications.
+    (r"fortios.*(?:enters?|entered)\s+(?:memory\s+)?conserve mode|fortios.*extreme low memory",
+                                                                         "critical", "system",     "FortiGate memory conserve mode"),
+    (r"fortios.*(?:leaves?|left|exit\w*)\s+(?:memory\s+)?conserve mode", "low",      "system",     "FortiGate conserve mode cleared"),
+    (r"session table.*(?:full|exhaust)|session limit.*(?:reached|exceed)|max\w*\s+sessions?\s+reached",
+                                                                         "high",     "firewall",   "Firewall session table exhaustion"),
+    (r"(?:fortios-ha|panos-ha).*(?:split.?brain|heartbeat.*(?:lost|down|fail)|hbdev.*down|ha1.*(?:link|connection).*down|both.*active)",
+                                                                         "critical", "redundancy", "Firewall HA split-brain / heartbeat loss"),
+    (r"(?:fortios-ha|panos-ha).*(?:failover|moved from state|state.*(?:changed|moved)|member state|master.*(?:change|elect)|non-functional)",
+                                                                         "high",     "redundancy", "Firewall HA failover / state change"),
+    (r"(?:fortios-vpn|panos-vpn|kmd|iked).*(?:phase[- ]?1|ike sa|ike-nego-p1).*(?:fail|error|timeout|mismatch|no proposal)|ipsec phase 1 error|negotiate_error",
+                                                                         "high",     "vpn",        "IPsec IKE Phase 1 negotiation failure"),
+    (r"(?:fortios-vpn|panos-vpn|kmd|iked).*(?:phase[- ]?2|quick mode|ike-nego-p2).*(?:fail|error|timeout|mismatch|no proposal)|action=phase2-down",
+                                                                         "high",     "vpn",        "IPsec IKE Phase 2 negotiation failure"),
+    (r"(?:fortios-vpn|panos-vpn).*(?:\bdpd\b|dead peer).*(?:fail|timeout|down)",
+                                                                         "high",     "vpn",        "IPsec DPD failure / peer dead"),
+    (r"(?:fortios-vpn|panos-vpn).*(?:tunnel-down|tunnel.*(?:\bdown\b|deleted)|ipsec.*\bdown\b)",
+                                                                         "high",     "vpn",        "VPN/IPsec tunnel failure"),
+    (r"(?:fortios-vpn|panos-vpn).*(?:tunnel-up|phase2-up|negotiation is succeeded|tunnel.*(?:\bup\b|established))|kmd_vpn_up",
+                                                                         "medium",   "vpn",        "VPN/IPsec tunnel up"),
+    (r"fortios-sdwan.*(?:out[- ]of[- ]sla|sla.*(?:fail|violat|miss)|miss(?:ed)? threshold|unreachable|stop forwarding|status=down|\bdead\b)|sd-?wan.*sla.*violat",
+                                                                         "high",     "sdwan",      "SD-WAN SLA violation / member out of SLA"),
+    (r"fortios-sdwan.*(?:in[- ]sla|back.*sla|start forwarding|is available|status=up|\balive\b)",
+                                                                         "medium",   "sdwan",      "SD-WAN member back in SLA"),
+    (r"(?:fortios-(?:ips|utm|anomaly|virus|attack)).*(?:critical|high|attack|signature)|panos-threat.*severity=(?:critical|high)",
+                                                                         "high",     "security",   "IPS/threat signature match"),
+    (r"panos-traffic.*\b(?:deny|drop|reset-\w+)\b|fortios-(?:traffic|forward|local).*action=(?:deny|blocked|dropped)",
+                                                                         "medium",   "security",   "Firewall/ACL deny event"),
+    (r"panos-globalprotect.*(?:auth\w*.*fail|fail\w*)|globalprotect\w*.*auth\w*[- ]fail",
+                                                                         "high",     "security",   "Authentication failure"),
+    (r"panos-routing.*bgp.*(?:left established|established\s*(?:->|to)\s*(?!established)\w+|to (?:idle|active|connect)\b|\bdown\b)",
+                                                                         "high",     "routing",    "BGP peer down / connect failure"),
+    (r"panos-routing.*bgp.*(?:enter(?:ed)? established|(?:->|to)\s*established|\bup\b)",
+                                                                         "medium",   "routing",    "BGP peer established"),
+    (r"(?:bfd-state-change|bfd-session).*(?:new-state:down|state down|\bdown\b)",
+                                                                         "high",     "sdwan",      "SD-WAN BFD session down"),
+    (r"(?:bfd-state-change|bfd-session).*(?:new-state:up|state up|\bup\b)",
+                                                                         "medium",   "sdwan",      "SD-WAN BFD session up"),
+    (r"omp-peer-state-change.*new-state:(?:init|down|handshake)|ompd.*(?:state changed to (?:init|down)|peer.*\bdown\b)",
+                                                                         "high",     "sdwan",      "SD-WAN OMP peer down"),
+    (r"omp-peer-state-change.*new-state:up|ompd.*state changed to up",   "medium",   "sdwan",      "SD-WAN OMP peer up"),
+    (r"control-connection-state-change.*new-state:(?:down|tear_down|challenge|connect)|vdaemon.*(?:connection.*(?:is down|lost|tear)|state changed to down)",
+                                                                         "high",     "sdwan",      "SD-WAN control connection down"),
+    (r"control-connection-state-change.*new-state:up|vdaemon.*(?:connection.*is up|state changed to up)",
+                                                                         "medium",   "sdwan",      "SD-WAN control connection up"),
+    # ── BGP anomaly signatures (vendor-neutral; before generic BGP rules) ──
+    (r"max(?:imum)?[-_ ]?(?:number of )?prefix(?:es)?.*(?:exceed|reached|limit)|maxpfxexceed|prefix[-_ ]limit.*exceed|prefix limit exceeded",
+                                                                         "high",     "routing",    "BGP max-prefix limit exceeded"),
+    (r"%(?:bgp-\d-)?maxpfx\b|max(?:imum)?[-_ ]?prefix.*(?:threshold|warning|approach)|prefix.*threshold.*(?:reached|exceed)",
+                                                                         "medium",   "routing",    "BGP max-prefix threshold warning"),
+    (r"(?:origin(?:\s+as)?|as[-_ ]?path)\s*(?:change|changed|mismatch|conflict)|\bmoas\b|possible (?:hijack|route leak)|\broute leak\b",
+                                                                         "high",     "routing",    "BGP origin / AS-path change (possible hijack or leak)"),
+    (r"(?:cease|notification).*(?:admin\w*\s*(?:shutdown|reset)|peer de-?configured|other configuration change)|shutdown communication|(?:notification|cease).*\b6/[2346]\b",
+                                                                         "medium",   "routing",    "BGP administrative shutdown / reset (Cease)"),
+    (r"hold.?time(?:r)?\s*(?:expir|timeout|out\b)|\bevent holdtime\b|bgp_hold_timeout|notification.*\b4/0\b",
+                                                                         "high",     "routing",    "BGP hold timer expired"),
+    (r"notification.*\b[1235]/\d{1,2}\b|notification.*(?:open message error|update message error|fsm error|message header error|bad peer as|malformed)",
+                                                                         "high",     "routing",    "BGP NOTIFICATION — protocol / OPEN / UPDATE error"),
     # ── CRITICAL ─────────────────────────────────────────────────────────
     (r"kernel\s*panic|core\s*dump|watchdog.*reset|rpd.*panic",          "critical", "system",     "Kernel panic / core dump — OS failure"),
     (r"swap_pager_getswapspace.*failed|swap.*exhaust",                  "critical", "system",     "Kernel swap space exhaustion"),
@@ -77,7 +137,8 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     # ── MEDIUM ───────────────────────────────────────────────────────────
     (r"snmp_trap_link_up|link\s*up|carrier.*up|if_up",                  "medium",   "interface",  "Interface link up"),
     (r"%(?:link-3-updown|lineproto-5-updown).*to\s+up",                 "medium",   "interface",  "Interface link up"),
-    (r"rpd_bgp.*establ|bgp.*established|%bgp-5-adjchange.*up",          "medium",   "routing",    "BGP peer established"),
+    (r"rpd_bgp.*establ|bgp.*established|%bgp-5-adjchange.*up|%adjchange.*\bup\b",
+                                                                         "medium",   "routing",    "BGP peer established"),
     (r"ospf.*(?:neighbor.*full|adj.*full)|%ospf-5-adjchg.*full",        "medium",   "routing",    "OSPF neighbor established"),
     (r"ntp.*(?:unreachable|stratum.*16|no.*server|sync\s+lost)",        "medium",   "ntp",        "NTP sync lost/unreachable"),
     (r"stp.*(?:tcn|topology.*change|root.*change)",                     "medium",   "stp",        "STP topology change"),
@@ -190,6 +251,11 @@ def _guaranteed_literals(parsed) -> set[str] | None:
 
 _KEYWORDS: tuple[str, ...]
 _UNGUARDED: list[tuple[re.Pattern[str], str, str, str]] = []
+_UNGUARDED_IDX: list[int] = []
+# Per-pattern gate: literal → indices of the patterns that literal guards.
+# A line only needs the patterns whose guaranteed literal it contains (plus
+# the unguarded ones), tried in table order so first-match precedence holds.
+_LITERAL_PATTERNS: dict[str, list[int]] = {}
 _kw: set[str] = set()
 for _i, (_p, _s, _c, _d) in enumerate(_KB_PATTERNS):
     try:
@@ -200,8 +266,31 @@ for _i, (_p, _s, _c, _d) in enumerate(_KB_PATTERNS):
     # gate — such patterns go to the always-checked list instead.
     if _lits and all(len(_l) >= 3 for _l in _lits):
         _kw |= _lits
+        for _l in _lits:
+            _LITERAL_PATTERNS.setdefault(_l, []).append(_i)
     else:
         _UNGUARDED.append(_COMPILED[_i])
+        _UNGUARDED_IDX.append(_i)
+_GATE_LITERALS: tuple[str, ...] = tuple(sorted(_LITERAL_PATTERNS))
+_CANDIDATE_CACHE: dict[tuple[str, ...], list[tuple[re.Pattern[str], str, str, str]]] = {}
+_CANDIDATE_CACHE_MAX = 4096
+
+
+def _gated_candidates(combined: str) -> list[tuple[re.Pattern[str], str, str, str]]:
+    """Ordered KB patterns that can possibly match ``combined`` (ASCII only)."""
+    present = tuple(k for k in _GATE_LITERALS if k in combined)
+    if not present or not _KEYWORDS:
+        return _UNGUARDED
+    cached = _CANDIDATE_CACHE.get(present)
+    if cached is None:
+        ids = set(_UNGUARDED_IDX)
+        for k in present:
+            ids.update(_LITERAL_PATTERNS[k])
+        cached = [_COMPILED[i] for i in sorted(ids)]
+        if len(_CANDIDATE_CACHE) >= _CANDIDATE_CACHE_MAX:
+            _CANDIDATE_CACHE.clear()
+        _CANDIDATE_CACHE[present] = cached
+    return cached
 # Prune redundant keywords: if k2 is a substring of k1, any line containing
 # k1 also contains k2 — k2 alone suffices for the gate.
 _KEYWORDS = tuple(sorted(
@@ -309,14 +398,55 @@ def strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
 
 
+# Canonical structured fields shared by LogEvent and ClassifiedEvent. All are
+# optional ("" = unknown) so the five-field positional constructor every
+# adapter and test uses keeps working unchanged.
+STRUCTURED_FIELDS: tuple[str, ...] = (
+    "vendor",             # fortinet | paloalto | cisco_sdwan | juniper | arista | cisco_ios | cisco_nxos | frr | sonic | cumulus | nokia_srl
+    "event_type",         # bgp_session | ipsec_tunnel | ike_phase1 | sdwan_sla | bfd_session | omp_peer | interface_link | ...
+    "interface",
+    "peer_ip",
+    "asn",
+    "vrf",
+    "vni",
+    "tunnel_id",
+    "action",             # vendor action verb (FortiOS action=, PAN-OS action field, …)
+    "state",              # "down" | "up" | "" — drives down→up recovery pairing
+    "normalized_utc_ts",  # ISO-8601 UTC when the source carried enough to compute it
+)
+
+
 @dataclass(frozen=True)
 class LogEvent:
-    """Normalized input event — what every adapter produces."""
+    """Normalized input event — what every adapter produces.
+
+    The first five fields are the legacy contract. The structured fields are
+    filled by ``ai_log_analyzer.parsers`` (or left blank by adapters that
+    only know raw text — the classifier enriches those lazily). ``attrs``
+    carries vendor extras (remip, locip, healthcheck, eventid, …); it is
+    excluded from equality/hash so events stay hashable.
+    """
     timestamp: str
     hostname: str
     appname: str
     severity_raw: str
     message: str
+    vendor: str = ""
+    event_type: str = ""
+    interface: str = ""
+    peer_ip: str = ""
+    asn: str = ""
+    vrf: str = ""
+    vni: str = ""
+    tunnel_id: str = ""
+    action: str = ""
+    state: str = ""
+    normalized_utc_ts: str = ""
+    attrs: Mapping[str, str] = field(default_factory=dict, compare=False, hash=False, repr=False)
+
+    def structured(self) -> dict[str, str]:
+        """Non-empty structured fields (no attrs)."""
+        return {f: getattr(self, f) for f in STRUCTURED_FIELDS if getattr(self, f)}
 
 
 @dataclass
@@ -335,9 +465,32 @@ class ClassifiedEvent:
     # How the verdict was reached: 1.0 custom rule, 0.9 KB pattern,
     # 0.6 raw-severity promotion, 0.3 unmatched (description = raw snippet).
     confidence: float = field(default=0.9)
+    # Structured entity fields carried over from the LogEvent (see STRUCTURED_FIELDS).
+    vendor: str = ""
+    event_type: str = ""
+    interface: str = ""
+    peer_ip: str = ""
+    asn: str = ""
+    vrf: str = ""
+    vni: str = ""
+    tunnel_id: str = ""
+    # `action` above is the recommended next step; the vendor's own action
+    # verb (FortiOS action=, PAN-OS action) lives here.
+    vendor_action: str = ""
+    state: str = ""
+    normalized_utc_ts: str = ""
+    attrs: Mapping[str, str] = field(default_factory=dict, repr=False)
+
+    def structured(self) -> dict[str, str]:
+        out = {}
+        for f in STRUCTURED_FIELDS:
+            value = self.vendor_action if f == "action" else getattr(self, f)
+            if value:
+                out[f] = value
+        return out
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "timestamp": self.timestamp,
             "hostname": self.hostname,
             "appname": self.appname,
@@ -350,6 +503,10 @@ class ClassifiedEvent:
             "sample_message": self.sample_message,
             "confidence": self.confidence,
         }
+        entities = self.structured()
+        if entities:
+            d["entities"] = entities
+        return d
 
 
 _DEFAULT_ACTIONS: dict[tuple[str, str], str] = {
@@ -366,6 +523,10 @@ _DEFAULT_ACTIONS: dict[tuple[str, str], str] = {
     ("medium", "interface"):    "Verify link stability — check SFP Rx/Tx power",
     ("medium", "security"):     "Review ACL/firewall hits — check for policy violation",
     ("medium", "ntp"):          "Verify NTP reachability — time skew may affect logs",
+    ("critical", "redundancy"): "Isolate the HA pair — confirm which node owns traffic before any failback",
+    ("high", "sdwan"):          "Check SD-WAN overlay — BFD/OMP/control connections and transport SLA",
+    ("high", "firewall"):       "Check firewall session/memory headroom — risk of new-session drops",
+    ("medium", "sdwan"):        "Monitor SD-WAN path quality — confirm SLA recovery",
     ("low", "auth"):             "Informational — log user access for audit",
     ("low", "config"):           "Informational — track config changes in change log",
 }
@@ -382,7 +543,12 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
     size. Building block for analyze()'s single-pass aggregation; use
     classify_events() when you need the sorted list + counters.
     """
+    from ai_log_analyzer.parsers import ensure_structured
+
     for ev in events:
+        # Events from API connectors (Kibana, Splunk, …) arrive as raw text;
+        # give them the same entity extraction the file/syslog parsers do.
+        ev = ensure_structured(ev)
         # Strip ANSI escapes once at the boundary — catches systemd green-OK
         # markers, FRR vtysh color codes, and any colorized adapter output.
         clean_message = strip_ansi(ev.message)
@@ -410,10 +576,7 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
             # substring checks do not, so only use the literal gate for ASCII.
             # No keyword → only the unproven patterns can possibly match (their
             # relative order is preserved, so precedence holds).
-            if not combined.isascii() or any(k in combined for k in _KEYWORDS):
-                candidates = _COMPILED
-            else:
-                candidates = _UNGUARDED
+            candidates = _COMPILED if not combined.isascii() else _gated_candidates(combined)
             for pattern, p_sev, p_cat, p_desc in candidates:
                 if pattern.search(combined):
                     sev, cat, desc = p_sev, p_cat, p_desc
@@ -429,6 +592,16 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
             sev = "high"
             confidence = 0.6
 
+        if type(ev) is LogEvent:
+            vendor, event_type, interface, peer_ip = ev.vendor, ev.event_type, ev.interface, ev.peer_ip
+            asn, vrf, vni, tunnel_id, vendor_action = ev.asn, ev.vrf, ev.vni, ev.tunnel_id, ev.action
+            state, norm_ts, attrs = ev.state, ev.normalized_utc_ts, ev.attrs
+        else:  # duck-typed events from third-party adapters
+            vendor, event_type, interface, peer_ip, asn, vrf, vni, tunnel_id, vendor_action, state, norm_ts = (
+                getattr(ev, f, "") for f in ("vendor", "event_type", "interface", "peer_ip", "asn", "vrf",
+                                             "vni", "tunnel_id", "action", "state", "normalized_utc_ts"))
+            attrs = getattr(ev, "attrs", None) or {}
+
         yield ClassifiedEvent(
             timestamp=ev.timestamp,
             hostname=ev.hostname.split(".")[0] if ev.hostname else "",
@@ -441,6 +614,18 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
             message=clean_message[:500],
             sample_message=clean_message[:200],
             confidence=confidence,
+            vendor=vendor,
+            event_type=event_type,
+            interface=interface,
+            peer_ip=peer_ip,
+            asn=asn,
+            vrf=vrf,
+            vni=vni,
+            tunnel_id=tunnel_id,
+            vendor_action=vendor_action,
+            state=state,
+            normalized_utc_ts=norm_ts,
+            attrs=attrs,
         )
 
 
