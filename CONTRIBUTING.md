@@ -18,7 +18,7 @@ ruff check src/ tests/   # must be clean
 pytest                   # full suite must pass
 ```
 
-Both run in CI (Python 3.10–3.12) on every PR — see `.github/workflows/ci.yml`.
+Both run in CI (Python 3.10–3.13) on every PR — see `.github/workflows/ci.yml`.
 
 ## Guidelines
 
