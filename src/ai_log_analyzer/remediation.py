@@ -166,6 +166,10 @@ class SafetyViolationError(ValueError):
     """Raised when a proposed remediation violates network safety guardrails."""
 
 
+class PlanInputError(SafetyViolationError):
+    """A caller-supplied parameter (device, interface, neighbor, timer) is malformed — a usage error."""
+
+
 _NO_QOS_TEMPLATE = frozenset({VendorOS.FORTINET_FORTIOS, VendorOS.PALOALTO_PANOS, VendorOS.CISCO_SDWAN})
 
 _DEVICE_RE = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
@@ -185,7 +189,7 @@ def validate_device(device: Any) -> str:
     """Return ``device`` if it is a plain hostname / address, else raise SafetyViolationError."""
     text = device if isinstance(device, str) else ""
     if not _DEVICE_RE.match(text):
-        raise SafetyViolationError(
+        raise PlanInputError(
             f"invalid device name {clean_text(device, 60)!r}: use 1-255 characters from A-Z a-z 0-9 . _ : - "
             "(no spaces, newlines, wildcards or quotes)")
     return text
@@ -195,12 +199,12 @@ def validate_ansible_host(device: str) -> str:
     """A device name safe to use as an Ansible ``hosts:`` pattern (exactly one inventory host)."""
     validate_device(device)
     if device.lower() in _ANSIBLE_GROUP_WORDS or device.startswith(("-", ".")):
-        raise SafetyViolationError(f"device {device!r} would address more than one inventory host")
+        raise PlanInputError(f"device {device!r} would address more than one inventory host")
     if ":" in device:  # `a:b` is an Ansible union pattern; only a literal IPv6 address may contain ':'
         try:
             ipaddress.IPv6Address(device)
         except ValueError:
-            raise SafetyViolationError(
+            raise PlanInputError(
                 f"device {device!r} contains ':' (an Ansible host-pattern separator); use the inventory hostname") from None
     return device
 
@@ -208,7 +212,7 @@ def validate_ansible_host(device: str) -> str:
 def validate_interface(interface: Any) -> str:
     text = interface if isinstance(interface, str) else ""
     if not _INTERFACE_RE.match(text):
-        raise SafetyViolationError(
+        raise PlanInputError(
             f"invalid interface name {clean_text(interface, 60)!r}: use 1-64 characters from A-Z a-z 0-9 . _ : / - "
             "(no spaces, newlines or quotes)")
     return text
@@ -221,12 +225,12 @@ def validate_neighbor_ip(value: Any) -> str | None:
     try:
         return str(ipaddress.ip_address(str(value).strip()))
     except ValueError:
-        raise SafetyViolationError(f"invalid bgp_neighbor_ip {clean_text(value, 60)!r}: not an IPv4/IPv6 address") from None
+        raise PlanInputError(f"invalid bgp_neighbor_ip {clean_text(value, 60)!r}: not an IPv4/IPv6 address") from None
 
 
 def validate_plan_id(plan_id: Any) -> str:
     if not isinstance(plan_id, str) or not _PLAN_ID_RE.match(plan_id):
-        raise SafetyViolationError(f"invalid plan id {clean_text(plan_id, 60)!r}")
+        raise PlanInputError(f"invalid plan id {clean_text(plan_id, 60)!r}")
     return plan_id
 
 
@@ -324,9 +328,9 @@ class SafetyGuardrail:
     @classmethod
     def validate(cls, commands: list[str], rollback_minutes: int) -> None:
         if isinstance(rollback_minutes, bool) or not isinstance(rollback_minutes, int):
-            raise SafetyViolationError(f"rollback_minutes must be an integer, got {type(rollback_minutes).__name__}.")
+            raise PlanInputError(f"rollback_minutes must be an integer, got {type(rollback_minutes).__name__}.")
         if not (cls.MIN_ROLLBACK_MINUTES <= rollback_minutes <= cls.MAX_ROLLBACK_MINUTES):
-            raise SafetyViolationError(
+            raise PlanInputError(
                 f"rollback_minutes ({rollback_minutes}) must be between "
                 f"{cls.MIN_ROLLBACK_MINUTES} and {cls.MAX_ROLLBACK_MINUTES}."
             )
