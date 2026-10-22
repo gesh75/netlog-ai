@@ -15,17 +15,25 @@ import re
 
 _IPV4 = r"(?:\d{1,3}\.){3}\d{1,3}"
 _IPV6 = r"[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}"
-_IP = rf"(?:{_IPV4}|{_IPV6})"
+_IPV4_MAPPED = rf"::[Ff]{{4}}:{_IPV4}"   # "::ffff:10.1.1.2" — must win over _IPV6, which stops at the dot
+_IP = rf"(?:{_IPV4_MAPPED}|{_IPV4}|{_IPV6})"
 
 
 def valid_ip(text: str | None) -> str:
-    """Canonical form of an IP address, or "" when ``text`` is not one."""
+    """Canonical form of an IP address, or "" when ``text`` is not one.
+
+    IPv4-mapped IPv6 ("::ffff:10.1.1.2") collapses to the plain IPv4 so the
+    same peer joins however a vendor spells it.
+    """
     if not text:
         return ""
     try:
-        return str(ipaddress.ip_address(text.strip().strip("[](),;")))
+        ip = ipaddress.ip_address(text.strip().strip("[](),;"))
     except ValueError:
         return ""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return str(ip)
 
 
 def first_ip(patterns: tuple[re.Pattern[str], ...], text: str) -> str:
@@ -55,6 +63,7 @@ _JUNOS_APPS = frozenset({"rpd", "mgd", "kmd", "chassisd", "dcd", "l2ald", "pfed"
 _NXOS_FACILITIES = frozenset({"ETHPORT", "ETH_PORT_CHANNEL", "VPC", "SYSMGR", "VSHD",
                               "IFMGR", "ETHPM", "VDC_MGR", "PLATFORM", "MODULE", "NVE"})
 _MNEMONIC_RE = re.compile(r"%(?P<fac>[A-Z][A-Z0-9_]+)-(?P<sev>\d)-(?P<mnem>[A-Z0-9_]+)")
+_XR_MNEMONIC_RE = re.compile(r"%[A-Z][A-Z0-9_]+-[A-Z][A-Z0-9_]+-\d-[A-Z0-9_]+")
 _JUNOS_TAG_RE = re.compile(r"\b(?:RPD|KMD|SNMP_TRAP|CHASSISD|UI|BFDD|LACPD|DCD|L2ALD|PFE|JSRPD|ESWD)_[A-Z0-9_]+")
 _CAMEL_RE = re.compile(r"^[A-Z][a-z]+(?:[A-Z][a-z0-9]*)*$")
 
@@ -66,10 +75,15 @@ def detect_vendor(appname: str, message: str) -> str:
         return "sonic"
     if app_l in _CUMULUS_APPS:
         return "cumulus"
-    if app_l in _FRR_APPS:
+    # Junos bfdd and FRR bfdd share a process name; only the Junos message tag tells them apart.
+    if app_l in _FRR_APPS and not (app_l == "bfdd" and _JUNOS_TAG_RE.search(message)):
         return "frr"
     if app_l in _JUNOS_APPS or _JUNOS_TAG_RE.search(message):
         return "juniper"
+    # IOS-XR "%ROUTING-BGP-5-ADJCHANGE": a two-level facility, and the agent
+    # name (bgp, ospf, bfd ...) collides with the EOS agent list below.
+    if _XR_MNEMONIC_RE.search(message):
+        return "cisco_ios"
     # The Junos-style envelope can move "%FAC-SEV-MNEMONIC" into the appname.
     m = _MNEMONIC_RE.search(f"{app} {message}")
     if m:
@@ -88,26 +102,35 @@ def detect_vendor(appname: str, message: str) -> str:
 # ── Field extractors ────────────────────────────────────────────────────────
 
 _BGP_PEER_RES = (
-    re.compile(rf"\b(?:neighbou?r|peer)\s+(?P<ip>{_IP})", re.IGNORECASE),
+    re.compile(rf"\b(?:neighbou?r|peer)(?:\s+|\s*:\s*)(?P<ip>{_IP})", re.IGNORECASE),  # FRR "peer:2001:db8::2"
+    re.compile(rf"\bsession with\s+(?P<ip>{_IP})", re.IGNORECASE),  # SR Linux "BGP session with 10.1.1.2"
     re.compile(rf"\b(?:sent to|received from)\s+(?P<ip>{_IP})", re.IGNORECASE),  # NOTIFICATION sent to <ip>
     re.compile(rf"\bBGP:\s*(?P<ip>{_IP})", re.IGNORECASE),  # FortiOS "BGP: 10.0.0.1-outgoing"
     re.compile(rf"(?P<ip>{_IPV4})\+\d+"),                   # Junos "10.0.0.1+179"
+    re.compile(rf"(?<![\w.:])(?P<ip>{_IPV4})\([\w.\-]+\)"),  # FRR peer description "10.1.1.2(spine1)"
 )
 _GENERIC_PEER_RES = (
     re.compile(rf"\b(?:neighbou?r|peer|nbr|to|from|remote(?:[- ](?:peer|gateway|address|ip))?)\s*:?\s+(?P<ip>{_IP})", re.IGNORECASE),
     re.compile(rf"(?P<ip>{_IPV4})"),
 )
+# asplain ("65010") or asdot ("1.10", "65000.100"); the written form is kept —
+# correlate.normalize_asn converts asdot. The tail guard stops a dotted quad
+# ("AS 10.1.1.1") from being read as an asdot ASN.
+_ASN_NUM = r"(?P<asn>\d{1,10}(?:\.\d{1,5})?)(?![\d]|\.\d)"
 _ASN_RES = (
-    re.compile(r"\b(?:External|Internal)\s+AS\s+(?P<asn>\d{1,10})\b"),
-    re.compile(r"\bremote[- ]as\s+(?P<asn>\d{1,10})\b", re.IGNORECASE),
-    re.compile(r"\bpeer[- ]as\s+(?P<asn>\d{1,10})\b", re.IGNORECASE),
-    re.compile(r"\bAS\s?(?P<asn>\d{1,10})\b"),
+    re.compile(rf"\b(?:External|Internal)\s+AS\s+{_ASN_NUM}"),
+    re.compile(rf"\bremote[- ]as\s+{_ASN_NUM}", re.IGNORECASE),
+    re.compile(rf"\bpeer[- ]as\s+{_ASN_NUM}", re.IGNORECASE),
+    re.compile(rf"\bAS:?\s?{_ASN_NUM}"),
 )
 _VRF_RES = (
-    re.compile(r"\b[Vv][Rr][Ff]\s+(?P<vrf>[A-Za-z0-9_.:\-]+)"),
+    re.compile(r"\b[Vv][Rr][Ff]:?\s+(?P<vrf>[A-Za-z0-9_.:\-]+)"),
+    re.compile(r"\bbgp-\d+ \[\d+\] \((?P<vrf>[^)\s]+)\)"),          # NX-OS "bgp-65001 [12345] (default)"
+    re.compile(r"\bvirtual[- ]router\s+(?P<vrf>[A-Za-z0-9_.:\-]+)", re.IGNORECASE),  # PAN-OS
     re.compile(r"\(instance\s+(?P<vrf>[A-Za-z0-9_.:\-]+)\)"),
     re.compile(r"\brouting-instance\s+(?P<vrf>[A-Za-z0-9_.:\-]+)"),
 )
+_NXOS_LOCAL_AS_RE = re.compile(r"\bbgp-(?P<las>\d+(?:\.\d+)?) \[\d+\]")
 _VNI_RE = re.compile(r"\b(?:VNI|vni|VNID|vnid|l2vni|l3vni)\s*[:=]?\s*(?P<vni>\d{1,8})\b")
 _INTF_NAME = (
     r"(?:(?:Ten|Forty|Hundred|TwentyFive|Fifty|FourHundred)?Gig(?:abit)?E(?:thernet)?"
@@ -121,13 +144,14 @@ _INTF_RES = (
     re.compile(rf"(?<![\w-])(?P<if>{_INTF_NAME})(?![\w-])"),
 )
 _STATE_TO_RE = re.compile(
-    r"(?:changed state from|from|old state)\s+(?P<old>\w+)\s+(?:to|event \w+ new state|->)\s+(?P<new>\w+)"
+    r"(?:changed state from|from|old state)\s+(?P<old>\w+)(?:\s+(?:to|event \w+ new state)\s+|\s*->\s*)(?P<new>\w+)"
     r"|(?:new[- ]state|state changed to|state)\s*[:=]?\s*(?P<new2>\w+)"
     r"|->\s*(?P<new3>\w+)",
     re.IGNORECASE,
 )
 _BGP_UP_STATES = frozenset({"established", "up"})
-_BGP_DOWN_STATES = frozenset({"idle", "active", "connect", "opensent", "openconfirm", "down", "init"})
+_BGP_DOWN_STATES = frozenset({"idle", "active", "connect", "opensent", "openconfirm", "down", "init",
+                              "clearing", "deleted"})
 
 
 def _first(patterns: tuple[re.Pattern[str], ...], text: str, group: str) -> str:
@@ -206,7 +230,9 @@ _MAXPFX_RE = re.compile(r"max(?:imum)?[-_ ]?(?:number of )?(?:prefix|pfx)|prefix
 _PATHCHG_RE = re.compile(r"(?:origin(?:\s+as)?|as[-_ ]?path)\s*(?:change|changed|mismatch|conflict)|\bmoas\b|"
                          r"route leak|possible hijack", re.IGNORECASE)
 _LOCAL_IP_RE = re.compile(rf"\b(?:Local-ip|local[- ]address|local ip|source)\s*[:=]?\s*(?P<ip>{_IP})", re.IGNORECASE)
-_IPSEC_RE = re.compile(r"\b(?:ipsec|ike|ikev2|isakmp|crypto)\b")
+# "_" is a word char, so \b would miss IKE_NEGOTIATION_FAILED.
+_IPSEC_RE = re.compile(r"(?<![a-z0-9_])(?:ipsec|ike|ikev2|isakmp|crypto)(?![a-z0-9])")
+_NEGO_FAIL_RE = re.compile(r"negotiation[_ ]failed|negotiation failed with error")
 _KMD_TUNNEL_RE = re.compile(r"\bvpn name:\s*(?P<t>[^,]+)|\bVPN\s+(?P<t2>\S+)\s+from\b|\btunnel[- ](?:name|id)\s*[:=]?\s*(?P<t3>[\w.\-]+)",
                             re.IGNORECASE)
 
@@ -273,7 +299,7 @@ def enrich_netos(appname: str, message: str) -> dict[str, str]:
         m = _LOCAL_IP_RE.search(msg)
         if m and valid_ip(m.group("ip")):
             out["attr:local_ip"] = valid_ip(m.group("ip"))
-        state = updown(msg)
+        state = updown(msg) or ("down" if _NEGO_FAIL_RE.search(low) else "")
         if state:
             out["state"] = state
     elif any(k in low for k in ("lacp", "lag_bundle", "lag member", "teamd", "bundle")):
@@ -299,9 +325,13 @@ def enrich_netos(appname: str, message: str) -> dict[str, str]:
     asn = extract_asn(msg) if ("AS" in msg or "-as" in low) else ""
     if asn:
         out["asn"] = asn
-    vrf = extract_vrf(msg) if ("vrf" in low or "instance" in low) else ""
+    vrf = extract_vrf(msg) if ("vrf" in low or "instance" in low or "virtual" in low or "bgp-" in low) else ""
     if vrf:
         out["vrf"] = vrf
+    # NX-OS "bgp-65001 [pid] (vrf)": 65001 is the router's *own* AS (process tag),
+    # not the peer's, so it must not feed the shared-remote-AS join.
+    if "bgp-" in low and (m := _NXOS_LOCAL_AS_RE.search(msg)):
+        out["attr:local_asn"] = m.group("las")
     vni = extract_vni(msg) if "vni" in low else ""
     if vni:
         out["vni"] = vni
