@@ -16,7 +16,18 @@ from ai_log_analyzer.deep_report import run_deep_report
 from ai_log_analyzer.servicenow_sync import ServiceNowClient
 from ai_log_analyzer.sources import SourceError, registry
 from ai_log_analyzer.sources.manager import SourceManager
-from ai_log_analyzer.web.app import main as serve_main
+
+# Event vendor tag -> remediation VendorOS value (see parsers / triage_worker).
+_EVENT_VENDOR_OS = {
+    "frr": "frr", "paloalto": "paloalto_panos", "cisco_sdwan": "cisco_sdwan", "fortinet": "fortinet_fortios",
+    "juniper": "juniper_junos", "arista": "arista_eos", "cisco_ios": "cisco_ios", "cisco_nxos": "cisco_nxos",
+}
+
+
+def serve_main() -> None:
+    """Start the web UI (imported lazily so `--version` / `doctor` work without Flask)."""
+    from ai_log_analyzer.web.app import main
+    main()
 
 
 def _events_from_source(kind_or_id: str, limit: int) -> list[LogEvent]:
@@ -44,12 +55,21 @@ def cmd_serve(_args: argparse.Namespace) -> int:
 def cmd_analyze(args: argparse.Namespace) -> int:
     # Chain lazy iterators — analyze() streams them, so multi-GB files run in
     # bounded memory (the web route caps size; the CLI is the big-file path).
+    if (getattr(args, "snow_sync", False) and not getattr(args, "snow_dry_run", False)
+            and not (os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL"))):
+        print("error: --snow-sync needs SERVICENOW_URL (or SNOW_URL); "
+              "use --snow-dry-run to preview the payload without a ServiceNow instance", file=sys.stderr)
+        return 2
     streams: list = []
     if args.frr:
         for c in args.frr:
             streams.append(frr.frr_docker_logs(c, tail=args.tail))
     if args.file:
         for path in args.file:
+            if not Path(path).is_file():
+                reason = "is a directory" if Path(path).is_dir() else "no such file"
+                print(f"error: cannot read {path}: {reason}", file=sys.stderr)
+                return 2
             streams.append(parse_file(path))
     if args.stdin:
         streams.append(parse_lines(sys.stdin.readlines()))
@@ -67,6 +87,9 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     except StopIteration:
         print("error: no input — pass --frr, --file, --stdin, or --source", file=sys.stderr)
         return 2
+    except OSError as exc:
+        print(f"error: cannot read input: {exc}", file=sys.stderr)
+        return 2
 
     want_deep = bool(
         getattr(args, "deep_analytics", False)
@@ -74,44 +97,81 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         or getattr(args, "snow_sync", False)
         or getattr(args, "snow_dry_run", False)
     )
-    if want_deep:
-        events = [first, *event_iter]
+    want_remediation = bool(getattr(args, "remediation", False))
+    if want_deep or want_remediation:   # both need a second look at the events
+        try:
+            events = [first, *event_iter]
+        except OSError as exc:
+            print(f"error: cannot read input: {exc}", file=sys.stderr)
+            return 2
         source = iter(events)
     else:
         events = None
         source = itertools.chain([first], event_iter)
-    result = analyze(
-        source,
-        use_llm=not args.no_llm,
-        dedup=getattr(args, "dedup", False),
-        evpn_causal=getattr(args, "evpn_causal", False) or None,
-    )
+    try:
+        result = analyze(
+            source,
+            use_llm=not args.no_llm,
+            dedup=getattr(args, "dedup", False),
+            evpn_causal=getattr(args, "evpn_causal", False) or None,
+        )
+    except OSError as exc:
+        print(f"error: cannot read input: {exc}", file=sys.stderr)
+        return 2
     res_dict = result.to_dict()
     if want_deep and events is not None:
         attached = _attach_deep_analytics(args, events)
         if attached is None:
             return 2
         res_dict.update(attached)
-    if getattr(args, "remediation", False):
-        from ai_log_analyzer.remediation import RemediationGenerator, VendorOS
-
-        gen = RemediationGenerator()
-        plans = []
-        for item in res_dict.get("action_items", [])[:3]:
-            for dev in item.get("devices", [])[:2]:
-                try:
-                    p = gen.build_graceful_link_drain(
-                        device=dev,
-                        vendor=VendorOS.ARISTA_EOS,
-                        interface="Ethernet1",
-                        rationale=f"Auto-generated remediation for {item.get('description', 'incident')}",
-                    )
-                    plans.append(p.to_dict())
-                except Exception:
-                    pass
+    if want_remediation and events is not None:
+        plans, skipped = _remediation_plans(res_dict, events)
         res_dict["remediation_plans"] = plans
+        if skipped:
+            res_dict["remediation_skipped"] = skipped
+            for sk in skipped:
+                print(f"warning: no remediation plan for {sk['device']}: {sk['reason']}", file=sys.stderr)
     print(json.dumps(res_dict, indent=2))
     return 0
+
+
+def _remediation_plans(res_dict: dict, events: list) -> tuple[list[dict], list[dict[str, str]]]:
+    """Graceful-drain plans for the top action items, with vendor and interface taken from the
+    events themselves. Devices whose vendor or interface cannot be determined, or whose plan is
+    refused, are reported (not guessed, not silently dropped)."""
+    from ai_log_analyzer.classifier import iter_classify
+    from ai_log_analyzer.remediation import RemediationGenerator, VendorOS
+
+    vendor_of: dict[str, str] = {}
+    iface_of: dict[tuple[str, str], str] = {}     # (host, description) -> interface as logged
+    for e in iter_classify(iter(events)):
+        host = (e.hostname or "").lower()
+        if e.vendor:
+            vendor_of.setdefault(host, e.vendor)
+        if e.interface:
+            iface_of.setdefault((host, e.description), e.interface)
+    gen = RemediationGenerator()
+    plans: list[dict] = []
+    skipped: list[dict[str, str]] = []
+    for item in res_dict.get("action_items", [])[:3]:
+        for dev in item.get("devices", [])[:2]:
+            host = dev.lower()
+            vos = _EVENT_VENDOR_OS.get(vendor_of.get(host, ""))
+            intf = iface_of.get((host, item.get("description")))
+            if not vos:
+                skipped.append({"device": dev, "reason": "vendor not identified from the events"})
+                continue
+            if not intf:
+                skipped.append({"device": dev, "reason": "no interface named in the events for this alert"})
+                continue
+            try:
+                plans.append(gen.build_graceful_link_drain(
+                    device=dev, vendor=VendorOS(vos), interface=intf,
+                    rationale=f"Auto-generated remediation for {item.get('description', 'incident')}",
+                ).to_dict())
+            except ValueError as exc:      # SafetyViolationError / PlanInputError
+                skipped.append({"device": dev, "reason": str(exc)})
+    return plans, skipped
 
 
 def _attach_deep_analytics(args: argparse.Namespace, events: list) -> dict | None:
@@ -134,7 +194,11 @@ def _attach_deep_analytics(args: argparse.Namespace, events: list) -> dict | Non
         out["deep_analytics"] = bundle.payload
     if getattr(args, "snow_sync", False) or getattr(args, "snow_dry_run", False):
         instance = os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL") or ""
-        dry_run = bool(getattr(args, "snow_dry_run", False) or not instance)
+        dry_run = bool(getattr(args, "snow_dry_run", False))
+        if not dry_run and not instance:
+            print("error: --snow-sync needs SERVICENOW_URL (or SNOW_URL); "
+                  "use --snow-dry-run to preview the payload without a ServiceNow instance", file=sys.stderr)
+            return None
         client = ServiceNowClient(
             instance_url=instance,
             username=os.environ.get("SERVICENOW_USER") or os.environ.get("SNOW_USER") or "",
@@ -343,12 +407,22 @@ def cmd_triage_worker(args: argparse.Namespace) -> int:
 def cmd_remediation(args: argparse.Namespace) -> int:
     """Generate vendor-safe remediation plan with automatic rollback timer."""
     from ai_log_analyzer.remediation import (
+        PlanInputError,
         RemediationActionType,
         RemediationGenerator,
+        SafetyGuardrail,
         SafetyViolationError,
         VendorOS,
     )
 
+    fmt_arg = getattr(args, "format", None)
+    if getattr(args, "json", False) and fmt_arg in ("ansible", "nornir"):
+        print(f"error: --json cannot be combined with --format {fmt_arg}; use one of them", file=sys.stderr)
+        return 2
+    lo, hi = SafetyGuardrail.MIN_ROLLBACK_MINUTES, SafetyGuardrail.MAX_ROLLBACK_MINUTES
+    if not isinstance(args.rollback_minutes, int) or not lo <= args.rollback_minutes <= hi:
+        print(f"error: --rollback-minutes must be an integer from {lo} to {hi}", file=sys.stderr)
+        return 2
     try:
         vendor = VendorOS(args.vendor)
     except ValueError:
@@ -378,21 +452,40 @@ def cmd_remediation(args: argparse.Namespace) -> int:
         else:
             print(f"error: unsupported action {args.action!r}", file=sys.stderr)
             return 2
+    except PlanInputError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except SafetyViolationError as exc:
         print(f"error: safety violation: {exc}", file=sys.stderr)
         return 1
 
-    fmt = "json" if args.json else (getattr(args, "format", None) or "markdown")
+    fmt = "json" if args.json else (fmt_arg or "markdown")
     from ai_log_analyzer.remediation_export import ExportUnsupportedError, export_plan
     try:
         print(export_plan(plan, fmt), end="" if fmt in ("ansible", "nornir") else "\n")
-    except ExportUnsupportedError as exc:
+    except (ExportUnsupportedError, PlanInputError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except SafetyViolationError as exc:
         print(f"error: safety violation: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Local self-check (Python, packages, writable stores, environment); no network calls."""
+    from ai_log_analyzer import doctor
+
+    checks = doctor.run_checks()
+    counts = doctor.summarize(checks)
+    if getattr(args, "json", False):
+        print(json.dumps({"checks": checks, "summary": counts}, indent=2))
+    else:
+        for c in checks:
+            if c["status"] != "info" or getattr(args, "verbose", False):
+                print(f"[{c['status']:>4}] {c['name']}: {c['detail']}")
+        print(f"\n{counts['ok']} ok, {counts['warn']} warning(s), {counts['fail']} failure(s)")
+    return 1 if counts["fail"] else 0
 
 
 def cmd_mcp(args: argparse.Namespace) -> int:
@@ -412,8 +505,23 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rollback_minutes_arg(value: str) -> int:
+    from ai_log_analyzer.remediation import SafetyGuardrail
+    lo, hi = SafetyGuardrail.MIN_ROLLBACK_MINUTES, SafetyGuardrail.MAX_ROLLBACK_MINUTES
+    try:
+        minutes = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer (expected {lo}-{hi})") from None
+    if not lo <= minutes <= hi:
+        raise argparse.ArgumentTypeError(f"{minutes} is out of range (expected {lo}-{hi})")
+    return minutes
+
+
 def main() -> None:
+    from ai_log_analyzer import __version__
+
     p = argparse.ArgumentParser(prog="ai-log-analyzer", description="AI-powered network log analyzer")
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("serve", help="Run the web UI on port ANALYZER_PORT (default 6060)")
@@ -465,7 +573,7 @@ def main() -> None:
     ap.add_argument(
         "--snow-sync",
         action="store_true",
-        help="Create or update a ServiceNow incident (uses SERVICENOW_URL)",
+        help="Create or update a ServiceNow incident (requires SERVICENOW_URL; errors if unset)",
     )
     ap.add_argument(
         "--snow-dry-run",
@@ -529,12 +637,20 @@ def main() -> None:
     rem_p.add_argument("--action", choices=["drain", "copp"], default="drain", help="Remediation action type")
     rem_p.add_argument("--interface", default="Ethernet1", help="Target interface name (e.g. Ethernet1, xe-0/0/0)")
     rem_p.add_argument("--bgp-neighbor", default=None, help="Optional BGP neighbor IP for drain")
-    rem_p.add_argument("--rollback-minutes", type=int, default=5, help="Auto-rollback timer in minutes (1-30)")
+    rem_p.add_argument("--rollback-minutes", type=_rollback_minutes_arg, default=5,
+                       help="Rollback timer in minutes (1-30). Only Junos, IOS-XE and EOS revert automatically; "
+                            "other platforms get manual rollback commands")
     rem_p.add_argument("--rationale", default="", help="Engineering justification")
     rem_p.add_argument("--json", action="store_true", help="Output machine-readable JSON")
-    rem_p.add_argument("--format", choices=["markdown", "json", "ansible", "nornir"], default="markdown",
-                       help="Export as CLI card (markdown), JSON, an Ansible playbook, or a Nornir/NAPALM script")
+    rem_p.add_argument("--format", choices=["markdown", "json", "ansible", "nornir"], default=None,
+                       help="Export as CLI card (markdown, default), JSON, an Ansible playbook, or a Nornir/NAPALM "
+                            "script (not combinable with --json)")
     rem_p.set_defaults(func=cmd_remediation)
+
+    dr = sub.add_parser("doctor", help="Local self-check: Python, packages, writable stores, environment (no network)")
+    dr.add_argument("--json", action="store_true", help="Machine-readable output")
+    dr.add_argument("-v", "--verbose", action="store_true", help="Also list optional features that are not configured")
+    dr.set_defaults(func=cmd_doctor)
 
     mp = sub.add_parser("mcp", help="Run as an MCP server (for Claude Code / Cursor / Continue)")
     mp.add_argument("--transport", default="stdio", choices=["stdio", "streamable-http"],

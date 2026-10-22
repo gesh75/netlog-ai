@@ -26,7 +26,14 @@ incident   ``INC-000042 (2026-10-01, resolved)``
 
 Config bodies are secret-scrubbed with ``sanitize()`` before they are stored,
 so the index never holds passwords or keys at rest; line numbers refer to
-the original file.
+the original file (skipped ``!`` / ``exit`` lines never shift them).
+
+Site bundles indexed with ``index_site_dir`` remember their directory and a
+fingerprint (path, mtime, size) of every config and golden file; ``search``
+re-indexes a site automatically when one of them changed, checking at most
+every ``AI_LOG_ANALYZER_RAG_REFRESH_SECONDS`` (default 30; ``0`` = every
+search; negative = never). Config and drift documents carry the site in their
+key, so the same short hostname in two sites never collides.
 """
 from __future__ import annotations
 
@@ -37,6 +44,7 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -71,6 +79,13 @@ CREATE TABLE IF NOT EXISTS rag_postings (
     PRIMARY KEY (term, doc_id)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS rag_postings_doc ON rag_postings (doc_id);
+CREATE TABLE IF NOT EXISTS rag_sources (
+    source_key  TEXT PRIMARY KEY,
+    root        TEXT NOT NULL,
+    golden      TEXT,
+    fingerprint TEXT NOT NULL,
+    indexed_at  REAL NOT NULL
+);
 """
 
 _K1 = 1.2
@@ -78,6 +93,12 @@ _B = 0.75
 _MAX_CHUNK_LINES = 60
 _WINDOW_LINES = 40
 _SNIPPET_CHARS = 420
+# search(): terms present in more than this share of a (>= _HIGH_DF_MIN_DOCS) corpus carry
+# almost no signal and are skipped when selective terms exist; per-term postings are capped.
+_HIGH_DF_RATIO = 0.5
+_HIGH_DF_MIN_DOCS = 100
+_MAX_POSTINGS_PER_TERM = 5000
+_DEFAULT_REFRESH_SECONDS = 30.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tokenizer
@@ -142,6 +163,9 @@ class Chunk:
     end: int
     heading: str
     lines: list[str]
+    # Original 1-based line number of each kept line. Empty = the lines are contiguous from
+    # ``start`` (skipped ``!`` / ``exit`` lines would otherwise shift every later window).
+    nums: list[int] = field(default_factory=list)
 
     @property
     def text(self) -> str:
@@ -168,10 +192,12 @@ def _style(lines: list[str]) -> str:
 def _windows(chunk: Chunk) -> list[Chunk]:
     if len(chunk.lines) <= _MAX_CHUNK_LINES:
         return [chunk]
+    nums = chunk.nums or list(range(chunk.start, chunk.start + len(chunk.lines)))
     out = []
     for off in range(0, len(chunk.lines), _WINDOW_LINES):
         part = chunk.lines[off:off + _WINDOW_LINES]
-        out.append(Chunk(chunk.start + off, chunk.start + off + len(part) - 1, chunk.heading, part))
+        part_nums = nums[off:off + len(part)]
+        out.append(Chunk(part_nums[0], part_nums[-1], chunk.heading, part, part_nums))
     return out
 
 
@@ -241,11 +267,12 @@ def _set_chunks(lines: list[str]) -> list[Chunk]:
         key = " ".join(words[1:4]) if words[0] == "set" else " ".join(words[:4])
         if cur is not None and cur.heading == key and i == cur.end + 1:
             cur.lines.append(raw)
+            cur.nums.append(i)
             cur.end = i
             continue
         if cur is not None:
             out.extend(_windows(cur))
-        cur = Chunk(i, i, key, [raw])
+        cur = Chunk(i, i, key, [raw], [i])
     if cur is not None:
         out.extend(_windows(cur))
     return out
@@ -268,6 +295,7 @@ def _indent_chunks(lines: list[str]) -> list[Chunk]:
         if raw[:1] in (" ", "\t"):
             if cur is not None:
                 cur.lines.append(raw)
+                cur.nums.append(i)
                 cur.end = i
             continue
         s = raw.strip()
@@ -281,11 +309,12 @@ def _indent_chunks(lines: list[str]) -> list[Chunk]:
                 first = cur.heading.split()[0]
                 if loose is not None and loose.heading == first:
                     loose.lines.append(cur.lines[0])
+                    loose.nums.append(cur.nums[0])
                     loose.end = cur.end
                 else:
                     flush_loose()
-                    loose = Chunk(cur.start, cur.end, first, list(cur.lines))
-        cur = Chunk(i, i, s, [raw])
+                    loose = Chunk(cur.start, cur.end, first, list(cur.lines), list(cur.nums))
+        cur = Chunk(i, i, s, [raw], [i])
     if cur is not None:
         if len(cur.lines) > 1:
             flush_loose()
@@ -294,10 +323,11 @@ def _indent_chunks(lines: list[str]) -> list[Chunk]:
             first = cur.heading.split()[0]
             if loose is not None and loose.heading == first:
                 loose.lines.append(cur.lines[0])
+                loose.nums.append(cur.nums[0])
                 loose.end = cur.end
             else:
                 flush_loose()
-                loose = Chunk(cur.start, cur.end, first, list(cur.lines))
+                loose = Chunk(cur.start, cur.end, first, list(cur.lines), list(cur.nums))
     flush_loose()
     return out
 
@@ -387,10 +417,11 @@ def _short(host: str) -> str:
 
 
 def citation_for(kind: str, ref: str, title: str, host: str, meta: Mapping[str, Any]) -> str:
+    where = f"{host} [{meta['site']}]" if meta.get("site") else host
     if kind == "config":
-        return f"{host} running-config L{meta.get('start')}-L{meta.get('end')} `{title}`"
+        return f"{where} running-config L{meta.get('start')}-L{meta.get('end')} `{title}`"
     if kind == "drift":
-        return f"{host} drift vs golden L{meta.get('start')}-L{meta.get('end')} `{title}`"
+        return f"{where} drift vs golden L{meta.get('start')}-L{meta.get('end')} `{title}`"
     if kind == "incident":
         status = "resolved" if meta.get("resolved") else "open"
         day = str(meta.get("generated_at") or "")[:10]
@@ -408,6 +439,8 @@ class RagIndex:
     def __init__(self, db: Any) -> None:   # db: state_store.StateDB
         self.db = db
         db.conn().executescript(_SCHEMA)
+        self._refresh_lock = threading.Lock()
+        self._last_refresh = 0.0
 
     # ── write ───────────────────────────────────────────────────────────────
     @staticmethod
@@ -471,6 +504,46 @@ class RagIndex:
         with self.db.write() as c:
             c.execute("DELETE FROM rag_postings")
             c.execute("DELETE FROM rag_docs")
+            c.execute("DELETE FROM rag_sources")
+
+    # ── staleness ───────────────────────────────────────────────────────────
+    def register_site(self, source_key: str, root: Path, golden: Path | None, fingerprint: str) -> None:
+        with self.db.write() as c:
+            c.execute("INSERT OR REPLACE INTO rag_sources(source_key, root, golden, fingerprint, indexed_at) "
+                      "VALUES (?, ?, ?, ?, ?)", (source_key, str(root), str(golden) if golden else None,
+                                                 fingerprint, time.time()))
+
+    def refresh_stale(self) -> list[str]:
+        """Re-index every registered site whose config / golden files changed; returns the site keys."""
+        refreshed: list[str] = []
+        for key, root, golden, fingerprint in self.db.conn().execute(
+                "SELECT source_key, root, golden, fingerprint FROM rag_sources").fetchall():
+            if _site_fingerprint(Path(root), Path(golden) if golden else None) == fingerprint:
+                continue
+            try:
+                index_site_dir(self, root, golden)
+                refreshed.append(key)
+            except (OSError, ValueError) as exc:
+                log.warning("RAG refresh of %s failed: %s", root, exc)
+        return refreshed
+
+    def _maybe_refresh(self) -> None:
+        try:
+            interval = float(os.environ.get("AI_LOG_ANALYZER_RAG_REFRESH_SECONDS", _DEFAULT_REFRESH_SECONDS))
+        except ValueError:
+            interval = _DEFAULT_REFRESH_SECONDS
+        now = time.monotonic()
+        if interval < 0 or (self._last_refresh and now - self._last_refresh < interval):
+            return
+        if not self._refresh_lock.acquire(blocking=False):
+            return
+        try:
+            self._last_refresh = now
+            self.refresh_stale()
+        except Exception as exc:  # staleness checks must never break a search
+            log.warning("RAG staleness check failed: %s", exc)
+        finally:
+            self._refresh_lock.release()
 
     # ── read ────────────────────────────────────────────────────────────────
     def stats(self) -> dict[str, Any]:
@@ -492,17 +565,25 @@ class RagIndex:
         q_terms = list(dict.fromkeys(tokenize(query)))[:64]
         if not q_terms:
             return []
+        self._maybe_refresh()
         conn = self.db.conn()
         n_docs, avgdl = conn.execute("SELECT COUNT(*), AVG(length) FROM rag_docs").fetchone()
         if not n_docs:
             return []
         avgdl = float(avgdl or 1.0)
         marks = ",".join("?" * len(q_terms))
-        postings = conn.execute(
-            f"SELECT term, doc_id, tf FROM rag_postings WHERE term IN ({marks})", q_terms).fetchall()
-        if not postings:
+        df = dict(conn.execute(
+            f"SELECT term, COUNT(*) FROM rag_postings WHERE term IN ({marks}) GROUP BY term", q_terms).fetchall())
+        if not df:
             return []
-        df = Counter(term for term, _, _ in postings)
+        terms = list(df)
+        if n_docs >= _HIGH_DF_MIN_DOCS:   # near-ubiquitous terms add cost, not signal
+            terms = [t for t in terms if df[t] <= _HIGH_DF_RATIO * n_docs] or terms
+        postings: list[tuple[str, int, int]] = []
+        for term in terms:
+            postings.extend((term, doc_id, tf) for doc_id, tf in conn.execute(
+                "SELECT doc_id, tf FROM rag_postings WHERE term=? ORDER BY tf DESC LIMIT ?",
+                (term, _MAX_POSTINGS_PER_TERM)))
         doc_ids = {doc_id for _, doc_id, _ in postings}
         kind_set = set(kinds) if kinds else None
         host_set = {_short(h) for h in hosts or () if h}
@@ -572,27 +653,34 @@ def _scrub(text: str) -> str:
 
 
 def config_docs(hostname: str, platform: str, config_text: str,
-                golden_text: str | None = None) -> list[Doc]:
-    """Stanza documents for one device, plus drift hunks when a golden config is given."""
+                golden_text: str | None = None, site: str = "") -> list[Doc]:
+    """Stanza documents for one device, plus drift hunks when a golden config is given.
+
+    ``site`` goes into the document key and citation, so the same short hostname in two
+    sites never collides.
+    """
     docs: list[Doc] = []
+    key = f"{site}:{hostname}" if site else hostname
+    extra = {"site": site} if site else {}
     for c in chunk_config(config_text):
-        docs.append(Doc("config", f"{hostname}:L{c.start}-L{c.end}", c.heading, _scrub(c.text),
-                        host=hostname, meta={"start": c.start, "end": c.end, "platform": platform}))
+        docs.append(Doc("config", f"{key}:L{c.start}-L{c.end}", c.heading, _scrub(c.text),
+                        host=hostname, meta={"start": c.start, "end": c.end, "platform": platform, **extra}))
     if golden_text is not None:
         drift = config_drift(config_text, golden_text)
         for h in drift["hunks"]:
             rs, re_ = h["running_lines"]
             body = "\n".join([f"stanza: {h['stanza']}"] + [f"+ {ln}" for ln in h["added"]]
                              + [f"- {ln}" for ln in h["removed"]])
-            docs.append(Doc("drift", f"{hostname}:drift:L{rs}-L{re_}", h["stanza"] or "(top level)",
+            docs.append(Doc("drift", f"{key}:drift:L{rs}-L{re_}", h["stanza"] or "(top level)",
                             _scrub(body), host=hostname,
                             meta={"start": rs, "end": re_, "golden_lines": h["golden_lines"],
-                                  "change": h["kind"], "platform": platform}))
+                                  "change": h["kind"], "platform": platform, **extra}))
     return docs
 
 
 def index_configs(index: RagIndex, devices: Iterable[Mapping[str, Any]],
-                  golden: Mapping[str, str] | None = None, *, source_key: str = "configs") -> int:
+                  golden: Mapping[str, str] | None = None, *, source_key: str = "configs",
+                  site: str = "") -> int:
     """Index ``[{hostname, platform, config_text}]``; ``golden`` maps hostname → golden text."""
     golden = {_short(k): v for k, v in (golden or {}).items()}
     docs: list[Doc] = []
@@ -601,25 +689,64 @@ def index_configs(index: RagIndex, devices: Iterable[Mapping[str, Any]],
         text = str(dev.get("config_text") or "")
         if not host or not text:
             continue
-        docs.extend(config_docs(host, str(dev.get("platform") or ""), text, golden.get(_short(host))))
+        docs.extend(config_docs(host, str(dev.get("platform") or ""), text, golden.get(_short(host)), site))
     return index.replace_source(source_key, docs)
 
 
-def _read_golden(golden_dir: Path | None, hostname: str, file_name: str) -> str | None:
+def _golden_path(golden_dir: Path | None, hostname: str, file_name: str) -> Path | None:
     if golden_dir is None:
         return None
     for cand in (golden_dir / file_name, golden_dir / f"{hostname}.txt", golden_dir / f"{hostname}.cfg",
                  golden_dir / f"{hostname}.conf"):
         if cand.is_file():
-            return cand.read_text(encoding="utf-8", errors="replace")
+            return cand
     return None
 
 
+def _read_golden(golden_dir: Path | None, hostname: str, file_name: str) -> str | None:
+    path = _golden_path(golden_dir, hostname, file_name)
+    return path.read_text(encoding="utf-8", errors="replace") if path else None
+
+
+def _site_files(site_dir: Path, golden_dir: Path | None) -> list[Path]:
+    """Every file a site's index is built from: manifest, device configs, golden configs."""
+    files = [site_dir / "manifest.json"]
+    try:
+        manifest = json.loads(files[0].read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return files
+    for dev in manifest.get("devices") or []:
+        path = site_dir / str(dev.get("file") or "")
+        files.append(path)
+        gold = _golden_path(golden_dir, str(dev.get("hostname") or path.stem), path.name)
+        if gold is not None:
+            files.append(gold)
+    return files
+
+
+def _site_fingerprint(site_dir: Path, golden_dir: Path | None) -> str:
+    """Digest of (path, mtime, size) of every source file; changes when any is edited, added or removed."""
+    parts = []
+    site_dir, golden_dir = site_dir.resolve(), golden_dir.resolve() if golden_dir else None  # stable keys
+    for f in _site_files(site_dir, golden_dir):
+        try:
+            st = f.stat()
+            parts.append(f"{f}|{st.st_mtime_ns}|{st.st_size}")
+        except OSError:
+            parts.append(f"{f}|missing")
+    return hashlib.sha1("\n".join(parts).encode()).hexdigest()
+
+
 def index_site_dir(index: RagIndex, site_dir: str | Path, golden_dir: str | Path | None = None) -> dict:
-    """Index one bundled site (``manifest.json`` + per-device configs)."""
+    """Index one bundled site (``manifest.json`` + per-device configs).
+
+    The site is registered with its fingerprint so ``RagIndex.search`` can re-index it when a
+    config or golden file changes on disk.
+    """
     site_dir = Path(site_dir)
     manifest = json.loads((site_dir / "manifest.json").read_text(encoding="utf-8"))
     gdir = Path(golden_dir) if golden_dir else (site_dir / "golden" if (site_dir / "golden").is_dir() else None)
+    fingerprint = _site_fingerprint(site_dir, gdir)   # taken first: an edit during indexing is picked up next time
     devices, golden = [], {}
     for dev in manifest.get("devices") or []:
         path = site_dir / str(dev.get("file") or "")
@@ -632,9 +759,10 @@ def index_site_dir(index: RagIndex, site_dir: str | Path, golden_dir: str | Path
         if gold is not None:
             golden[host] = gold
     site = str(manifest.get("site") or site_dir.name)
-    n_cfg = index_configs(index, devices, golden, source_key=f"configs:{site}")
+    n_cfg = index_configs(index, devices, golden, source_key=f"configs:{site}", site=site)
     n_topo = index_topology(index, {**manifest, "source": manifest.get("source", "site manifest")},
                             source_key=f"topology:{site}")
+    index.register_site(f"configs:{site}", site_dir.resolve(), gdir.resolve() if gdir else None, fingerprint)
     return {"site": site, "devices": len(devices), "golden": len(golden), "config_docs": n_cfg,
             "topology_docs": n_topo}
 
@@ -661,7 +789,8 @@ def index_topology(index: RagIndex, manifest: Mapping[str, Any], *, source_key: 
         head = ", ".join(f"{k} {v}" for k, v in fields.items() if v)
         body = "\n".join([f"device {host}", *(f"{k}: {v}" for k, v in fields.items() if v),
                           *(f"link {x}" for x in links_by_host.get(host, [])[:40])])
-        docs.append(Doc("topology", f"{source}:device:{host}", f"device {host} ({head})", body,
+        ref = f"{source}:{site}:device:{host}" if site else f"{source}:device:{host}"
+        docs.append(Doc("topology", ref, f"device {host} ({head})", body,
                         host=host, meta={"source": source, "site": site}))
     return index.replace_source(source_key, docs)
 
