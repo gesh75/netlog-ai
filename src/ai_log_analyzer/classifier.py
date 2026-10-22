@@ -90,6 +90,19 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
                                                                          "high",     "routing",    "BGP origin / AS-path change (possible hijack or leak)"),
     (r"(?:cease|notification).*(?:admin\w*\s*(?:shutdown|reset)|peer de-?configured|other configuration change)|shutdown communication|(?:notification|cease).*\b6/[2346]\b",
                                                                          "medium",   "routing",    "BGP administrative shutdown / reset (Cease)"),
+    # (placed ahead of the BGP hold-timer rule: IS-IS/LDP lines also say "hold time expired")
+    # IS-IS / LDP, matched on message text: "Adjacency to r2 (Gi0/0/1) Down" vs "... Up".
+    (r"rpd_isis_adjdown|is-is lost .{0,20}adjacency"
+     r"|(?:isis|clns).{0,80}adjacency to .{0,80}\)\s*(?:\(l\d\)\s*)?down\b|\badj\b.{0,100}\s-\s*down\b",
+                                                                         "high",     "routing",    "IS-IS adjacency down"),
+    (r"rpd_isis_adjup|is-is new .{0,20}adjacency"
+     r"|(?:isis|clns).{0,80}adjacency to .{0,80}\)\s*(?:\(l\d\)\s*)?up\b|\badj\b.{0,100}\s-\s*up\b",
+                                                                         "low",      "routing",    "IS-IS adjacency up"),
+    (r"isis.*(?:adj.*down|adj.*change|lsp.*purge)",                     "high",     "routing",    "IS-IS adjacency change"),
+    (r"rpd_ldp_(?:nbrdown|sessiondown)|ldp.{0,40}(?:neighbou?r|nbr|session).{0,100}\bis\s+down\b",
+                                                                         "high",     "routing",    "LDP neighbor/session down"),
+    (r"rpd_ldp_(?:nbrup|sessionup)|ldp.{0,40}(?:neighbou?r|nbr|session).{0,100}\bis\s+up\b",
+                                                                         "low",      "routing",    "LDP neighbor/session up"),
     (r"hold.?time(?:r)?\s*(?:expir|timeout|out\b)|\bevent holdtime\b|bgp_hold_timeout|notification.*\b4/0\b",
                                                                          "high",     "routing",    "BGP hold timer expired"),
     (r"notification.*\b[1235]/\d{1,2}\b|notification.*(?:open message error|update message error|fsm error|message header error|bad peer as|malformed)",
@@ -173,18 +186,6 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"ifupdown2.*(?:fail|error|unable)",                               "high",     "interface",  "Cumulus ifupdown2 failure"),
     (r"ptmd.*(?:link.*down|bfd.*down|fail)",                            "high",     "routing",    "Cumulus PTMD link/BFD down"),
     (r"bfd.*(?:down|removed|session.*fail)",                            "high",     "routing",    "BFD session down"),
-    # IS-IS / LDP, matched on message text: "Adjacency to r2 (Gi0/0/1) Down" vs "... Up".
-    (r"rpd_isis_adjdown|is-is lost .{0,20}adjacency"
-     r"|(?:isis|clns).{0,80}adjacency to .{0,80}\)\s*(?:\(l\d\)\s*)?down\b|\badj\b.{0,100}\s-\s*down\b",
-                                                                         "high",     "routing",    "IS-IS adjacency down"),
-    (r"rpd_isis_adjup|is-is new .{0,20}adjacency"
-     r"|(?:isis|clns).{0,80}adjacency to .{0,80}\)\s*(?:\(l\d\)\s*)?up\b|\badj\b.{0,100}\s-\s*up\b",
-                                                                         "low",      "routing",    "IS-IS adjacency up"),
-    (r"isis.*(?:adj.*down|adj.*change|lsp.*purge)",                     "high",     "routing",    "IS-IS adjacency change"),
-    (r"rpd_ldp_(?:nbrdown|sessiondown)|ldp.{0,40}(?:neighbou?r|nbr|session).{0,100}\bis\s+down\b",
-                                                                         "high",     "routing",    "LDP neighbor/session down"),
-    (r"rpd_ldp_(?:nbrup|sessionup)|ldp.{0,40}(?:neighbou?r|nbr|session).{0,100}\bis\s+up\b",
-                                                                         "low",      "routing",    "LDP neighbor/session up"),
     (r"license.*(?:expir|invalid|warn)|expir.*license",                 "high",     "compliance", "License expiration warning"),
     # VXLAN data-plane tunnels are not IPsec VPNs: match them before the generic tunnel rule.
     (r"vxlan[_ -]?tunnel[_ -]?down|vtep[_ -]?down|vtep\s+\S+\s+(?:is\s+)?(?:down|unreachable)|nve\d*.*peer.*(?:down|lost)|nve: nve peer .* lost",

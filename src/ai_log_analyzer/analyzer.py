@@ -63,6 +63,9 @@ _RECOVERY_DESCRIPTIONS: frozenset[str] = frozenset({
     "SD-WAN BFD session up",
     "SD-WAN OMP peer up",
     "SD-WAN control connection up",
+    "IS-IS adjacency up",
+    "LDP neighbor/session up",
+    "STP guard recovered",
 })
 
 # Action items whose entities all recovered rank below live outages of the

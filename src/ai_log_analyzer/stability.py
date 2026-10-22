@@ -49,18 +49,25 @@ _DOWN_DESCRIPTIONS: dict[str, str] = {
     "LAG member leaving bundle": "lag",
     "VPN/IPsec tunnel failure": "vpn",
     "VRRP/gateway failover": "redundancy",
+    "IS-IS adjacency down": "isis",
+    "IS-IS adjacency change": "isis",
+    "LDP neighbor/session down": "ldp",
+    "STP root/loop/BPDU guard block": "stp",
 }
 _UP_DESCRIPTIONS: dict[str, str] = {
     "Interface link up": "interface",
     "BGP peer established": "bgp",
     "OSPF neighbor established": "ospf",
     "LAG member joining bundle": "lag",
+    "IS-IS adjacency up": "isis",
+    "LDP neighbor/session up": "ldp",
+    "STP guard recovered": "stp",
 }
 
 _ENTITY_LABELS: dict[str, str] = {
     "interface": "interface", "bgp": "BGP peer", "ospf": "OSPF neighbor",
     "bfd": "BFD session", "lag": "LAG member", "vpn": "VPN tunnel",
-    "redundancy": "gateway redundancy",
+    "redundancy": "gateway redundancy", "isis": "IS-IS adjacency", "ldp": "LDP session", "stp": "STP port",
 }
 
 # Strip trailing ":SS" / ":SS.mmm" so bucket keys have minute granularity.
