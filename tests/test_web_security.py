@@ -29,7 +29,7 @@ def test_token_unset_decorator_is_noop(client, monkeypatch):
 
 @pytest.mark.unit
 def test_token_set_rejects_missing_and_wrong_token(client, monkeypatch):
-    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit-token-0123456789")
     assert client.post("/api/llm/provider", json={}).status_code == 401
     r = client.post("/api/llm/provider", json={},
                     headers={"X-API-Token": "wrong"})
@@ -38,17 +38,17 @@ def test_token_set_rejects_missing_and_wrong_token(client, monkeypatch):
 
 @pytest.mark.unit
 def test_token_set_accepts_correct_token(client, monkeypatch):
-    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit-token-0123456789")
     r = client.post("/api/llm/provider", json={},
-                    headers={"X-API-Token": "sekrit"})
+                    headers={"X-API-Token": "sekrit-token-0123456789"})
     assert r.status_code != 401  # passes the gate; body validation may 400
 
 
 @pytest.mark.unit
 def test_token_accepts_authorization_bearer(client, monkeypatch):
-    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit-token-0123456789")
     r = client.post("/api/llm/provider", json={},
-                    headers={"Authorization": "Bearer sekrit"})
+                    headers={"Authorization": "Bearer sekrit-token-0123456789"})
     assert r.status_code != 401
     r = client.post("/api/llm/provider", json={},
                     headers={"Authorization": "Bearer wrong"})
@@ -59,7 +59,7 @@ def test_token_accepts_authorization_bearer(client, monkeypatch):
 def test_sources_test_and_fetch_require_token(client, monkeypatch):
     """/api/sources/<id>/test and /fetch were the only POST data routes
     missing the auth gate — regression check that they now enforce it."""
-    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit-token-0123456789")
     assert client.post("/api/sources/x/test").status_code == 401
     assert client.post("/api/sources/x/fetch", json={}).status_code == 401
     assert client.post("/api/rules", json={}).status_code == 401
@@ -68,11 +68,11 @@ def test_sources_test_and_fetch_require_token(client, monkeypatch):
 @pytest.mark.unit
 def test_incident_search_requires_token(client, monkeypatch):
     """Incident history must not be searchable anonymously when tokened."""
-    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit-token-0123456789")
     url = "/api/incidents/similar?q=router"
     assert client.get(url).status_code == 401
     assert client.get(url, headers={"X-API-Token": "wrong"}).status_code == 401
-    assert client.get(url, headers={"X-API-Token": "sekrit"}).status_code != 401
+    assert client.get(url, headers={"X-API-Token": "sekrit-token-0123456789"}).status_code != 401
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -304,11 +304,11 @@ def test_run_does_not_docker_exec_non_lab_hostname(client, monkeypatch):
 
 @pytest.mark.unit
 def test_llm_status_hides_last_errors_from_anonymous_when_tokened(client, monkeypatch):
-    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit-token-0123456789")
     state = client.get("/api/llm/status").get_json()
     assert "last_errors" not in state
     state = client.get("/api/llm/status",
-                       headers={"X-API-Token": "sekrit"}).get_json()
+                       headers={"X-API-Token": "sekrit-token-0123456789"}).get_json()
     assert "last_errors" in state
 
 

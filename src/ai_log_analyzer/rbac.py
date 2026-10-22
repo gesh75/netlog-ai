@@ -21,8 +21,12 @@ Principals are configured from the environment; any of these turns auth on:
   Prefer ``token_sha256`` so the file holds no usable secret; ``token``
   (plaintext) is accepted too.
 
-Tokens are compared in constant time. With nothing configured the API runs in
-dev mode (no auth, bind to 127.0.0.1), as before.
+Tokens are compared in constant time and must be at least ``MIN_TOKEN_LEN``
+(16) characters; a shorter one is a configuration error (``RbacConfigError``),
+never silently dropped, because dropping the only token would switch auth off.
+With nothing configured the API runs in dev mode (no auth, bind to 127.0.0.1),
+as before; set ``AI_LOG_ANALYZER_REQUIRE_AUTH=1`` to refuse that (the Docker
+image does).
 """
 from __future__ import annotations
 
@@ -38,6 +42,19 @@ log = logging.getLogger(__name__)
 
 ROLES = ("viewer", "operator", "admin")
 RANK = {"viewer": 1, "operator": 2, "admin": 3}
+MIN_TOKEN_LEN = 16
+
+
+class RbacConfigError(ValueError):
+    """A configured token is unusable (too short); raised instead of failing open."""
+
+
+def _check_len(token: str, where: str) -> str:
+    if len(token) < MIN_TOKEN_LEN:
+        raise RbacConfigError(
+            f"{where}: token is {len(token)} characters; use at least {MIN_TOKEN_LEN} "
+            "(e.g. `python -c \"import secrets; print(secrets.token_urlsafe(32))\"`)")
+    return token
 
 
 @dataclass(frozen=True)
@@ -64,8 +81,10 @@ def _env_principals() -> list[Principal]:
             name, sep, token = item.partition(":")
             if not sep:
                 name, token = f"{role}-{i + 1}", item
+            token = token.strip()
             if token:
-                out.append(Principal(name.strip() or f"{role}-{i + 1}", role, _digest(token.strip())))
+                label = name.strip() or f"{role}-{i + 1}"
+                out.append(Principal(label, role, _digest(_check_len(token, f"AI_LOG_ANALYZER_{role.upper()}_TOKENS entry {label!r}"))))
     return out
 
 
@@ -80,8 +99,8 @@ def _file_principals(path: str) -> list[Principal]:
         role = str(u.get("role", "")).lower()
         name = str(u.get("name", "")).strip()
         digest = str(u.get("token_sha256", "")).strip().lower()
-        if not digest and u.get("token"):
-            digest = _digest(str(u["token"]))
+        if not digest and u.get("token") and role in RANK and name:   # only usable entries are length-checked
+            digest = _digest(_check_len(str(u["token"]), f"RBAC file entry {name!r}"))
         if role not in RANK or not name or len(digest) != 64:
             log.warning("RBAC file entry %r skipped (needs name, role in %s, token or token_sha256)",
                         name or "?", ROLES)
@@ -105,7 +124,8 @@ def principals(legacy_token: str = "") -> list[Principal]:
     key = (legacy_token, path, mtime, *(os.environ.get(f"AI_LOG_ANALYZER_{r.upper()}_TOKENS", "") for r in ROLES))
     hit = _CACHE.get(key)
     if hit is None:
-        hit = ([Principal("shared-token", "admin", _digest(legacy_token))] if legacy_token else [])
+        hit = ([Principal("shared-token", "admin", _digest(_check_len(legacy_token, "AI_LOG_ANALYZER_API_TOKEN")))]
+               if legacy_token else [])
         hit += _env_principals() + (_file_principals(path) if path else [])
         _CACHE.clear()
         _CACHE[key] = hit
@@ -114,6 +134,11 @@ def principals(legacy_token: str = "") -> list[Principal]:
 
 def auth_enabled(legacy_token: str = "") -> bool:
     return bool(principals(legacy_token))
+
+
+def auth_required() -> bool:
+    """``AI_LOG_ANALYZER_REQUIRE_AUTH=1``: refuse to run without any token (fail closed)."""
+    return os.environ.get("AI_LOG_ANALYZER_REQUIRE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def authenticate(token: str, legacy_token: str = "") -> Principal | None:

@@ -118,6 +118,7 @@
     border-radius: 10px; padding: 1px 8px; font-weight: 600;
     letter-spacing: 0.3px;
   }
+  .brand-version:empty { display: none; }
   .header-spacer { flex: 1; }
   /* Soft "Status:" label before the chip cluster */
   .status-label {
@@ -1267,9 +1268,9 @@
     </div>
     <div>
       <span class="brand-title">AI Log Analyzer</span>
-      <!-- Static fallback only — app.js overwrites this from /api/health,
-           so the badge always tracks the installed package version -->
-      <span class="brand-version">v2.1.0</span>
+      <!-- Empty in the markup on purpose: app.js fills it from /api/health, so the
+           badge always tracks the installed package version (no number to forget to bump) -->
+      <span class="brand-version"></span>
     </div>
   </div>
   <button type="button" class="chip role-chip" id="role-badge" aria-haspopup="dialog" aria-expanded="false" aria-controls="auth-popover"><span>👤 …</span></button>
