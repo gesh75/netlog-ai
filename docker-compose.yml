@@ -1,17 +1,52 @@
+# Default: `docker compose up -d`. The API token is mandatory (the image refuses to
+# start without one) and the port is published on loopback only; put a TLS reverse
+# proxy in front of it for anything beyond this host.
+#
+# Lab mode (read FRR / containerlab logs via the host docker socket):
+#   docker compose --profile lab up -d app-lab        # instead of `app`, not alongside it
+# The socket is root-equivalent on the host; only use the lab profile on a lab machine.
+
+x-app: &app
+  restart: unless-stopped
+  env_file: .env
+  environment: &app-env
+    AI_LOG_ANALYZER_API_TOKEN: ${AI_LOG_ANALYZER_API_TOKEN:?set AI_LOG_ANALYZER_API_TOKEN (>= 16 characters)}
+    AI_LOG_ANALYZER_STATE_DB: /data/state.db
+  ports:
+    - "127.0.0.1:${ANALYZER_PORT:-6060}:6060"
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6060/api/health', timeout=4)"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 10s
+
 services:
   app:
+    <<: *app
     build: .
     container_name: ai-log-analyzer
-    restart: unless-stopped
-    env_file: .env
-    ports:
-      - "${ANALYZER_PORT:-6060}:6060"
     volumes:
-      # Mount docker socket so the container can read FRR lab logs from the host
+      - netlog-data:/data
+
+  app-lab:
+    <<: *app
+    profiles: ["lab"]
+    build:
+      context: .
+      args:
+        WITH_DOCKER_CLI: "1"
+    image: netlog-ai:lab
+    container_name: ai-log-analyzer-lab
+    environment:
+      <<: *app-env
+      DOCKER_EXEC_FALLBACK: "true"
+    # The image runs as a non-root user; grant it the host's docker group (id: `getent group docker`).
+    group_add:
+      - "${DOCKER_GID:-999}"
+    volumes:
+      - netlog-data:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6060/api/health')"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+
+volumes:
+  netlog-data:

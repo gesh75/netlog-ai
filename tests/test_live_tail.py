@@ -103,7 +103,7 @@ def test_sse_tail_unknown_source_404_and_non_syslog_400():
 def test_sse_tail_requires_token_when_configured(monkeypatch):
     import ai_log_analyzer.web.app as web_app
     from ai_log_analyzer.web.app import create_app
-    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit")
+    monkeypatch.setattr(web_app, "API_TOKEN", "sekrit-token-0123456789")
     app = create_app()
     app.testing = True
     client = app.test_client()
