@@ -100,6 +100,7 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `AI_LOG_ANALYZER_AUDIT_DB` | the state DB | Audit log database. Auditing is on when this or the state DB is set. |
 | `AI_LOG_ANALYZER_RAG_DB` | the state DB | Retrieval (BM25) index database. |
 | `AI_LOG_ANALYZER_RAG` | enabled | Set to `0`, `false`, `off` or `no` to disable evidence retrieval. |
+| `AI_LOG_ANALYZER_RAG_REFRESH_SECONDS` | `30` | **(new in this release)** How often a search re-checks site config files for changes and re-indexes them. `0` = check on every search; negative = never. |
 | `AI_LOG_ANALYZER_GOLDEN_DIR` | unset | Golden configs for drift detection: `<site>/<host>.txt` or `<host>.txt`. |
 | `AI_LOG_ANALYZER_TEMPLATE_STORE` | unset | JSON file remembering mined log templates across runs, to flag never-seen patterns. Written owner-only. |
 | `AI_LOG_ANALYZER_CUSTOM_RULES` | unset | JSON list of custom classification rules loaded at startup; they override the built-in knowledge base. |
@@ -110,6 +111,7 @@ tokenization) are shared across workers through the state DB, API keys never are
 | Variable | Default | Purpose / notes |
 | --- | --- | --- |
 | `AI_LOG_ANALYZER_DEDUP` | off | Collapse near-identical lines before classification. |
+| `AI_LOG_ANALYZER_DEDUP_MAX_CLUSTERS` | `20000` | **(new in this release)** Upper bound on distinct dedup clusters kept per run; further shapes fall into one overflow cluster so memory stays bounded. |
 | `AI_LOG_ANALYZER_EVPN_CAUSAL` | off | Enable the protocol-aware EVPN causal overlay by default. |
 | `AI_LOG_ANALYZER_MAX_LINE_BYTES` | `65536` | Longer log lines are truncated before parsing (protects against pathological input). |
 | `AI_LOG_ANALYZER_MAX_FILE_BYTES` | `0` (unlimited) | Cap on the bytes read from one file by the ingest layer. |
@@ -125,6 +127,8 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `AI_LOG_ANALYZER_TRIAGE_MIN_SEVERITY` | `high` | Minimum severity that opens a ticket. |
 | `AI_LOG_ANALYZER_TRIAGE_WINDOW_S` | `300` | Correlation window in seconds. |
 | `AI_LOG_ANALYZER_TRIAGE_POLL_S` | `15` | Spool poll interval in seconds. |
+| `AI_LOG_ANALYZER_TRIAGE_TICK_BUDGET_S` | `10` | **(new in this release)** Time budget for one triage tick. A tick keeps draining full batches from the spool until it is empty or this budget is spent, then re-polls immediately. |
+| `AI_LOG_ANALYZER_TRIAGE_RETENTION_DAYS` | `30` | **(new in this release)** Age after which non-active triage ticket records are pruned. |
 | `AI_LOG_ANALYZER_TRIAGE_COOLDOWN_S` | `900` | Per-incident ticket cooldown in seconds. |
 | `AI_LOG_ANALYZER_TRIAGE_MAX_TICKETS_PER_HOUR` | `30` | Hard cap on tickets per hour. |
 | `AI_LOG_ANALYZER_TRIAGE_SITE` | `default` | Site label stamped on triage incidents. |
