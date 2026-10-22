@@ -284,19 +284,35 @@ class StateDB:
                       "LIMIT 1 OFFSET ?)", (cap,))
         return len(rows)
 
+    _INCIDENT_COLS = ("id, description, severity, category, devices, count, sample_messages, generated_at, "
+                      "resolution, resolved_at, resolved_by")
+
+    @staticmethod
+    def _incident_rec(row: tuple) -> dict[str, Any]:
+        row_id, desc, sev, cat, devices, count, samples, gen, res, res_at, res_by = row
+        rec = {"id": row_id, "description": desc, "severity": sev, "category": cat,
+               "devices": json.loads(devices or "[]"), "count": count,
+               "sample_messages": json.loads(samples or "[]"), "generated_at": gen}
+        if res:
+            rec.update(resolution=res, resolved_at=res_at or "", resolved_by=res_by or "")
+        return rec
+
     def incidents_all(self, limit: int) -> list[dict[str, Any]]:
         rows = self.conn().execute(
-            "SELECT id, description, severity, category, devices, count, sample_messages, generated_at, "
-            "resolution, resolved_at, resolved_by FROM incidents ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-        out = []
-        for row_id, desc, sev, cat, devices, count, samples, gen, res, res_at, res_by in reversed(rows):
-            rec = {"id": row_id, "description": desc, "severity": sev, "category": cat,
-                   "devices": json.loads(devices or "[]"), "count": count,
-                   "sample_messages": json.loads(samples or "[]"), "generated_at": gen}
-            if res:
-                rec.update(resolution=res, resolved_at=res_at or "", resolved_by=res_by or "")
-            out.append(rec)
-        return out
+            f"SELECT {self._INCIDENT_COLS} FROM incidents ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [self._incident_rec(r) for r in reversed(rows)]
+
+    def incidents_since(self, after_id: int) -> list[dict[str, Any]]:
+        """Journal rows with id > after_id, oldest first (incremental reload)."""
+        rows = self.conn().execute(
+            f"SELECT {self._INCIDENT_COLS} FROM incidents WHERE id > ? ORDER BY id", (int(after_id),)).fetchall()
+        return [self._incident_rec(r) for r in rows]
+
+    def incidents_version(self) -> tuple[int, int, int]:
+        """Cheap change marker (row count, newest id, total resolution text length) for caches."""
+        row = self.conn().execute("SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(LENGTH(resolution)), 0) "
+                                  "FROM incidents").fetchone()
+        return int(row[0]), int(row[1]), int(row[2])
 
     def incidents_resolve(self, row_id: int, resolution: str, resolved_at: str, resolved_by: str) -> bool:
         with self.write() as c:
