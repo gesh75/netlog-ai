@@ -32,5 +32,9 @@ Both run in CI (Python 3.10–3.12) on every PR — see `.github/workflows/ci.ym
 
 ## Reporting issues
 
-Use [GitHub Issues](https://github.com/gesh75/netlog-ai/issues). For suspected
-security issues (e.g. a sanitization bypass), please mark the issue clearly.
+Use [GitHub Issues](https://github.com/gesh75/netlog-ai/issues) for bugs and
+feature requests.
+
+**Do not report security issues as public Issues.** For suspected vulnerabilities
+(e.g. a sanitization bypass, credential leak, SSRF or injection) follow the private
+reporting process in [SECURITY.md](SECURITY.md).
