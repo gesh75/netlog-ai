@@ -14,9 +14,23 @@ import regex
 
 from ai_log_analyzer.hostnames import short_host
 
+# BGP "from X to Y" grammar. A match here reads the line's own transition, so it outranks the
+# parser's coarser state (see _AUTHORITATIVE below).
+_BGP_TRANSITION_DOWN = (
+    r"(?:bgp|peer|neighbou?r).*(?:\bestablished\s*(?:->|\u2192|to)\s*(?:idle|active|connect|opensent|openconfirm|clearing|down|deleted)\b"
+    r"|\bold state established\b.*\bnew state\s+(?:idle|active|connect|opensent|openconfirm|clearing)\b)"
+)
+_BGP_TRANSITION_UP = r"(?:bgp|peer|neighbou?r).*(?:->|\u2192|\bto|\bnew state|\bchanged to|(?<!old )\bstate)\s*established\b"
+
 # (regex, severity, category, description) — first match wins.
 # Patterns tested against f"{appname} {message}".lower()
 _KB_PATTERNS: list[tuple[str, str, str, str]] = [
+    # ── Operator CLI audit / accounting records ──
+    # They quote the command text ("show chassis alarms", "show bgp ... | match down"), so every
+    # keyword rule below would fire on the operator's own keystrokes. First match wins.
+    (r"ui_cmdline_read_line|cfglog_loggedcmd|logged command\b|%accounting-\d-cmd\b|\bcommand=/"
+     r"|\bcommand\s*[:=]?\s*['\"](?:show|display|get|ping|traceroute|clear|request|configure|set|delete|commit|run)\b",
+                                                                         "low",      "config",     "CLI management activity"),
     # ── Security / SD-WAN vendors (gated on parser appnames / vendor tokens) ──
     # FortiOS appnames are "fortios-<subtype>", PAN-OS "panos-<subtype>";
     # Cisco SD-WAN lines carry bfd-/omp-/control-connection- notifications.
@@ -64,6 +78,9 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
                                                                          "high",     "sdwan",      "SD-WAN control connection down"),
     (r"control-connection-state-change.*new-state:up|vdaemon.*(?:connection.*is up|state changed to up)",
                                                                          "medium",   "sdwan",      "SD-WAN control connection up"),
+    # An SD-WAN interface-state-change names its VPN, which the generic tunnel rule would misread.
+    (r"interface-state-change.*\bdown\b",                                "high",     "interface",  "Interface link down"),
+    (r"interface-state-change.*\bup\b",                                  "medium",   "interface",  "Interface link up"),
     # ── BGP anomaly signatures (vendor-neutral; before generic BGP rules) ──
     (r"max(?:imum)?[-_ ]?(?:number of )?prefix(?:es)?.*(?:exceed|reached|limit)|maxpfxexceed|prefix[-_ ]limit.*exceed|prefix limit exceeded",
                                                                          "high",     "routing",    "BGP max-prefix limit exceeded"),
@@ -77,14 +94,29 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
                                                                          "high",     "routing",    "BGP hold timer expired"),
     (r"notification.*\b[1235]/\d{1,2}\b|notification.*(?:open message error|update message error|fsm error|message header error|bad peer as|malformed)",
                                                                          "high",     "routing",    "BGP NOTIFICATION — protocol / OPEN / UPDATE error"),
+    # ── BGP transition into Established, ahead of the keyword rules ──
+    # "OpenConfirm to Established (last down 00:00:12 ago)" is UP; the "bgp.*down" rules below would
+    # call it a failure. The DOWN direction ("Established to Active") sits next to the generic
+    # "established" rule further down, after the specific hold-timer / idle verdicts.
+    (_BGP_TRANSITION_UP,                                                "medium",   "routing",    "BGP peer established"),
     # ── CRITICAL ─────────────────────────────────────────────────────────
-    (r"kernel\s*panic|core\s*dump|watchdog.*reset|rpd.*panic",          "critical", "system",     "Kernel panic / core dump — OS failure"),
+    # "Core dump disabled/enabled/limit" is configuration chatter, not a crash.
+    (r"kernel\s*panic|core\s*dump(?!s?\s+(?:is |are |was |has been )?(?:disabled|off|enabled|not |limit|size))|watchdog.*reset|rpd.*panic",
+                                                                         "critical", "system",     "Kernel panic / core dump — OS failure"),
     (r"swap_pager_getswapspace.*failed|swap.*exhaust",                  "critical", "system",     "Kernel swap space exhaustion"),
-    (r"out\s+of\s+memory|heap.*exhaust|memory.*full|oom.?kill",         "critical", "system",     "Memory exhaustion / OOM"),
+    # "memory: 20% full" is a status line; the guard only exempts fill levels below 90%.
+    (r"out\s+of\s+memory|heap.*exhaust|(?!.*\b(?:[0-9]|[1-8][0-9])(?:\.\d+)?%\s*full\b)memory.*full|oom.?kill",
+                                                                         "critical", "system",     "Memory exhaustion / OOM"),
     (r"parity\s+error|sbus\s+transaction|ser_overlay_mem_correction",   "critical", "hardware",   "ASIC memory parity error (hard)"),
     (r"fpc\d+.*(?:offline|power.?off|restart|crash|halt)",              "critical", "hardware",   "FPC/line card offline or crash"),
     (r"(?:major|minor|chassis)\s+alarm",                                "critical", "hardware",   "Chassis alarm triggered"),
-    (r"power\s*supply.*fail|psu.*fail|fan.*(?:fail|offline)",           "critical", "hardware",   "Power supply or fan failure"),
+    # Junos alarmd: the colour is the severity (RED = major, YELLOW = minor).
+    (r"alarm set.*color=red",                                           "critical", "hardware",   "Chassis alarm triggered"),
+    (r"alarm set.*color=yellow",                                        "medium",   "hardware",   "Chassis alarm triggered"),
+    (r"power\s*supply.*fail|psu.*fail|fan.*(?:fail|offline)"
+     r"|power\s*supply.{0,20}\b(?:offline|removed|absent)\b|psu.{0,20}\b(?:offline|removed|absent)\b"
+     r"|psud.{0,60}(?:absence warning|not present|not ok|fault|insufficient)",
+                                                                         "critical", "hardware",   "Power supply or fan failure"),
     (r"routing\s+engine.*failover|re\d+.*switchover|mastership",        "critical", "system",     "Routing Engine failover/switchover"),
     # ── HIGH ─────────────────────────────────────────────────────────────
     (r"bgp_connect_failed|bgp.*(?:down|cease|no\s+route|hold.?timer)",  "high",     "routing",    "BGP peer down / connect failure"),
@@ -95,13 +127,30 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     # Cisco IOS-XE / NX-OS (%FACILITY-SEV-MNEMONIC) + Nokia SR Linux
     (r"%dual-5-nbrchange.*down",                                        "high",     "routing",    "EIGRP neighbor down (IOS)"),
     (r"bgp_mgr.*(?:to\s+(?:idle|active|connect)\b|session.*(?:down|fail))", "high", "routing",    "BGP peer down / connect failure"),
-    (r"%(?:link-3-updown|lineproto-5-updown).*to\s+down",               "high",     "interface",  "Interface link down"),
+    (r"%(?:\w+-)?(?:link-\d-updown|lineproto-\d-updown).*to\s+down",    "high",     "interface",  "Interface link down"),
     (r"%ethport-5-if_down|%eth_port_channel.*down",                     "high",     "interface",  "Interface link down"),
     (r"\w+_mgr.*oper.*state.*down|srlinux.*port.*down",                 "high",     "interface",  "Interface link down"),
     (r"%sec_login-4-login_failed|%authpriv.*fail",                      "high",     "security",   "Authentication failure"),
     (r"%sysmgr-2-service_crashed|%sysmgr.*(?:crash|terminated)",        "critical", "system",     "NX-OS service crash"),
     (r"%vpc-2-|vpc.*peer.*(?:down|fail)",                               "high",     "lag",        "vPC peer failure (NX-OS)"),
-    (r"%hsrp-5-statechange|%fhrp",                                      "high",     "redundancy", "VRRP/gateway failover"),
+    (r"%hsrp-5-statechange|%standby-\d-statechange|%fhrp",              "high",     "redundancy", "VRRP/gateway failover"),
+    # Junos SRX chassis cluster (JSRPD): control-link loss is the HA heartbeat path.
+    (r"jsrpd_ha_control_link_down",                                     "critical", "redundancy", "Firewall HA split-brain / heartbeat loss"),
+    (r"jsrpd_rg_state_change",                                          "high",     "redundancy", "Firewall HA failover / state change"),
+    # IOS-style system health: CPU, memory, restarts
+    (r"%sys-\d-(?:mallocfail|memlow)|memory allocation of \d+ bytes failed",
+                                                                         "high",     "system",     "Low memory / allocation failure"),
+    (r"%sys-\d-cpurisingthreshold|\b(?:cpu|memory)\s+(?:usage|utili[sz]ation)\s+(?:is\s+)?(?:too\s+)?(?:high|critical|exceed\w*)"
+     r"|high\s+(?:cpu|memory)\s+(?:usage|utili[sz]ation)|matches resource limit",
+                                                                         "high",     "system",     "High CPU / memory utilization"),
+    (r"%sys-\d-cpuhog|\bcpu\s*hog\b",                                  "medium",   "system",     "CPU hog — process holding the CPU"),
+    (r"%sys-5-restart|%sys-\d-reload\b|\breload requested by\b",       "high",     "system",     "Device restart / reload"),
+    (r"monit.*(?:process is not running|does not exist|status failed)", "high",     "system",     "Monitored process not running"),
+    # AAA servers (TACACS+/RADIUS) going dark locks operators out or forces local fallback
+    (r"%aaa-\d-tacacs_server_down|tacacs.{0,80}(?:is down|\bdead\b|unreachable|not responding)"
+     r"|%radius-\d-radius_dead|radius.{0,80}(?:\bdead\b|unreachable|not responding)",
+                                                                         "high",     "aaa",        "AAA server unreachable (TACACS+/RADIUS)"),
+
     # Work edge — IOS-XE, Aruba, Meraki. Specific tokens before the generic
     # auth and vpn rules so those descriptions stay distinct.
     (r"(?:aruba|meraki).*(?:\bap\b|access point).*(?:down|offline)|\bap\s+\S+\s+(?:is\s+)?(?:down|offline)",
@@ -124,24 +173,56 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"ifupdown2.*(?:fail|error|unable)",                               "high",     "interface",  "Cumulus ifupdown2 failure"),
     (r"ptmd.*(?:link.*down|bfd.*down|fail)",                            "high",     "routing",    "Cumulus PTMD link/BFD down"),
     (r"bfd.*(?:down|removed|session.*fail)",                            "high",     "routing",    "BFD session down"),
+    # IS-IS / LDP, matched on message text: "Adjacency to r2 (Gi0/0/1) Down" vs "... Up".
+    (r"rpd_isis_adjdown|is-is lost .{0,20}adjacency"
+     r"|(?:isis|clns).{0,80}adjacency to .{0,80}\)\s*(?:\(l\d\)\s*)?down\b|\badj\b.{0,100}\s-\s*down\b",
+                                                                         "high",     "routing",    "IS-IS adjacency down"),
+    (r"rpd_isis_adjup|is-is new .{0,20}adjacency"
+     r"|(?:isis|clns).{0,80}adjacency to .{0,80}\)\s*(?:\(l\d\)\s*)?up\b|\badj\b.{0,100}\s-\s*up\b",
+                                                                         "low",      "routing",    "IS-IS adjacency up"),
     (r"isis.*(?:adj.*down|adj.*change|lsp.*purge)",                     "high",     "routing",    "IS-IS adjacency change"),
+    (r"rpd_ldp_(?:nbrdown|sessiondown)|ldp.{0,40}(?:neighbou?r|nbr|session).{0,100}\bis\s+down\b",
+                                                                         "high",     "routing",    "LDP neighbor/session down"),
+    (r"rpd_ldp_(?:nbrup|sessionup)|ldp.{0,40}(?:neighbou?r|nbr|session).{0,100}\bis\s+up\b",
+                                                                         "low",      "routing",    "LDP neighbor/session up"),
     (r"license.*(?:expir|invalid|warn)|expir.*license",                 "high",     "compliance", "License expiration warning"),
     # VXLAN data-plane tunnels are not IPsec VPNs: match them before the generic tunnel rule.
     (r"vxlan[_ -]?tunnel[_ -]?down|vtep[_ -]?down|vtep\s+\S+\s+(?:is\s+)?(?:down|unreachable)|nve\d*.*peer.*(?:down|lost)|nve: nve peer .* lost",
                                                                          "high",     "evpn",       "VXLAN tunnel / VTEP down"),
-    (r"ike.*fail|ipsec.*fail|vpn.*down|tunnel.*down|advpn",             "high",     "vpn",        "VPN/IPsec tunnel failure"),
+    (r"(?<![a-z])ike.*fail|ipsec.*fail|vpn.*down|tunnel.*down|advpn",   "high",     "vpn",        "VPN/IPsec tunnel failure"),
     (r"lacp.*(?:timeout|expired|down)|lag_bundle.*down|ae\d+.*down",    "high",     "lag",        "LACP/LAG member down"),
-    (r"lag_bundle.*leaving|lag.*member.*removed",                       "high",     "lag",        "LAG member leaving bundle"),
+    (r"lag_bundle.*leaving|lag.*member.*removed|%ec-\d-unbundle",       "high",     "lag",        "LAG member leaving bundle"),
     (r"mlag.*(?:fail|inconsist|disabled)|mlag.*inactive",               "high",     "lag",        "MLAG failure/inconsistency"),
-    (r"snmp_trap_link_down|link\s*down|carrier.*down|if_down",          "high",     "interface",  "Interface link down"),
+    # "<Intf|Interface|Port> <name> is [now] down" (FRR, SR Linux, FortiOS, SR OS) and "Link is Down" (Linux
+    # NICs); admin-down and bare port numbers ("port 22 is down") are not link faults.
+    (r"snmp_trap_link_down|link\s*down|\blink\s+is\s+down\b|carrier.*down|if_down"
+     r"|\b(?:intf|interface|port)\s+(?!\d+\s)[\w/.:\-]+(?:\(\d+\))?[,:]?\s+is\s+(?:now\s+)?(?:down|not operational)\b"
+     r"|\bport\s+[\w/.\-]+:\s*down\b",                                  "high",     "interface",  "Interface link down"),
+    # STP protection: guard recovery first ("unblocking" contains "blocking").
+    (r"%spantree-\d-(?:rootguard|loopguard)_unblock|(?:root|loop)[ _-]?guard unblocking",
+                                                                         "low",      "stp",        "STP guard recovered"),
+    (r"%spantree-\d-(?:rootguard_block|loopguard_block|block_bpduguard)|%stp-\d-block_bpduguard"
+     r"|(?:root|loop)[ _-]?guard blocking",
+                                                                         "high",     "stp",        "STP root/loop/BPDU guard block"),
     (r"err.?disabl|errdisable|shutdown.*error",                         "high",     "interface",  "Interface error-disabled"),
+    # sshd brute-force signatures the generic auth rule misses
+    (r"failed (?:password|publickey|keyboard-interactive|none) for|invalid user\b|pam: authentication error|maximum authentication attempts exceeded",
+                                                                         "high",     "security",   "Authentication failure"),
     (r"authentication.*fail|login.*fail|auth.*invalid|pam_unix.*fail",  "high",     "security",   "Authentication failure"),
     (r"vrrp.*(?:master.*change|backup|failover)|hsrp.*change",          "high",     "redundancy", "VRRP/gateway failover"),
+    (r"(?:rx|receive|input)[ _-]?(?:optical )?power.{0,40}(?:low|high)[ _-]?alarm|(?:low|high)[ _-]?(?:rx|receive)[ _-]?power[ _-]?alarm",
+                                                                         "high",     "hardware",   "Optical Rx power alarm"),
     (r"fpc\d+.*(?:error|mem:|unit:)",                                   "high",     "hardware",   "FPC hardware error"),
     (r"l3_entry|l2_entry|memory\s+block|blk:",                          "high",     "hardware",   "ASIC forwarding table error"),
+    # Established -> Active/Connect/Clearing is a DOWN event; without this the generic
+    # "bgp.*established" rule below ranks it as a medium "peer established".
+    (_BGP_TRANSITION_DOWN,                                              "high",     "routing",    "BGP peer down / connect failure"),
     # ── MEDIUM ───────────────────────────────────────────────────────────
-    (r"snmp_trap_link_up|link\s*up|carrier.*up|if_up",                  "medium",   "interface",  "Interface link up"),
-    (r"%(?:link-3-updown|lineproto-5-updown).*to\s+up",                 "medium",   "interface",  "Interface link up"),
+    (r"snmp_trap_link_up|link\s*up|\blink\s+is\s+up\b|carrier.*up|if_up"
+     r"|\b(?:intf|interface|port)\s+(?!\d+\s)[\w/.:\-]+(?:\(\d+\))?[,:]?\s+is\s+(?:now\s+)?up\b|\bport\s+[\w/.\-]+:\s*up\b",
+                                                                         "medium",   "interface",  "Interface link up"),
+    (r"%(?:\w+-)?(?:link-\d-updown|lineproto-\d-updown).*to\s+up",      "medium",   "interface",  "Interface link up"),
+    (r"%ec-\d-bundle\b",                                                "medium",   "lag",        "LAG member joining bundle"),
     (r"rpd_bgp.*establ|bgp.*established|%bgp-5-adjchange.*up|%adjchange.*\bup\b",
                                                                          "medium",   "routing",    "BGP peer established"),
     (r"ospf.*(?:neighbor.*full|adj.*full)|%ospf-5-adjchg.*full",        "medium",   "routing",    "OSPF neighbor established"),
@@ -149,9 +230,13 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"stp.*(?:tcn|topology.*change|root.*change)",                     "medium",   "stp",        "STP topology change"),
     (r"pfe.*discard|packet.*drop|policer.*drop|congestion",             "medium",   "performance","Packet drops/policer discard"),
     (r"pause.*frame|flow.?control|flowcontrol",                         "medium",   "performance","Flow control / pause frames"),
-    (r"temperature.*(?:warn|high|threshold)|thermal|overheat",          "medium",   "hardware",   "Temperature warning"),
+    # "Started thermal control daemon" is a service banner, not a reading.
+    (r"temperature.*(?:warn|high|threshold)|\bthermal\b(?! control daemon)|overheat|thermalctld.{0,100}(?:warn|insufficient|abnormal|over|critical|shutdown)",
+                                                                         "medium",   "hardware",   "Temperature warning"),
     (r"acl.*deny|firewall.*deny|filter.*block|security.*deny",          "medium",   "security",   "Firewall/ACL deny event"),
-    (r"ddos|flood|storm.?control",                                      "medium",   "security",   "DDoS/storm detected"),
+    # a VXLAN "flood list" / flood-and-learn is forwarding state, not an attack
+    (r"ddos|\bflood(?:ing)?\b(?![- ](?:list|domain|group|vtep|and|lsa|lsp))|storm.?control",
+                                                                         "medium",   "security",   "DDoS/storm detected"),
     (r"lag_bundle.*joining|lag.*member.*added",                         "medium",   "lag",        "LAG member joining bundle"),
     (r"lacp.*activity|lacpd",                                           "medium",   "lag",        "LACP activity/negotiation"),
     (r"evpn.*(?:route|update|withdraw|type)",                           "medium",   "routing",    "EVPN route update"),
@@ -163,7 +248,8 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"nvue.*(?:commit|apply)|nclu.*commit",                            "low",      "config",     "Cumulus NVUE/NCLU config commit"),
     (r"configdb.*(?:update|modify)|sonic-cfggen",                       "low",      "config",     "SONiC ConfigDB change"),
     (r"commit.*confirmed|config.*change|commit\b",                      "low",      "config",     "Configuration change committed"),
-    (r"%sys-5-config_i|%vshd-5-vshd_syslog_config_i",                   "low",      "config",     "Configuration change committed"),
+    (r"%sys-5-config_i|%vshd-5-vshd_syslog_config_i|object attribute (?:configured|deleted)|\bcfgpath=",
+                                                                         "low",      "config",     "Configuration change committed"),
     (r"%sec_login-5-login_success",                                     "low",      "auth",       "SSH login accepted"),
     (r"lldp.*(?:neighbor|add|delete|update)",                           "low",      "discovery",  "LLDP neighbor change"),
     (r"snmpd|agentx|snmp.*trap",                                        "low",      "monitoring", "SNMP daemon/trap activity"),
@@ -181,10 +267,59 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
 
 SEV_ORDER: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
+# ── ReDoS bounds ─────────────────────────────────────────────────────────
+# Ingest caps a line at 64 KB and any syslog sender controls the text, so the
+# built-in table must not be able to pin a worker. Two layers: the text the KB
+# loop sees is cut to _MAX_MATCH_CHARS (head and tail kept, so trailing state
+# words such as "... changed state to down" survive), and every unbounded `.*`
+# gap between keywords is compiled as `.{0,_GAP_CHARS}` so backtracking per
+# start position is bounded. Real log lines keep their keywords well inside 300
+# characters of each other; the bound only bites on adversarial input.
+_MAX_MATCH_CHARS = 4096
+_HEAD_CHARS = 3072
+_GAP_CHARS = 300
+
+
+def _bound_for_kb(text: str) -> str:
+    """Head + tail of an over-long line (the KB loop never scans more than 4 KB)."""
+    if len(text) <= _MAX_MATCH_CHARS:
+        return text
+    return f"{text[:_HEAD_CHARS]} {text[-(_MAX_MATCH_CHARS - _HEAD_CHARS - 1):]}"
+
+
+def _bound_gaps(pattern: str, limit: int = _GAP_CHARS) -> str:
+    """Rewrite each ``.*`` as ``.{0,limit}`` (escaped dots and [character classes] are left alone)."""
+    out: list[str] = []
+    i, in_class = 0, False
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\":
+            out.append(pattern[i:i + 2])
+            i += 2
+        elif in_class:
+            in_class = ch != "]"
+            out.append(ch)
+            i += 1
+        elif ch == "[":
+            in_class = True
+            out.append(ch)
+            i += 1
+        elif ch == "." and pattern[i + 1:i + 2] == "*":
+            out.append(f".{{0,{limit}}}")
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 # Pre-compile patterns once for speed
 _COMPILED: list[tuple[re.Pattern[str], str, str, str]] = [
-    (re.compile(p, re.IGNORECASE), s, c, d) for (p, s, c, d) in _KB_PATTERNS
+    (re.compile(_bound_gaps(p), re.IGNORECASE), s, c, d) for (p, s, c, d) in _KB_PATTERNS
 ]
+_AUTHORITATIVE: frozenset[int] = frozenset(
+    id(_COMPILED[i][0]) for i, row in enumerate(_KB_PATTERNS) if row[0] in (_BGP_TRANSITION_DOWN, _BGP_TRANSITION_UP)
+)
 
 # ── Fast-path literal gate ───────────────────────────────────────────────
 # In real syslog the vast majority of lines match no KB pattern, yet each one
@@ -281,10 +416,31 @@ _CANDIDATE_CACHE: dict[tuple[str, ...], list[tuple[re.Pattern[str], str, str, st
 _CANDIDATE_CACHE_MAX = 4096
 
 
+def _present_literals(text: str) -> tuple[str, ...]:
+    """Every gate literal contained in ``text``, via one compiled alternation.
+
+    ``_KEYWORDS`` is substring-free, so at most one keyword can start at any
+    index (two starting together would make the shorter a prefix of the longer)
+    and stepping the search one past each hit finds every keyword, overlapping
+    ones included. A literal that contains a keyword is then confirmed with a
+    plain ``in`` check, so the result equals a scan of all ``_GATE_LITERALS``.
+    """
+    found: set[str] = set()
+    pos = 0
+    while (m := _GATE_RE.search(text, pos)):
+        found.add(m.group())
+        pos = m.start() + 1
+    if not found:
+        return ()
+    return tuple(sorted({lit for k in found for lit in _LITERALS_WITH[k] if lit in text}))
+
+
 def _gated_candidates(combined: str) -> list[tuple[re.Pattern[str], str, str, str]]:
     """Ordered KB patterns that can possibly match ``combined`` (ASCII only)."""
-    present = tuple(k for k in _GATE_LITERALS if k in combined)
-    if not present or not _KEYWORDS:
+    if not _KEYWORDS:
+        return _UNGUARDED
+    present = _present_literals(combined)
+    if not present:
         return _UNGUARDED
     cached = _CANDIDATE_CACHE.get(present)
     if cached is None:
@@ -302,6 +458,12 @@ _KEYWORDS = tuple(sorted(
     k for k in _kw
     if not any(other != k and other in k for other in _kw)
 ))
+# One alternation over the substring-free keywords (longest first) replaces the
+# per-line scan of every literal; see _present_literals for why it is exact.
+_GATE_RE = re.compile("|".join(re.escape(k) for k in sorted(_KEYWORDS, key=len, reverse=True)))
+_LITERALS_WITH: dict[str, tuple[str, ...]] = {
+    k: tuple(lit for lit in _GATE_LITERALS if k in lit) for k in _KEYWORDS
+}
 
 # ── Custom user rules ────────────────────────────────────────────────────
 # Loaded from a JSON file (env AI_LOG_ANALYZER_CUSTOM_RULES or add_custom_rules()).
@@ -468,7 +630,8 @@ class ClassifiedEvent:
     message: str
     sample_message: str = field(default="")  # short version for UI
     # How the verdict was reached: 1.0 custom rule, 0.9 KB pattern,
-    # 0.6 raw-severity promotion, 0.3 unmatched (description = raw snippet).
+    # 0.7 derived from the parsed (event_type, state), 0.6 raw-severity
+    # promotion, 0.3 unmatched (description = raw snippet).
     confidence: float = field(default=0.9)
     # Structured entity fields carried over from the LogEvent (see STRUCTURED_FIELDS).
     vendor: str = ""
@@ -532,6 +695,11 @@ _DEFAULT_ACTIONS: dict[tuple[str, str], str] = {
     ("high", "sdwan"):          "Check SD-WAN overlay — BFD/OMP/control connections and transport SLA",
     ("high", "firewall"):       "Check firewall session/memory headroom — risk of new-session drops",
     ("medium", "sdwan"):        "Monitor SD-WAN path quality — confirm SLA recovery",
+    ("high", "system"):         "Check device resources and process health — look at CPU/memory consumers and recent restarts",
+    ("medium", "system"):       "Check which process is holding the CPU — compare against the usual baseline",
+    ("high", "stp"):            "Find the port that received the unexpected BPDU — fix the neighbor or edge-port config",
+    ("high", "aaa"):            "Verify AAA server reachability — confirm local/fallback login still works",
+    ("high", "hardware"):       "Inspect hardware — check optics Rx power, line card and chassis alarms",
     ("low", "auth"):             "Informational — log user access for audit",
     ("low", "config"):           "Informational — track config changes in change log",
 }
@@ -539,6 +707,57 @@ _DEFAULT_ACTIONS: dict[tuple[str, str], str] = {
 
 def _action_for(sev: str, cat: str) -> str:
     return _DEFAULT_ACTIONS.get((sev, cat), "Review and investigate as needed")
+
+
+# (event_type, state) -> verdict, for events no rule matched (or only a catch-all matched).
+# Descriptions reuse the KB rules' own strings so recovery pairing and playbooks line up. OSPF and
+# BFD are left to their keyword rules: their parsed state reads "dead" in "ip ospf dead-interval 20".
+_STATE_VERDICTS: dict[tuple[str, str], tuple[str, str, str]] = {
+    ("bgp_session", "down"):    ("high",   "routing",   "BGP peer down / connect failure"),
+    ("bgp_session", "up"):      ("medium", "routing",   "BGP peer established"),
+    ("interface_link", "down"): ("high",   "interface", "Interface link down"),
+    ("interface_link", "up"):   ("medium", "interface", "Interface link up"),
+    ("ipsec_tunnel", "down"):   ("high",   "vpn",       "VPN/IPsec tunnel failure"),
+    ("ipsec_tunnel", "up"):     ("medium", "vpn",       "VPN/IPsec tunnel up"),
+    ("lag_member", "down"):     ("high",   "lag",       "LACP/LAG member down"),
+    ("lag_member", "up"):       ("medium", "lag",       "LAG member joining bundle"),
+    ("isis_adjacency", "down"): ("high",   "routing",   "IS-IS adjacency down"),
+    ("isis_adjacency", "up"):   ("low",    "routing",   "IS-IS adjacency up"),
+    ("ldp_session", "down"):    ("high",   "routing",   "LDP neighbor/session down"),
+    ("ldp_session", "up"):      ("low",    "routing",   "LDP neighbor/session up"),
+}
+# Catch-all "daemon activity" rules say nothing about health; a typed state outranks them.
+_GENERIC_ACTIVITY: frozenset[str] = frozenset({
+    "Routing daemon activity", "Chassis daemon activity", "Forwarding daemon activity",
+    "SNMP daemon/trap activity", "Alarm set/clear event", "Process lifecycle event",
+    "inetd service activity", "EOS agent/process activity", "LLDP neighbor change",
+})
+# BGP keyword rules that are blind to direction; the parsed state may flip them.
+_BGP_DOWN_DESCRIPTIONS: frozenset[str] = frozenset({
+    "BGP peer down / connect failure", "BGP peer idle / notification",
+    "BGP notification / adjacency down (FRR/IOS)",
+})
+
+
+_ADMIN_DOWN_RE = re.compile(r"administratively|admin[- ]down|\bshut(?:down)?\b")
+
+
+def _state_verdict(event_type: str, state: str, sev: str, desc: str, text: str) -> tuple[str, str, str] | None:
+    """Verdict implied by a parsed (event_type, state), or None to keep the rule match."""
+    target = _STATE_VERDICTS.get((event_type, state))
+    if target is None:
+        return None
+    # An operator shutting a port is intent, not a fault: the parser reads "administratively down" as down.
+    if event_type == "interface_link" and state == "down" and _ADMIN_DOWN_RE.search(text):
+        return None
+    if not desc or (sev == "low" and desc in _GENERIC_ACTIVITY):
+        return target
+    if event_type == "bgp_session":
+        if state == "down" and desc == "BGP peer established":
+            return target
+        if state == "up" and desc in _BGP_DOWN_DESCRIPTIONS:
+            return target
+    return None
 
 
 def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
@@ -558,8 +777,20 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
         # markers, FRR vtysh color codes, and any colorized adapter output.
         clean_message = strip_ansi(ev.message)
         combined = f"{ev.appname} {clean_message}".lower()
+        kb_text = _bound_for_kb(combined)
         sev, cat, desc = "info", "other", ""
         confidence = 0.9
+        authoritative = False
+
+        if type(ev) is LogEvent:
+            vendor, event_type, interface, peer_ip = ev.vendor, ev.event_type, ev.interface, ev.peer_ip
+            asn, vrf, vni, tunnel_id, vendor_action = ev.asn, ev.vrf, ev.vni, ev.tunnel_id, ev.action
+            state, norm_ts, attrs = ev.state, ev.normalized_utc_ts, ev.attrs
+        else:  # duck-typed events from third-party adapters
+            vendor, event_type, interface, peer_ip, asn, vrf, vni, tunnel_id, vendor_action, state, norm_ts = (
+                getattr(ev, f, "") for f in ("vendor", "event_type", "interface", "peer_ip", "asn", "vrf",
+                                             "vni", "tunnel_id", "action", "state", "normalized_utc_ts"))
+            attrs = getattr(ev, "attrs", None) or {}
 
         # Custom user rules take precedence over the built-in KB.
         for pattern, p_sev, p_cat, p_desc in _CUSTOM_RULES:
@@ -581,11 +812,20 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
             # substring checks do not, so only use the literal gate for ASCII.
             # No keyword → only the unproven patterns can possibly match (their
             # relative order is preserved, so precedence holds).
-            candidates = _COMPILED if not combined.isascii() else _gated_candidates(combined)
+            candidates = _COMPILED if not kb_text.isascii() else _gated_candidates(kb_text)
             for pattern, p_sev, p_cat, p_desc in candidates:
-                if pattern.search(combined):
+                if pattern.search(kb_text):
                     sev, cat, desc = p_sev, p_cat, p_desc
+                    authoritative = id(pattern) in _AUTHORITATIVE
                     break
+
+        # The parser's (event_type, state) is the direction of record: it fixes a state-blind
+        # keyword verdict and classifies events no rule matched. Custom rules are never overridden.
+        if confidence != 1.0 and not authoritative and state in ("up", "down"):
+            derived = _state_verdict(event_type, state, sev, desc, kb_text)
+            if derived:
+                sev, cat, desc = derived
+                confidence = 0.7
 
         if not desc:
             snippet = clean_message[:120].strip() or ev.appname or "General log message"
@@ -596,16 +836,6 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
         if ev.severity_raw.lower() in ("crit", "emerg", "alert") and sev == "info":
             sev = "high"
             confidence = 0.6
-
-        if type(ev) is LogEvent:
-            vendor, event_type, interface, peer_ip = ev.vendor, ev.event_type, ev.interface, ev.peer_ip
-            asn, vrf, vni, tunnel_id, vendor_action = ev.asn, ev.vrf, ev.vni, ev.tunnel_id, ev.action
-            state, norm_ts, attrs = ev.state, ev.normalized_utc_ts, ev.attrs
-        else:  # duck-typed events from third-party adapters
-            vendor, event_type, interface, peer_ip, asn, vrf, vni, tunnel_id, vendor_action, state, norm_ts = (
-                getattr(ev, f, "") for f in ("vendor", "event_type", "interface", "peer_ip", "asn", "vrf",
-                                             "vni", "tunnel_id", "action", "state", "normalized_utc_ts"))
-            attrs = getattr(ev, "attrs", None) or {}
 
         yield ClassifiedEvent(
             timestamp=ev.timestamp,
@@ -634,6 +864,14 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
         )
 
 
+def _time_sort_key(ev: ClassifiedEvent) -> tuple[str, str]:
+    """(UTC ISO stamp, raw fallback): unparseable stamps sort oldest, then lexicographically."""
+    from ai_log_analyzer.parsers.timeutil import normalize_ts
+
+    norm = ev.normalized_utc_ts or normalize_ts(ev.timestamp)[0]
+    return (norm, "" if norm else ev.timestamp)
+
+
 def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int]]:
     """Classify a stream of LogEvents.
 
@@ -652,7 +890,8 @@ def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], 
         sev_counts[ce.severity] = sev_counts.get(ce.severity, 0) + 1
         cat_counts[ce.category] = cat_counts.get(ce.category, 0) + 1
 
-    # Stable sort: pass 1 sorts newest first by ISO timestamp; pass 2 buckets by severity.
-    classified.sort(key=lambda e: e.timestamp, reverse=True)
+    # Stable sort: pass 1 sorts newest first; pass 2 buckets by severity. The time key is the
+    # parser's UTC-normalized stamp, so ISO, RFC 3164 and PAN-OS stamps order against each other.
+    classified.sort(key=_time_sort_key, reverse=True)
     classified.sort(key=lambda e: SEV_ORDER.get(e.severity, 5))
     return classified, sev_counts, cat_counts
