@@ -226,6 +226,18 @@ def updown(text: str) -> str:
 
 # ── NOS enrichment ──────────────────────────────────────────────────────────
 
+# CLI / AAA accounting records echo the operator's command text ("command 'show bgp
+# neighbor | match down'"). That text is not a network event, whatever words it holds.
+_CLI_AUDIT_RE = re.compile(
+    r"\bUI_CMD\w*|\bcommand '|\bcmd=|\blogged command\b|\bCFGLOG_LOGGEDCMD\b|\bcommand-authorization\b",
+    re.IGNORECASE)
+# FRR bgpd's unprefixed "%ADJCHANGE:"; "%CLNS-5-ADJCHANGE" / "%OSPF-5-ADJCHANGE" carry a facility.
+_BARE_ADJCHANGE_RE = re.compile(r"(?<![\w-])%adjchange\b")
+_NOT_BGP_ADJ = ("ospf", "isis", "is-is", "clns", "ldp", "adjacency")
+_ISIS_RE = re.compile(r"(?<![a-z])(?:isis|is-is)|%clns-|rpd_isis")
+_ISIS_NBR_RE = re.compile(r"\badj(?:acency)?\s+to\s+(?P<n>[\w.\-]+)", re.IGNORECASE)
+_LDP_RE = re.compile(r"(?<![a-z])ldp(?![a-z])|rpd_ldp_|%ldp-|ldpd")
+_OPER_RE = re.compile(r"\boper(?:ational)?[ -]?(?:state|status)\b")
 _MAXPFX_RE = re.compile(r"max(?:imum)?[-_ ]?(?:number of )?(?:prefix|pfx)|prefix[-_ ]limit|maxpfx", re.IGNORECASE)
 _PATHCHG_RE = re.compile(r"(?:origin(?:\s+as)?|as[-_ ]?path)\s*(?:change|changed|mismatch|conflict)|\bmoas\b|"
                          r"route leak|possible hijack", re.IGNORECASE)
@@ -249,7 +261,10 @@ def enrich_netos(appname: str, message: str) -> dict[str, str]:
     if vendor:
         out["vendor"] = vendor
 
-    if "bgp" in low or "adjchange" in low:
+    if _CLI_AUDIT_RE.search(msg):
+        out["attr:audit"] = "cli"
+        return out
+    if "bgp" in low or (_BARE_ADJCHANGE_RE.search(low) and not any(w in low for w in _NOT_BGP_ADJ)):
         out["event_type"] = "bgp_session"
         if _MAXPFX_RE.search(msg):
             out["event_type"] = "bgp_max_prefix"
@@ -288,6 +303,32 @@ def enrich_netos(appname: str, message: str) -> dict[str, str]:
             out["state"] = "up"
         elif re.search(r"\b(?:down|dead)\b", low):
             out["state"] = "down"
+    elif _ISIS_RE.search(low):
+        out["event_type"] = "isis_adjacency"
+        intf = extract_interface(msg)
+        if intf:
+            out["interface"] = intf
+        m = _ISIS_NBR_RE.search(msg)
+        if m:
+            out["attr:neighbor"] = m.group("n")
+        if "adjdown" in low or re.search(r"\blost\b", low):
+            out["state"] = "down"
+        elif "adjup" in low:
+            out["state"] = "up"
+        elif state := updown(msg):
+            out["state"] = state
+    elif _LDP_RE.search(low):
+        out["event_type"] = "ldp_session"
+        peer = first_ip(_GENERIC_PEER_RES, msg)
+        if peer:
+            out["peer_ip"] = peer
+        intf = extract_interface(msg)
+        if intf:
+            out["interface"] = intf
+        if "nbrdown" in low or "sessiondown" in low:
+            out["state"] = "down"
+        elif state := updown(msg):
+            out["state"] = state
     elif "kmd_vpn" in low or _IPSEC_RE.search(low) or ("vpn" in low and "tunnel" in low):
         out["event_type"] = "ipsec_tunnel"
         m = _KMD_TUNNEL_RE.search(msg)
@@ -311,15 +352,19 @@ def enrich_netos(appname: str, message: str) -> dict[str, str]:
             out["state"] = "down"
         elif re.search(r"joining|added|\bup\b|attached|collecting", low):
             out["state"] = "up"
-    elif any(k in low for k in ("link", "updown", "if_down", "if_up", "carrier", "oper", "changed state")):
-        intf = extract_interface(msg)
-        state = updown(msg)
-        if intf and state:
-            out["event_type"] = "interface_link"
-            out["interface"] = intf
-            out["state"] = state
-    elif "commit" in low or "config_i" in low or "configured from" in low:
-        out["event_type"] = "config_change"
+    else:
+        if any(k in low for k in ("link", "updown", "if_down", "if_up", "carrier", "changed state")) \
+                or _OPER_RE.search(low):
+            intf = extract_interface(msg)
+            state = updown(msg)
+            if intf and state:
+                out["event_type"] = "interface_link"
+                out["interface"] = intf
+                out["state"] = state
+        # Checked after the link rule so a word like "operation" in "requested 'commit'
+        # operation" can no longer pre-empt a real configuration commit.
+        if "event_type" not in out and ("commit" in low or "config_i" in low or "configured from" in low):
+            out["event_type"] = "config_change"
 
     # Cheap substring gates before the regexes (most lines carry none of these).
     asn = extract_asn(msg) if ("AS" in msg or "-as" in low) else ""

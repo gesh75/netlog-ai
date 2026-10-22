@@ -38,7 +38,7 @@ _KIND_BY_EVENT_TYPE: dict[str, str] = {
     "bfd_session": "bfd",
     "omp_peer": "omp",
     "control_connection": "control",
-    "ospf_adjacency": "ospf",
+    "ospf_adjacency": "ospf", "isis_adjacency": "isis", "ldp_session": "ldp",
     "lag_member": "lag",
     "conserve_mode": "conserve",
 }
@@ -70,6 +70,10 @@ def entity_key(ev: Any) -> EntityKey | None:
     elif kind in ("bfd", "control"):
         ident = ev.tunnel_id or ev.peer_ip
     elif kind in ("omp", "ospf"):
+        ident = ev.peer_ip or ev.interface
+    elif kind == "isis":
+        ident = ev.interface or attrs.get("neighbor", "")
+    elif kind == "ldp":
         ident = ev.peer_ip or ev.interface
     else:  # conserve
         ident = "memory"
