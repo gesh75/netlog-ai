@@ -48,7 +48,7 @@ CHANGELOG for the exact semantics shipped.
 | `AI_LOG_ANALYZER_SAMPLES_DIR` | packaged `data/samples` | Override the demo samples directory. |
 | `AI_LOG_ANALYZER_SITES_DIR` | packaged `data/sites` | Override the site manifests / golden-config directory (web app, CLI and MCP server). |
 | `AI_LOG_ANALYZER_DATA_DIR` | unset | **(new in this release)** Base directory for persisted state files (stores, spools, keys) so a container needs one writable volume. |
-| `AI_LOG_ANALYZER_PSEUDONYM_KEY` | generated per process | **(new in this release)** Secret key for stable hostname/entity pseudonyms across restarts. **Security:** treat as a secret; anyone holding it can correlate pseudonyms. |
+| `AI_LOG_ANALYZER_PSEUDONYM_KEY` | random per process | **(new in this release)** HMAC key for PUB-/user- pseudonym tokens. Each gunicorn worker generates its own random key, so tokens differ per worker and after a restart; set a long random value for stable tokens. **Security:** treat as a secret; anyone holding it can regenerate the tokens. |
 | `NETLOG_ALLOW_INSECURE_HTTP` | `false` | **(new in this release)** Allow plain `http://` for outbound integrations (ITSM, NetBox, webhooks, log sources). Default requires `https://` except for loopback. **Security:** sends credentials in clear text if enabled. |
 | `AI_LOG_ANALYZER_DEBUG` | unset | Any non-empty value prints which `.env` files were loaded. |
 
@@ -63,7 +63,10 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `LLM_PROVIDER` | `ollama` | `ollama`, `local` (Docker Model Runner), `claude`, `claude-only`, `grok`. |
 | `LLM_ENABLED` | `true` | Master switch for LLM calls (`true`/`false` only). |
 | `LLM_TIMEOUT` | `120` | Per-request timeout in seconds. |
-| `LLM_TOTAL_TIMEOUT_S` | built-in limit | **(new in this release)** Overall wall-clock budget across retries and fallbacks for one gateway call. |
+| `LLM_TOTAL_TIMEOUT_S` | `180` | **(new in this release)** Overall wall-clock budget for one gateway call across providers, retries and backoff; per-request timeouts shrink to what is left. `0` = unlimited. |
+| `LLM_BREAKER_THRESHOLD` | `3` | **(new in this release)** Consecutive failures after which a provider's circuit opens and it is skipped. `0` disables the breaker. |
+| `LLM_BREAKER_COOLDOWN_S` | `60` | **(new in this release)** Seconds an open circuit stays open before one trial call is allowed. State is per process. |
+| `LLM_LOCAL_HOSTS` | empty | **(new in this release)** Comma-separated hostnames to treat as local for the egress policy. An `OLLAMA_URL` / `MODEL_RUNNER_URL` on any other off-host name reports mode `remote-host`. |
 | `LLM_MODEL` | `ai/qwen3:latest` | Model for the local Docker Model Runner. |
 | `MODEL_RUNNER_URL` | `http://localhost:12434` | Docker Model Runner base URL. |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama native API base URL. |
