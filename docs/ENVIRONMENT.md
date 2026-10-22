@@ -38,16 +38,18 @@ CHANGELOG for the exact semantics shipped.
 | `AI_LOG_ANALYZER_OPERATOR_TOKENS` | unset | Same format, role `operator` (viewer plus running analyses, ITSM enrichment and incident resolution). |
 | `AI_LOG_ANALYZER_ADMIN_TOKENS` | unset | Same format, role `admin` (everything, including provider, rules, source and triage-worker control). |
 | `AI_LOG_ANALYZER_RBAC_FILE` | unset | JSON file `{"users": [{"name", "role", "token_sha256"}]}`. Prefer `token_sha256` so the file holds no usable secret. |
-| `AI_LOG_ANALYZER_REQUIRE_AUTH` | `false` | **(new in this release)** When true, the server refuses to start or serve unless an API token or RBAC principal is configured. Recommended for any non-loopback deployment. |
-| `AI_LOG_ANALYZER_ALLOW_NOAUTH` | `false` | **(new in this release)** Explicit opt-out acknowledging that an exposed server runs without authentication (demos, isolated labs only). |
-| `AI_LOG_ANALYZER_ALLOWED_HOSTS` | loopback names | **(new in this release)** Comma-separated `Host` header allow-list (DNS-rebinding defense). Add the public hostname(s) when serving behind a proxy. |
-| `AI_LOG_ANALYZER_MAX_SSE` | small built-in limit | **(new in this release)** Maximum concurrent server-sent-event streams, so idle clients cannot exhaust workers. |
+| `AI_LOG_ANALYZER_REQUIRE_AUTH` | `false` (`1` in the Docker image) | **(new in this release)** When set, `create_app()` raises at startup unless an API token or RBAC principal is configured, so a gunicorn deployment can never start open. |
+| `AI_LOG_ANALYZER_ALLOW_NOAUTH` | `false` | **(new in this release)** `python -m` / `main()` refuses to bind a non-loopback address without a token unless this is `1`. Demos and isolated labs only. |
+| `AI_LOG_ANALYZER_ITSM_ALLOW_PRIVATE` | `false` | **(new in this release)** Lets the ServiceNow sync reach a private-range instance URL. Read from the server environment only; request bodies cannot set it. |
+| `AI_LOG_ANALYZER_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` plus `ANALYZER_HOST` | **(new in this release)** Comma-separated `Host` header allow-list (DNS-rebinding defense). Enforced only while authentication is off; a bad Host gets 400. `*` disables the check. |
+| `AI_LOG_ANALYZER_MAX_SSE` | `8` | **(new in this release)** Maximum concurrent server-sent-event streams (`/api/tail`); further clients get 503. |
+| `AI_LOG_ANALYZER_MAX_CONTENT_LENGTH` | `16777216` (16 MiB) | **(new in this release)** Maximum request body size; larger requests get a JSON 413. |
 | `AI_LOG_ANALYZER_CORS_ORIGINS` | `http://localhost:6060,http://127.0.0.1:6060` | Comma-separated CORS allow-list for `/api/*`. Never use `*` together with authentication. |
-| `AI_LOG_ANALYZER_FILE_ROOTS` | `~:/var/log:<repo checkout>` | Colon-separated directories that `POST /api/analyze {"source":"file"}` may read. **Security:** confines server-side file ingest; keep it as narrow as you can. |
+| `AI_LOG_ANALYZER_FILE_ROOTS` | `/var/log` plus `AI_LOG_ANALYZER_DATA_DIR` | Colon-separated directories that `POST /api/analyze {"source":"file"}` may read. Dotfiles, dot-directories and credential/state filenames are denied under every root. **Security:** keep it as narrow as you can; `$HOME` and the repo checkout are no longer included by default. |
 | `AI_LOG_ANALYZER_MAX_FILE_MB` | `200` | Web-route cap for single-file analysis (MB). Use the CLI for larger files. |
 | `AI_LOG_ANALYZER_SAMPLES_DIR` | packaged `data/samples` | Override the demo samples directory. |
 | `AI_LOG_ANALYZER_SITES_DIR` | packaged `data/sites` | Override the site manifests / golden-config directory (web app, CLI and MCP server). |
-| `AI_LOG_ANALYZER_DATA_DIR` | unset | **(new in this release)** Base directory for persisted state files (stores, spools, keys) so a container needs one writable volume. |
+| `AI_LOG_ANALYZER_DATA_DIR` | unset | **(new in this release)** One extra directory, besides `/var/log`, from which file analysis may read (for example the container's `/data` volume). |
 | `AI_LOG_ANALYZER_PSEUDONYM_KEY` | random per process | **(new in this release)** HMAC key for PUB-/user- pseudonym tokens. Each gunicorn worker generates its own random key, so tokens differ per worker and after a restart; set a long random value for stable tokens. **Security:** treat as a secret; anyone holding it can regenerate the tokens. |
 | `NETLOG_ALLOW_INSECURE_HTTP` | `false` | **(new in this release)** Allow plain `http://` for outbound integrations (ITSM, NetBox, webhooks, log sources). Default requires `https://` except for loopback. **Security:** sends credentials in clear text if enabled. |
 | `AI_LOG_ANALYZER_DEBUG` | unset | Any non-empty value prints which `.env` files were loaded. |
