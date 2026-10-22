@@ -288,7 +288,7 @@ def _bound_for_kb(text: str) -> str:
 
 
 def _bound_gaps(pattern: str, limit: int = _GAP_CHARS) -> str:
-    """Rewrite every top-level-syntax ``.*`` as ``.{0,limit}`` (escapes and [classes] untouched)."""
+    """Rewrite each ``.*`` as ``.{0,limit}`` (escaped dots and [character classes] are left alone)."""
     out: list[str] = []
     i, in_class = 0, False
     while i < len(pattern):
