@@ -327,3 +327,22 @@ def test_reset_circuit_breakers(monkeypatch):
     llm.reset_circuit_breakers()
     llm.query("sys", "user")
     assert len(calls) == 4
+
+
+def test_docker_runner_stops_trying_paths_after_the_deadline(monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(llm, "_clock", clock)
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT_S", "50")
+    monkeypatch.setattr(llm, "_DOCKER_SOCKETS", [])
+
+    class _Slow(_Session):
+        def post(self, url, **kwargs):
+            clock.advance(60)
+            return super().post(url, **kwargs)
+    sess = _Slow(requests.ConnectionError("down"))
+    monkeypatch.setattr(llm, "_SESSION", sess)
+    llm._state["provider"] = "local"
+    monkeypatch.setitem(llm._PROVIDERS, "local", llm._query_docker_runner)
+    monkeypatch.setitem(llm._PROVIDERS, "ollama", lambda *a: pytest.fail("deadline already spent"))
+    assert llm.query("sys", "user") is None
+    assert len(sess.calls) == 1

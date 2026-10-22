@@ -464,6 +464,11 @@ def _remaining() -> float | None:
     return None if deadline is None else deadline - _clock()
 
 
+def _out_of_time() -> bool:
+    left = _remaining()
+    return left is not None and left <= 0
+
+
 def _http_timeout() -> int:
     """Per-request timeout: the configured one, capped by what is left of the query budget."""
     base = int(_state["timeout"])
@@ -564,8 +569,7 @@ def _query(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
     system = (system_prompt or "") + _INJECTION_GUARD
 
     for name in provider_order(configured):
-        left = _remaining()
-        if left is not None and left <= 0:
+        if _out_of_time():
             _record_error(name, "skipped: LLM_TOTAL_TIMEOUT_S deadline exceeded")
             logger.warning("LLM query deadline exceeded before provider %s", name)
             break
@@ -842,14 +846,16 @@ def _query_docker_runner(system_prompt: str, user_prompt: str, max_tokens: int) 
                     if text:
                         return text
             except (requests.RequestException, *_MALFORMED):
-                continue
-            if _remaining() is not None and _remaining() <= 0:
+                pass
+            if _out_of_time():
                 return None
 
     for sock_path in _DOCKER_SOCKETS:
         if not os.path.exists(sock_path):
             continue
         for path in api_paths:
+            if _out_of_time():
+                return None
             text = _query_unix_socket(sock_path, path, payload)
             if text:
                 return text
