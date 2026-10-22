@@ -258,7 +258,7 @@ def test_tcp_octet_counting_split_across_writes_and_lf_framing():
         time.sleep(0.05)
         conn.sendall(framed[9:] + _octet(m2))
         conn.sendall(b"<13>Oct 20 10:00:02 sw1 app: lf framed\n")
-        conn.sendall(b"300 " + b"x" * 300)                      # over max_frame → dropped
+        conn.sendall(b"300 <13>" + b"x" * 296)                  # over max_frame → dropped
         conn.sendall(b"<13>Oct 20 10:00:03 sw1 app: after oversize\n")
         conn.close()
         assert _wait_for(lambda: src.stats().get("received") == 4)

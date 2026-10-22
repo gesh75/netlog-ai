@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -41,6 +42,8 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS kv (
@@ -69,6 +72,13 @@ CREATE TABLE IF NOT EXISTS syslog_spool (
     line        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS syslog_spool_source_id ON syslog_spool (source, id);
+-- Per-source row count and loss counters, so pruning and the dashboard never COUNT(*) the spool.
+CREATE TABLE IF NOT EXISTS spool_meta (
+    source      TEXT PRIMARY KEY,
+    rows        INTEGER NOT NULL DEFAULT 0,
+    pruned      INTEGER NOT NULL DEFAULT 0,
+    lost_unread INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS audit_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     ts         REAL NOT NULL,
@@ -100,6 +110,7 @@ CREATE TABLE IF NOT EXISTS triage_tickets (
     title         TEXT,
     refs          TEXT
 );
+CREATE INDEX IF NOT EXISTS triage_tickets_last_seen ON triage_tickets (last_seen);
 """
 
 # Columns added after the first release; applied with ALTER TABLE when missing.
@@ -108,6 +119,17 @@ _MIGRATIONS = {
 }
 
 _BUSY_TIMEOUT_MS = 10_000
+_SYNC_MODES = frozenset({"OFF", "NORMAL", "FULL", "EXTRA"})
+
+
+def _sync_mode() -> str:
+    """``AI_LOG_ANALYZER_SQLITE_SYNC``: NORMAL (default), FULL (fsync every commit), EXTRA or OFF."""
+    mode = os.environ.get("AI_LOG_ANALYZER_SQLITE_SYNC", "").strip().upper()
+    return mode if mode in _SYNC_MODES else "NORMAL"
+
+
+class LeaseLost(RuntimeError):
+    """A fenced write was attempted by an owner whose lease another owner has taken."""
 
 
 def _is_busy(exc: BaseException) -> bool:
@@ -170,6 +192,17 @@ class StateDB:
                         conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
                     except sqlite3.OperationalError:  # another process added it first
                         pass
+        self._backfill_spool_meta(conn)
+
+    def _backfill_spool_meta(self, conn: sqlite3.Connection) -> None:
+        """Seed per-source spool counts for a database written before ``spool_meta`` existed."""
+        if conn.execute("SELECT 1 FROM spool_meta LIMIT 1").fetchone() is not None:
+            return
+        if conn.execute("SELECT 1 FROM syslog_spool LIMIT 1").fetchone() is None:
+            return
+        with self.write() as c:
+            c.execute("INSERT OR IGNORE INTO spool_meta(source, rows) "
+                      "SELECT source, COUNT(*) FROM syslog_spool GROUP BY source")
 
     # ── connections ─────────────────────────────────────────────────────────
     def conn(self) -> sqlite3.Connection:
@@ -187,7 +220,7 @@ class StateDB:
                                    factory=_TrackedConnection)
             _LIVE_CONNS.add(conn)
             conn.execute("PRAGMA journal_mode=WAL").fetchall()
-            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute(f"PRAGMA synchronous={_sync_mode()}")
             conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
             self._local.conn = conn
             self._local.pid = pid
@@ -220,6 +253,10 @@ class StateDB:
                 (namespace, key, json.dumps(value), time.time()),
             )
 
+    def kv_delete(self, namespace: str, key: str) -> None:
+        with self.write() as c:
+            c.execute("DELETE FROM kv WHERE namespace=? AND key=?", (namespace, key))
+
     def kv_get_all(self, namespace: str) -> dict[str, Any]:
         rows = self.conn().execute("SELECT key, value FROM kv WHERE namespace=?", (namespace,)).fetchall()
         out: dict[str, Any] = {}
@@ -247,19 +284,35 @@ class StateDB:
                       "LIMIT 1 OFFSET ?)", (cap,))
         return len(rows)
 
+    _INCIDENT_COLS = ("id, description, severity, category, devices, count, sample_messages, generated_at, "
+                      "resolution, resolved_at, resolved_by")
+
+    @staticmethod
+    def _incident_rec(row: tuple) -> dict[str, Any]:
+        row_id, desc, sev, cat, devices, count, samples, gen, res, res_at, res_by = row
+        rec = {"id": row_id, "description": desc, "severity": sev, "category": cat,
+               "devices": json.loads(devices or "[]"), "count": count,
+               "sample_messages": json.loads(samples or "[]"), "generated_at": gen}
+        if res:
+            rec.update(resolution=res, resolved_at=res_at or "", resolved_by=res_by or "")
+        return rec
+
     def incidents_all(self, limit: int) -> list[dict[str, Any]]:
         rows = self.conn().execute(
-            "SELECT id, description, severity, category, devices, count, sample_messages, generated_at, "
-            "resolution, resolved_at, resolved_by FROM incidents ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-        out = []
-        for row_id, desc, sev, cat, devices, count, samples, gen, res, res_at, res_by in reversed(rows):
-            rec = {"id": row_id, "description": desc, "severity": sev, "category": cat,
-                   "devices": json.loads(devices or "[]"), "count": count,
-                   "sample_messages": json.loads(samples or "[]"), "generated_at": gen}
-            if res:
-                rec.update(resolution=res, resolved_at=res_at or "", resolved_by=res_by or "")
-            out.append(rec)
-        return out
+            f"SELECT {self._INCIDENT_COLS} FROM incidents ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [self._incident_rec(r) for r in reversed(rows)]
+
+    def incidents_since(self, after_id: int) -> list[dict[str, Any]]:
+        """Journal rows with id > after_id, oldest first (incremental reload)."""
+        rows = self.conn().execute(
+            f"SELECT {self._INCIDENT_COLS} FROM incidents WHERE id > ? ORDER BY id", (int(after_id),)).fetchall()
+        return [self._incident_rec(r) for r in rows]
+
+    def incidents_version(self) -> tuple[int, int, int]:
+        """Cheap change marker (row count, newest id, total resolution text length) for caches."""
+        row = self.conn().execute("SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(LENGTH(resolution)), 0) "
+                                  "FROM incidents").fetchone()
+        return int(row[0]), int(row[1]), int(row[2])
 
     def incidents_resolve(self, row_id: int, resolution: str, resolved_at: str, resolved_by: str) -> bool:
         with self.write() as c:
@@ -276,17 +329,67 @@ class StateDB:
         if not rows:
             return 0
         with self.write() as c:
+            meta = c.execute("SELECT rows FROM spool_meta WHERE source=?", (source,)).fetchone()
+            if meta is None:   # first write for this source (or a legacy spool): count once
+                total = int(c.execute("SELECT COUNT(*) FROM syslog_spool WHERE source=?", (source,)).fetchone()[0])
+                c.execute("INSERT INTO spool_meta(source, rows) VALUES (?, ?)", (source, total))
+            else:
+                total = int(meta[0])
             c.executemany("INSERT INTO syslog_spool(source, received_at, sender, line) VALUES (?, ?, ?, ?)",
                           [(source, ts, sender, line) for ts, sender, line in rows])
+            total += len(rows)
             # Prune at most every ~1000 rows so storms do not pay a DELETE per batch.
             pending = self._prune_counter.get(source, 0) + len(rows)
             if pending >= 1000 or pending >= cap:
-                c.execute(
-                    "DELETE FROM syslog_spool WHERE source=? AND id <= (SELECT id FROM syslog_spool "
-                    "WHERE source=? ORDER BY id DESC LIMIT 1 OFFSET ?)", (source, source, cap))
+                total = self._spool_prune(c, source, total, cap)
                 pending = 0
             self._prune_counter[source] = pending
+            c.execute("UPDATE spool_meta SET rows=? WHERE source=?", (total, source))
         return len(rows)
+
+    @staticmethod
+    def _spool_prune(c: sqlite3.Connection, source: str, total: int, cap: int) -> int:
+        """Delete the oldest ``total - cap`` rows of ``source``; returns the new row count.
+
+        The boundary id is found by skipping only the excess rows, so the cost follows the
+        excess (about 1000 rows), not the cap. Rows a registered triage consumer has not yet
+        read are counted in ``spool_meta.lost_unread``: the cap stays a hard bound, but the loss
+        is never silent.
+        """
+        excess = total - cap
+        if excess <= 0:
+            return total
+        sql = "SELECT id FROM syslog_spool WHERE source=? ORDER BY id LIMIT 1 OFFSET ?"
+        row = c.execute(sql, (source, excess - 1)).fetchone()
+        if row is None:   # the counter drifted above the real count (external deletes): recount
+            total = int(c.execute("SELECT COUNT(*) FROM syslog_spool WHERE source=?", (source,)).fetchone()[0])
+            excess = total - cap
+            row = c.execute(sql, (source, excess - 1)).fetchone() if excess > 0 else None
+            if row is None:
+                return total
+        boundary = int(row[0])
+        lost = 0
+        cur = c.execute("SELECT value FROM kv WHERE namespace='triage' AND key=?", ("cursor:" + source,)).fetchone()
+        if cur is not None:
+            try:
+                cursor = int(json.loads(cur[0]))
+            except (TypeError, ValueError):
+                cursor = boundary
+            if cursor < boundary:
+                lost = int(c.execute("SELECT COUNT(*) FROM syslog_spool WHERE source=? AND id>? AND id<=?",
+                                     (source, cursor, boundary)).fetchone()[0])
+        removed = c.execute("DELETE FROM syslog_spool WHERE source=? AND id<=?", (source, boundary)).rowcount
+        c.execute("UPDATE spool_meta SET pruned=pruned+?, lost_unread=lost_unread+? WHERE source=?",
+                  (removed, lost, source))
+        if lost:
+            log.warning("syslog spool %s: pruned %d row(s) the triage worker had not read yet "
+                        "(spool cap %d is too small for the ingest rate, or triage is behind)", source, lost, cap)
+        return total - removed
+
+    def spool_gap(self, source: str) -> dict[str, int]:
+        """Rows pruned from the spool and the subset a triage consumer had not read yet."""
+        row = self.conn().execute("SELECT pruned, lost_unread FROM spool_meta WHERE source=?", (source,)).fetchone()
+        return {"pruned": int(row[0]), "lost_unread": int(row[1])} if row else {"pruned": 0, "lost_unread": 0}
 
     def spool_tail(self, source: str, limit: int) -> list[tuple[int, str, str]]:
         rows = self.conn().execute(
@@ -313,17 +416,36 @@ class StateDB:
 
     def spool_stats(self) -> list[dict[str, Any]]:
         """Per-source spool depth for the dashboard: rows, newest row id and receive time."""
-        rows = self.conn().execute(
-            "SELECT source, COUNT(*), MAX(id), MAX(received_at) FROM syslog_spool GROUP BY source "
-            "ORDER BY source").fetchall()
-        return [{"source": src, "rows": int(n), "max_id": int(mx or 0), "last_received_at": float(ts or 0.0)}
-                for src, n, mx, ts in rows]
+        conn = self.conn()
+        out = []
+        for src, n in conn.execute("SELECT source, rows FROM spool_meta ORDER BY source").fetchall():
+            last = conn.execute("SELECT id, received_at FROM syslog_spool WHERE source=? ORDER BY id DESC LIMIT 1",
+                                (src,)).fetchone()
+            if last is None:
+                continue
+            out.append({"source": src, "rows": int(n), "max_id": int(last[0]),
+                        "last_received_at": float(last[1] or 0.0)})
+        return out
 
     def triage_count(self) -> int:
         return int(self.conn().execute("SELECT COUNT(*) FROM triage_tickets").fetchone()[0])
 
     def spool_sources(self) -> list[str]:
-        return [r[0] for r in self.conn().execute("SELECT DISTINCT source FROM syslog_spool")]
+        rows = self.conn().execute("SELECT source FROM spool_meta WHERE rows > 0 ORDER BY source").fetchall()
+        return [r[0] for r in rows]
+
+    def spool_before(self, source: str, upto_id: int, limit: int) -> list[tuple[int, float, str, str]]:
+        """Newest ``limit`` rows with id <= upto_id as (id, received_at, sender, line), oldest first."""
+        rows = self.conn().execute(
+            "SELECT id, received_at, sender, line FROM syslog_spool WHERE source=? AND id <= ? "
+            "ORDER BY id DESC LIMIT ?", (source, int(upto_id), int(limit))).fetchall()
+        return list(reversed(rows))
+
+    def spool_last_received(self, source: str) -> float:
+        """Receive time of the newest spooled row (0.0 when empty)."""
+        row = self.conn().execute("SELECT received_at FROM syslog_spool WHERE source=? ORDER BY id DESC LIMIT 1",
+                                  (source,)).fetchone()
+        return float(row[0]) if row else 0.0
 
     def spool_min_id(self, source: str) -> int:
         row = self.conn().execute("SELECT MIN(id) FROM syslog_spool WHERE source=?", (source,)).fetchone()
@@ -340,7 +462,10 @@ class StateDB:
                     held = json.loads(row[0])
                 except (TypeError, ValueError):
                     held = {}
-                if held.get("owner") != owner and float(held.get("expires", 0)) > now:
+                expires = float(held.get("expires", 0))
+                # An expiry further ahead than 2 TTLs can only come from a wall clock that stepped
+                # back (NTP) since it was written: treat it as expired instead of extending it.
+                if held.get("owner") != owner and now < expires <= now + 2 * ttl_s:
                     return False
             c.execute(
                 "INSERT INTO kv(namespace, key, value, updated_at) VALUES ('lease', ?, ?, ?) "
@@ -353,6 +478,18 @@ class StateDB:
             row = c.execute("SELECT value FROM kv WHERE namespace='lease' AND key=?", (name,)).fetchone()
             if row is not None and json.loads(row[0]).get("owner") == owner:
                 c.execute("DELETE FROM kv WHERE namespace='lease' AND key=?", (name,))
+
+    def lease_valid(self, name: str, owner: str, now: float | None = None) -> bool:
+        """True unless another owner holds an unexpired lease ``name``."""
+        now = time.time() if now is None else now
+        row = self.conn().execute("SELECT value FROM kv WHERE namespace='lease' AND key=?", (name,)).fetchone()
+        if row is None:
+            return True
+        try:
+            held = json.loads(row[0])
+        except (TypeError, ValueError):
+            return True
+        return held.get("owner") == owner or float(held.get("expires", 0)) <= now
 
     def spool_max_id(self, source: str) -> int:
         row = self.conn().execute("SELECT MAX(id) FROM syslog_spool WHERE source=?", (source,)).fetchone()
@@ -441,14 +578,34 @@ class StateDB:
         rec["refs"] = json.loads(rec["refs"] or "[]")
         return rec
 
-    def triage_put(self, rec: dict[str, Any]) -> None:
+    def triage_put(self, rec: dict[str, Any], fence: tuple[str, str] | None = None,
+                   now: float | None = None) -> None:
+        """Upsert one ticket record. With ``fence=(lease, owner)`` the write is refused
+        (``LeaseLost``) once another owner holds that lease, so a stalled worker cannot overwrite
+        its successor's state."""
         values = {**rec, "refs": json.dumps(rec.get("refs") or [])}
         with self.write() as c:
+            if fence is not None:
+                row = c.execute("SELECT value FROM kv WHERE namespace='lease' AND key=?", (fence[0],)).fetchone()
+                if row is not None:
+                    try:
+                        held = json.loads(row[0])
+                    except (TypeError, ValueError):
+                        held = {}
+                    if held.get("owner") != fence[1] and float(held.get("expires", 0)) > (time.time() if now is None else now):
+                        raise LeaseLost(f"lease {fence[0]!r} is held by {held.get('owner')!r}")
             c.execute(
                 f"INSERT INTO triage_tickets({', '.join(self._TRIAGE_COLS)}) VALUES "
                 f"({', '.join('?' * len(self._TRIAGE_COLS))}) ON CONFLICT(fingerprint) DO UPDATE SET "
                 + ", ".join(f"{k}=excluded.{k}" for k in self._TRIAGE_COLS[1:]),
                 [values.get(k) for k in self._TRIAGE_COLS])
+
+    def triage_prune(self, retention_s: float, now: float | None = None) -> int:
+        """Delete tickets not seen for ``retention_s`` whose state is not active; returns the count."""
+        cutoff = (time.time() if now is None else now) - retention_s
+        with self.write() as c:
+            return c.execute("DELETE FROM triage_tickets WHERE last_seen < ? AND COALESCE(state, '') != 'active'",
+                             (cutoff,)).rowcount
 
     def triage_all(self, limit: int = 200) -> list[dict[str, Any]]:
         rows = self.conn().execute(
