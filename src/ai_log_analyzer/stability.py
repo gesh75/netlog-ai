@@ -3,27 +3,36 @@
 Classified events tell you what broke; this module tells you what keeps
 breaking. It tracks, per device:
 
-  * **Flapping** — down→up→down oscillation of the same entity class
-    (interface, BGP peer, OSPF neighbor, LAG member, VPN tunnel). A link that
-    bounces six times an hour is a worse signal than one clean failure, but a
-    severity-ranked action list shows them the same way.
+  * **Flapping** — down→up→down oscillation of the same entity (one
+    interface, one BGP peer, one OSPF neighbor, LAG member, VPN tunnel). A link
+    that bounces six times an hour is a worse signal than one clean failure,
+    but a severity-ranked action list shows them the same way. Twenty-four
+    ports that each went down once are not one port flapping twenty-four times:
+    transitions are counted per entity, falling back to the entity class only
+    when the event names none.
   * **Volume bursts** — a device whose event rate spikes far above its own
     baseline is misbehaving even when every individual event looks routine.
   * **Trend** — whether a device's error activity is rising or falling across
     the analysis window, projected into a deterministic 24h risk band.
 
-Everything is heuristic, streaming-safe (O(devices × entity classes) memory),
-and dependency-free. Timestamps in network logs are unreliable — mixed
-formats, missing entirely — so bucketing uses the minute prefix of whatever
-timestamp string exists and falls back to arrival order.
+Everything is heuristic, streaming-safe (O(devices × tracked entities) memory,
+capped per device), and dependency-free. Timestamps in network logs are
+unreliable — mixed formats, missing entirely — so bucketing uses the minute
+prefix of whatever timestamp string exists and falls back to arrival order;
+buckets are ordered by that minute, not by when they were last touched, so
+multi-file input does not skew the trend.
 """
 from __future__ import annotations
 
 import re
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from datetime import datetime
+from functools import lru_cache
 
+from ai_log_analyzer.causal import _parse_event_ts
 from ai_log_analyzer.classifier import ClassifiedEvent
+from ai_log_analyzer.entity_state import entity_key
 
 # Descriptions that represent an entity going DOWN / coming back UP.
 # Keyed by KB description (stable strings from the classifier), grouped into
@@ -58,18 +67,35 @@ _ENTITY_LABELS: dict[str, str] = {
 _SECONDS_RE = re.compile(r":\d{2}(?:[.,]\d+)?\s*(?:Z|[+-]\d{2}:?\d{2})?$")
 
 _MAX_BUCKETS_PER_HOST = 512
+_MAX_ENTITIES_PER_HOST = 1024   # beyond this, new entities share their class-level slot
 _ARRIVAL_BUCKET_SIZE = 200  # events per synthetic bucket when no timestamp
 
 
 @dataclass
 class _DeviceState:
-    transitions: dict[str, int] = field(default_factory=dict)   # entity → down↔up flips
-    last_state: dict[str, str] = field(default_factory=dict)    # entity → "down"|"up"
-    downs: dict[str, int] = field(default_factory=dict)         # entity → down events
+    # keyed by (entity class, entity id); id is "" when the event names none
+    transitions: dict[tuple[str, str], int] = field(default_factory=dict)   # entity → down↔up flips
+    last_state: dict[tuple[str, str], str] = field(default_factory=dict)    # entity → "down"|"up"
+    downs: dict[tuple[str, str], int] = field(default_factory=dict)         # entity → down events
     criticals: int = 0
     highs: int = 0
     total: int = 0
     buckets: OrderedDict[str, int] = field(default_factory=OrderedDict)  # minute → count
+
+
+_SEQ_RE = re.compile(r"seq-(\d+)$")
+
+
+@lru_cache(maxsize=4096)
+def _bucket_order(key: str) -> tuple[int, float, str]:
+    """Chronological sort key of a minute bucket (timed first, arrival buckets by number)."""
+    m = _SEQ_RE.match(key)
+    if m:
+        return (2, float(m.group(1)), key)
+    parsed = _parse_event_ts(f"{key}:00")
+    if parsed is None:
+        return (1, 0.0, key)
+    return (0, (parsed - datetime.min).total_seconds(), key)
 
 
 class StabilityTracker:
@@ -91,6 +117,7 @@ class StabilityTracker:
 
         entity = _DOWN_DESCRIPTIONS.get(e.description)
         if entity is not None:
+            entity = self._entity(st, entity, e)
             st.downs[entity] = st.downs.get(entity, 0) + 1
             if st.last_state.get(entity) == "up":
                 st.transitions[entity] = st.transitions.get(entity, 0) + 1
@@ -98,6 +125,7 @@ class StabilityTracker:
         else:
             entity = _UP_DESCRIPTIONS.get(e.description)
             if entity is not None:
+                entity = self._entity(st, entity, e)
                 if st.last_state.get(entity) == "down":
                     st.transitions[entity] = st.transitions.get(entity, 0) + 1
                 st.last_state[entity] = "up"
@@ -106,10 +134,18 @@ class StabilityTracker:
         ts = e.timestamp or ""
         key = _SECONDS_RE.sub("", ts) if ts else f"seq-{self._seq // _ARRIVAL_BUCKET_SIZE}"
         st.buckets[key] = st.buckets.get(key, 0) + 1
-        st.buckets.move_to_end(key)
-        while len(st.buckets) > _MAX_BUCKETS_PER_HOST:
-            st.buckets.popitem(last=False)
+        if len(st.buckets) > _MAX_BUCKETS_PER_HOST:
+            del st.buckets[min(st.buckets, key=_bucket_order)]   # drop the oldest minute, not the least recent
         self._seq += 1
+
+    @staticmethod
+    def _entity(st: _DeviceState, cls: str, e: ClassifiedEvent) -> tuple[str, str]:
+        """(class, id) of the entity an up/down event is about."""
+        ek = entity_key(e)
+        key = (cls, ek[2] if ek else "")
+        if key[1] and key not in st.last_state and len(st.last_state) >= _MAX_ENTITIES_PER_HOST:
+            return (cls, "")
+        return key
 
     # ── report ────────────────────────────────────────────────────────────
 
@@ -130,7 +166,7 @@ class StabilityTracker:
     @staticmethod
     def _trend(st: _DeviceState) -> str:
         """Rising/stable/falling error activity across the window halves."""
-        counts = list(st.buckets.values())
+        counts = [st.buckets[k] for k in sorted(st.buckets, key=_bucket_order)]
         if len(counts) < 4:
             return "stable"
         half = len(counts) // 2
@@ -172,12 +208,14 @@ class StabilityTracker:
             burst = self._burst_ratio(st)
             trend = self._trend(st)
             score = self._score(st, flaps, burst)
-            worst_entity = max(st.transitions, key=st.transitions.get) if st.transitions else ""
+            flapped = {k: n for k, n in st.transitions.items() if n >= 2}   # at least one round trip
+            worst_cls, worst_id = max(flapped, key=flapped.get) if flapped else ("", "")
             devices.append({
                 "hostname": host,
                 "score": score,
                 "flaps": flaps,
-                "flapping_entity": _ENTITY_LABELS.get(worst_entity, worst_entity),
+                "flapping_entity": _ENTITY_LABELS.get(worst_cls, worst_cls),
+                "flapping_entity_id": worst_id,
                 "criticals": st.criticals,
                 "highs": st.highs,
                 "events": st.total,
