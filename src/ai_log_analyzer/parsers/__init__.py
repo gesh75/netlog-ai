@@ -5,8 +5,9 @@
     ev.vendor, ev.event_type, ev.tunnel_id, ev.state   # fortinet, ike_phase1, HQ-DC1, down
 
 Built-in plugins, in priority order: FortiOS key=value (10), PAN-OS CSV (20),
-Cisco Catalyst SD-WAN (30), generic syslog RFC 5424/3164/Junos + NOS entity
-enrichment (50), SecureCRT recordings (60), fallback (1000). Third-party
+Cisco Catalyst SD-WAN (30), JSON lines (40), CEF (41), LEEF (42), generic syslog
+RFC 5424/3164/Junos/relay + NOS entity enrichment (50), SecureCRT recordings (60),
+fallback (1000). Third-party
 plugins register with ``registry.register(MyParser())``.
 """
 from __future__ import annotations
@@ -31,10 +32,11 @@ from ai_log_analyzer.parsers.generic import (
 )
 from ai_log_analyzer.parsers.panos import PanOSParser
 from ai_log_analyzer.parsers.sdwan import CiscoSdwanParser
+from ai_log_analyzer.parsers.structured import CefParser, JsonLineParser, LeefParser
 
 registry = ParserRegistry()
-for _plugin in (FortiOSParser(), PanOSParser(), CiscoSdwanParser(), SyslogParser(),
-                SecureCrtParser(), FallbackParser()):
+for _plugin in (FortiOSParser(), PanOSParser(), CiscoSdwanParser(), JsonLineParser(), CefParser(),
+                LeefParser(), SyslogParser(), SecureCrtParser(), FallbackParser()):
     registry.register(_plugin)
 
 _BODY_PLUGINS = (FortiOSParser(), PanOSParser(), CiscoSdwanParser())
