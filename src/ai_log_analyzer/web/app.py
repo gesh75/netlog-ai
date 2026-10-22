@@ -1776,7 +1776,10 @@ def create_app() -> Flask:
             st = worker.status()
             triage.update(running=st["running"], role=st["role"], sinks=st["sinks"],
                           window_events=st["window_events"], totals=st["totals"],
-                          last_tick_at=(st.get("last_tick") or {}).get("at"))
+                          last_tick_at=(st.get("last_tick") or {}).get("at"),
+                          spool_gap_rows=st.get("spool_gap_rows", {}),
+                          pending_deliveries=st.get("pending_deliveries", 0),
+                          sink_state=st.get("sink_state", {}))
         if db is not None:
             try:
                 triage["tickets"] = db.triage_count()
