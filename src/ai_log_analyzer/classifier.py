@@ -695,6 +695,11 @@ _DEFAULT_ACTIONS: dict[tuple[str, str], str] = {
     ("high", "sdwan"):          "Check SD-WAN overlay — BFD/OMP/control connections and transport SLA",
     ("high", "firewall"):       "Check firewall session/memory headroom — risk of new-session drops",
     ("medium", "sdwan"):        "Monitor SD-WAN path quality — confirm SLA recovery",
+    ("high", "system"):         "Check device resources and process health — look at CPU/memory consumers and recent restarts",
+    ("medium", "system"):       "Check which process is holding the CPU — compare against the usual baseline",
+    ("high", "stp"):            "Find the port that received the unexpected BPDU — fix the neighbor or edge-port config",
+    ("high", "aaa"):            "Verify AAA server reachability — confirm local/fallback login still works",
+    ("high", "hardware"):       "Inspect hardware — check optics Rx power, line card and chassis alarms",
     ("low", "auth"):             "Informational — log user access for audit",
     ("low", "config"):           "Informational — track config changes in change log",
 }
