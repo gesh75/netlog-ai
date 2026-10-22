@@ -253,6 +253,10 @@ class StateDB:
                 (namespace, key, json.dumps(value), time.time()),
             )
 
+    def kv_delete(self, namespace: str, key: str) -> None:
+        with self.write() as c:
+            c.execute("DELETE FROM kv WHERE namespace=? AND key=?", (namespace, key))
+
     def kv_get_all(self, namespace: str) -> dict[str, Any]:
         rows = self.conn().execute("SELECT key, value FROM kv WHERE namespace=?", (namespace,)).fetchall()
         out: dict[str, Any] = {}
