@@ -8,7 +8,17 @@ automation path. Each export runs in three stages:
 2. **Dry run**: an Ansible ``check_mode: true`` + ``diff: true`` task
    (``--tags dry_run``), or NAPALM ``dry_run=True``. Nothing is applied.
 3. **Apply → verify → confirm**, with a ``rescue`` rollback that only fires
-   when the apply step actually changed the device.
+   when the apply step actually changed the device. The verify step is a real
+   gate: where the post-check output can be asserted reliably (a drained BGP
+   peer must no longer be Established; Junos/IOS-XE/NX-OS/EOS) an ``assert``
+   fails the play and triggers the rollback; everywhere else the play stops for
+   an explicit operator ``yes`` (no answer = roll back). Nothing is ever
+   confirmed or persisted on the strength of the post-checks merely running.
+
+Only the Junos play (``commit confirmed``) has a device-side auto-revert timer;
+the other exports have no dead-man timer, so their safety net is the dry run,
+the verification gate and the rescue rollback (the CLI card's vendor timer is
+not part of the playbook).
 
 Collections: ``cisco.ios``, ``cisco.nxos``, ``arista.eos``,
 ``junipernetworks.junos`` (native ``commit confirmed`` + ``rollback``),
@@ -21,14 +31,23 @@ run against a lab device first.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
+import re
 from typing import Any
 
 from ai_log_analyzer.remediation import (
     RemediationActionType,
     RemediationPlan,
     SafetyGuardrail,
+    SafetyViolationError,
     VendorOS,
+    clean_text,
+    validate_ansible_host,
+    validate_device,
+    validate_interface,
+    validate_neighbor_ip,
+    validate_plan_id,
 )
 
 
@@ -117,25 +136,118 @@ def config_blocks(lines: list[str]) -> list[dict[str, list[str]]]:
     return [{"parents": list(p), "lines": ls} for p, ls in blocks.items() if ls]
 
 
-def _screen(plan: RemediationPlan) -> None:
+_TEMPLATE_RE = re.compile(r"\{\{|\{%|\{#")
+_CONTROL_CHARS_RE = re.compile(r"[\r\n\x00-\x08\x0b-\x1f\x7f\x85  ]")
+
+
+def _checks(commands: list[str]) -> list[str]:
+    """Pre/post-checks without comment-only lines."""
+    return [c for c in commands if c.strip() and not c.strip().startswith(("#", "!"))]
+
+
+def _screen(plan: RemediationPlan, ansible: bool = False) -> None:
     if not plan.body_commands:
         raise ExportUnsupportedError(f"plan {plan.plan_id} has no body commands to export")
+    validate_plan_id(plan.plan_id)
+    if ansible:
+        validate_ansible_host(plan.device)
+    else:
+        validate_device(plan.device)
+    if plan.interface:
+        validate_interface(plan.interface)
+    if plan.bgp_neighbor_ip:
+        validate_neighbor_ip(plan.bgp_neighbor_ip)
     SafetyGuardrail.validate(plan.body_commands, plan.rollback_minutes)
     if plan.inverse_commands:
         SafetyGuardrail.validate(plan.inverse_commands, plan.rollback_minutes)
+    SafetyGuardrail.validate_read_only(plan.pre_checks, "pre-check")
+    SafetyGuardrail.validate_read_only(plan.post_checks, "post-check")
+    for cmd in [*plan.body_commands, *plan.inverse_commands, *plan.pre_checks, *plan.post_checks]:
+        if _CONTROL_CHARS_RE.search(cmd):
+            raise SafetyViolationError(f"command {clean_text(cmd, 60)!r} contains a line break or control character")
+        if _TEMPLATE_RE.search(cmd):  # Ansible would template it on the controller
+            raise SafetyViolationError(f"command {cmd!r} contains template syntax ({{{{ }}}} or {{% %}})")
 
 
 def _header(plan: RemediationPlan, tool: str) -> str:
+    timer = (f"commit confirmed {int(plan.rollback_minutes)} min auto-reverts unless the verification gate passes"
+             if plan.vendor == VendorOS.JUNIPER_JUNOS else
+             "no device-side auto-revert timer in this export: safety net = dry run + verification gate + rescue rollback")
     return (
-        f"# netlog-ai remediation {plan.plan_id} — {plan.device} ({plan.vendor.value}) — {plan.action_type.value}\n"
-        f"# Generated {plan.created_at} for {tool}. Rationale: {plan.rationale}\n"
-        f"# Blast radius: {plan.blast_radius_notes or 'review before running'}\n"
+        f"# netlog-ai remediation {clean_text(plan.plan_id, 64)} — {clean_text(plan.device, 255)} "
+        f"({plan.vendor.value}) — {plan.action_type.value}\n"
+        f"# Generated {clean_text(plan.created_at, 40)} for {tool}. Rationale: {clean_text(plan.rationale)}\n"
+        f"# Blast radius: {clean_text(plan.blast_radius_notes) or 'review before running'}\n"
+        f"# Rollback: {timer}.\n"
         "# 1) Dry run (nothing applied):  ansible-playbook -i <inventory> this.yml --check --diff\n"
         "#    or only the diff task:      ansible-playbook -i <inventory> this.yml --tags dry_run\n"
         "# 2) Apply, verify, confirm:     ansible-playbook -i <inventory> this.yml --diff\n"
+        "#    (confirm/persist only runs after the post-check assertion or an operator 'yes')\n"
         "# Screened by netlog-ai SafetyGuardrail. Validate against a lab device first.\n"
         "---\n"
     )
+
+
+def _post_assertion(plan: RemediationPlan) -> dict[str, str] | None:
+    """Machine-checkable post-condition, or None when the output cannot be asserted reliably.
+
+    Only a graceful drain of a known IPv4 BGP peer on Junos / IOS-XE / NX-OS / EOS qualifies:
+    after the drain that peer must not be Established in ``show bgp summary``. The regexes
+    avoid backslashes so they survive YAML, Jinja and Python string literals unchanged.
+    """
+    if plan.action_type != RemediationActionType.GRACEFUL_LINK_DRAIN or not plan.bgp_neighbor_ip:
+        return None
+    style = {VendorOS.ARISTA_EOS: "word", VendorOS.JUNIPER_JUNOS: "word",
+             VendorOS.CISCO_IOS_XE: "numeric", VendorOS.CISCO_NXOS: "numeric"}.get(plan.vendor)
+    try:
+        ip = ipaddress.ip_address(plan.bgp_neighbor_ip)
+    except ValueError:
+        return None
+    # IPv6 rows wrap on IOS/NX-OS, and the output must actually contain the summary.
+    if style is None or ip.version != 4 or not any("bgp summary" in c.lower() for c in _checks(plan.post_checks)):
+        return None
+    peer = str(ip).replace(".", "[.]")
+    established = f"(?m)^ *{peer} .* Estab" if style == "word" else f"(?m)^ *{peer} .* [0-9]+ *$"
+    return {"neighbor": str(ip), "require": "(?i)bgp|peers", "established": established}
+
+
+_VERIFIED = "netlog_verified | default(false) | bool"
+_SHOW_CLI = "(netlog_post | default({})).stdout_lines | default('no post-checks configured')"
+
+
+def _gate_tasks(plan: RemediationPlan, show: str, assertable: bool = False) -> list[dict[str, Any]]:
+    """Verification gate between the post-checks and the confirm/persist step.
+
+    Asserts on the post-check output when possible; otherwise stops for an explicit operator
+    ``yes``. A failure raises inside the apply block, so the ``rescue`` rollback runs.
+    ``show`` is a Jinja expression that renders the output for the operator; ``assertable``
+    means the registered ``netlog_post.stdout`` is the CLI text the assertion can parse.
+    """
+    spec = _post_assertion(plan) if assertable else None
+    if spec is not None:
+        text = "netlog_post.stdout | join('\\n')"
+        tasks: list[dict[str, Any]] = [{
+            "name": f"Verify: BGP peer {spec['neighbor']} is no longer Established (fails -> roll back)",
+            "ansible.builtin.assert": {
+                "that": [f"({text}) is search('{spec['require']}')",
+                         f"({text}) is not search('{spec['established']}')"],
+                "fail_msg": f"netlog-ai {plan.plan_id}: post-checks do not show peer {spec['neighbor']} "
+                            "drained (still Established, or no BGP summary in the output).",
+                "success_msg": f"peer {spec['neighbor']} is no longer Established"}}]
+    else:
+        tasks = [
+            {"name": "Post-check output for operator review", "ansible.builtin.debug": {"msg": f"{{{{ {show} }}}}"}},
+            {"name": f"Operator verification — type yes to keep {plan.plan_id}; anything else rolls it back",
+             "ansible.builtin.pause": {"prompt": f"netlog-ai {plan.plan_id}: post-check output cannot be asserted "
+                                                 "automatically. Review it above. Type 'yes' to confirm, "
+                                                 "anything else (or no answer) rolls the change back"},
+             "register": "netlog_manual"},
+            {"name": "Roll back unless the operator confirmed", "ansible.builtin.assert": {
+                "that": ["(netlog_manual.user_input | default('') | trim | lower) == 'yes'"],
+                "fail_msg": f"netlog-ai {plan.plan_id}: not confirmed by the operator."}},
+        ]
+    tasks.append({"name": "Verification gate passed", "ansible.builtin.set_fact": {"netlog_verified": True}})
+    return tasks
 
 
 def _fail_task(plan: RemediationPlan, how: str) -> dict[str, Any]:
@@ -146,8 +258,8 @@ def _fail_task(plan: RemediationPlan, how: str) -> dict[str, Any]:
 # ── Ansible ─────────────────────────────────────────────────────────────────
 
 def to_ansible_playbook(plan: RemediationPlan) -> str:
-    """Ready-to-run playbook YAML for ``plan``. Raises ExportUnsupportedError."""
-    _screen(plan)
+    """Ready-to-run playbook YAML for ``plan``. Raises ExportUnsupportedError / SafetyViolationError."""
+    _screen(plan, ansible=True)
     if plan.vendor in _CLI_FAMILY:
         play = _cli_play(plan)
     elif plan.vendor == VendorOS.JUNIPER_JUNOS:
@@ -185,10 +297,11 @@ def _cli_play(plan: RemediationPlan) -> dict[str, Any]:
     if plan.inverse_commands:
         play["vars"]["netlog_inverse_blocks"] = config_blocks(plan.inverse_commands)
     cfg_args = {"lines": "{{ item.lines }}", "parents": "{{ item.parents if item.parents else omit }}"}
+    pre, post = _checks(plan.pre_checks), _checks(plan.post_checks)
     checkpoint = f"netlog-{plan.plan_id.lower()}"
     tasks: list[dict[str, Any]] = [
-        {"name": "Pre-checks (read-only)", fam["cmd"]: {"commands": plan.pre_checks},
-         "register": "netlog_pre", "check_mode": False, "changed_when": False},
+        *([{"name": "Pre-checks (read-only)", fam["cmd"]: {"commands": pre},
+            "register": "netlog_pre", "check_mode": False, "changed_when": False}] if pre else []),
         {"name": "Dry run — show the diff, apply nothing", fam["cfg"]: dict(cfg_args),
          "loop": "{{ netlog_blocks }}", "check_mode": True, "diff": True, "tags": ["dry_run"]},
     ]
@@ -198,9 +311,11 @@ def _cli_play(plan: RemediationPlan) -> dict[str, Any]:
     apply_block += [
         {"name": "Apply change", fam["cfg"]: dict(cfg_args), "loop": "{{ netlog_blocks }}",
          "register": "netlog_apply", "diff": True},
-        {"name": "Post-checks", fam["cmd"]: {"commands": plan.post_checks}, "register": "netlog_post",
-         "changed_when": False},
-        {"name": "Persist (write memory) only after post-checks pass", fam["cfg"]: {"save_when": "modified"}},
+        *([{"name": "Post-checks", fam["cmd"]: {"commands": post}, "register": "netlog_post",
+            "changed_when": False}] if post else []),
+        *_gate_tasks(plan, _SHOW_CLI, assertable=bool(post)),
+        {"name": "Persist (write memory) — only after the verification gate passed", fam["cfg"]: {"save_when": "modified"},
+         "when": _VERIFIED},
     ]
     rescue: list[dict[str, Any]] = []
     if plan.vendor == VendorOS.CISCO_NXOS:
@@ -225,9 +340,10 @@ def _junos_play(plan: RemediationPlan) -> dict[str, Any]:
     play = _base_play(plan, "ansible.netcommon.netconf", "junipernetworks.junos.junos")
     lines = [c.strip() for c in plan.body_commands if c.strip()]
     comment = f"netlog-ai {plan.plan_id}"
+    pre, post = _checks(plan.pre_checks), _checks(plan.post_checks)
     play["tasks"] = [
-        {"name": "Pre-checks (read-only)", "junipernetworks.junos.junos_command": {"commands": plan.pre_checks},
-         "register": "netlog_pre", "check_mode": False, "changed_when": False},
+        *([{"name": "Pre-checks (read-only)", "junipernetworks.junos.junos_command": {"commands": pre},
+            "register": "netlog_pre", "check_mode": False, "changed_when": False}] if pre else []),
         {"name": "Dry run — commit check + diff, apply nothing",
          "junipernetworks.junos.junos_config": {"lines": lines, "comment": comment},
          "check_mode": True, "diff": True, "tags": ["dry_run"]},
@@ -237,10 +353,12 @@ def _junos_play(plan: RemediationPlan) -> dict[str, Any]:
               "junipernetworks.junos.junos_config": {"lines": lines, "confirm": plan.rollback_minutes,
                                                      "comment": comment},
               "register": "netlog_apply", "diff": True},
-             {"name": "Post-checks", "junipernetworks.junos.junos_command": {"commands": plan.post_checks},
-              "register": "netlog_post", "changed_when": False},
-             {"name": "Confirm the commit (make permanent)",
-              "junipernetworks.junos.junos_config": {"confirm_commit": True}},
+             *([{"name": "Post-checks", "junipernetworks.junos.junos_command": {"commands": post},
+                 "register": "netlog_post", "changed_when": False}] if post else []),
+             *_gate_tasks(plan, _SHOW_CLI,
+                          assertable=bool(post)),
+             {"name": "Confirm the commit (make permanent) — only after the verification gate passed",
+              "junipernetworks.junos.junos_config": {"confirm_commit": True}, "when": _VERIFIED},
          ],
          "rescue": [
              {"name": "Roll back the unconfirmed commit now",
@@ -295,7 +413,8 @@ def _fortios_play(plan: RemediationPlan) -> dict[str, Any]:
         fact(f"Pre-check: current {intf} settings (read-only)"),
         dry,
         {"name": "Apply, verify, roll back on failure", "when": "not ansible_check_mode", "tags": ["apply"],
-         "block": [apply, {**fact(f"Post-check: {intf} settings"), "register": "netlog_post"}],
+         "block": [apply, {**fact(f"Post-check: {intf} settings"), "register": "netlog_post"},
+                   *_gate_tasks(plan, "netlog_post | default({}) | to_nice_json")],
          "rescue": [rollback, _fail_task(plan, f"{intf} set back to up.")]},
     ]
     return play
@@ -330,7 +449,9 @@ def _panos_play(plan: RemediationPlan) -> dict[str, Any]:
              {"name": "Commit", "paloaltonetworks.panos.panos_commit_firewall": {"provider": prov},
               "register": "netlog_commit"},
              {"name": "Post-check", "paloaltonetworks.panos.panos_op": {
-                 "provider": prov, "cmd": "show routing protocol bgp summary"}, "changed_when": False},
+                 "provider": prov, "cmd": "show routing protocol bgp summary"}, "register": "netlog_post",
+              "changed_when": False},
+             *_gate_tasks(plan, "netlog_post | default({}) | to_nice_json"),
          ],
          "rescue": [
              {"name": f"Load snapshot {snapshot}", "paloaltonetworks.panos.panos_op": {
@@ -351,11 +472,12 @@ def _frr_play(plan: RemediationPlan) -> dict[str, Any]:
     argv = ["vtysh", "-c", "configure terminal"]
     for cmd in plan.body_commands:
         argv += ["-c", cmd.strip()]
-    backup = f"/etc/frr/frr.conf.{plan.plan_id.lower()}.bak"
+    # unique per plan instance: a second run for the same device/interface keeps its own backup
+    backup = f"/etc/frr/frr.conf.{plan.plan_id.lower()}.{re.sub(r'[^0-9]', '', plan.created_at)[:20]}.bak"
     play["tasks"] = [
         {"name": f"Pre-check: {c}", "ansible.builtin.command": {"argv": ["vtysh", "-c", c]},
          "check_mode": False, "changed_when": False}
-        for c in plan.pre_checks
+        for c in _checks(plan.pre_checks)
     ] + [
         {"name": "Dry run — commands that would be applied", "ansible.builtin.debug": {"var": "netlog_argv"},
          "vars": {"netlog_argv": argv}, "tags": ["dry_run"]},
@@ -365,9 +487,13 @@ def _frr_play(plan: RemediationPlan) -> dict[str, Any]:
              {"name": "Backup frr.conf", "ansible.builtin.copy": {"src": "/etc/frr/frr.conf", "dest": backup,
                                                                  "remote_src": True}},
              {"name": "Apply via vtysh", "ansible.builtin.command": {"argv": argv}, "register": "netlog_apply"},
-             *({"name": f"Post-check: {c}", "ansible.builtin.command": {"argv": ["vtysh", "-c", c]},
-                "changed_when": False} for c in plan.post_checks),
-             {"name": "Persist", "ansible.builtin.command": {"argv": ["vtysh", "-c", "write memory"]}},
+             *([{"name": "Post-checks (read-only)", "ansible.builtin.command": {"argv": ["vtysh", "-c", "{{ item }}"]},
+                 "loop": _checks(plan.post_checks), "register": "netlog_post", "changed_when": False}]
+               if plan.post_checks else []),
+             *_gate_tasks(plan, "(netlog_post | default({})).results | default([]) | map(attribute='stdout_lines')"
+                                " | list"),
+             {"name": "Persist — only after the verification gate passed",
+              "ansible.builtin.command": {"argv": ["vtysh", "-c", "write memory"]}, "when": _VERIFIED},
          ],
          "rescue": [
              {"name": "Restore frr.conf", "ansible.builtin.copy": {"src": backup, "dest": "/etc/frr/frr.conf",
@@ -390,24 +516,37 @@ def to_nornir_script(plan: RemediationPlan) -> str:
     if driver is None:
         raise ExportUnsupportedError(f"{plan.vendor.value}: no NAPALM driver mapping — use the Ansible export or CLI card")
     config = "\n".join(c.strip() if plan.vendor == VendorOS.JUNIPER_JUNOS else c for c in plan.body_commands)
+    spec = _post_assertion(plan)
+    post = _checks(plan.post_checks)
+    # every dynamic value is emitted through repr() (a valid Python literal); the docstring only
+    # carries validated identifiers, never free text
+    doc_device = plan.device.replace('"', "").replace("\\", "")
     return f'''#!/usr/bin/env python3
-"""netlog-ai remediation {plan.plan_id} — {plan.device} ({plan.vendor.value}, NAPALM driver "{driver}").
+"""netlog-ai remediation {plan.plan_id} — {doc_device} ({plan.vendor.value}, NAPALM driver "{driver}").
 
 Default run is a DRY RUN: NAPALM loads a merge candidate, prints the diff and
-discards it. Pass --apply to commit, run post-checks, and roll back through
-NAPALM if any post-check fails. Screened by netlog-ai SafetyGuardrail.
+discards it. Pass --apply to commit and run the post-checks. The change is
+kept only if the post-check assertion passes (or, when the output cannot be
+asserted for this plan, the operator types "yes" on a terminal); otherwise it
+is rolled back through NAPALM and the script exits 2. There is no device-side
+auto-revert timer in this export. Screened by netlog-ai SafetyGuardrail.
 Requires: pip install nornir nornir_napalm nornir_utils
 """
+import re
 import sys
 
 from nornir import InitNornir
 from nornir_napalm.plugins.tasks import napalm_cli, napalm_configure
 from nornir_utils.plugins.functions import print_result
 
-DEVICE = {json.dumps(plan.device)}
-CONFIG = {json.dumps(config)}
-PRE_CHECKS = {json.dumps(plan.pre_checks)}
-POST_CHECKS = {json.dumps(plan.post_checks)}
+DEVICE = {repr(plan.device)}
+CONFIG = {repr(config)}
+PRE_CHECKS = {repr(_checks(plan.pre_checks))}
+POST_CHECKS = {repr(post)}
+# Post-condition on the post-check text: REQUIRE must match and ESTABLISHED must not
+# (a drained BGP peer is no longer Established). None = ask the operator instead.
+REQUIRE = {repr(spec["require"] if spec and post else None)}
+ESTABLISHED = {repr(spec["established"] if spec and post else None)}
 APPLY = "--apply" in sys.argv
 
 
@@ -415,16 +554,50 @@ def rollback(task):
     task.host.get_connection("napalm", task.nornir.config).rollback()
 
 
+def assertion_failure(text):
+    """Why the post-check output fails the assertion, or None when it holds."""
+    if not re.search(REQUIRE, text):
+        return "post-check output does not contain a BGP summary"
+    if re.search(ESTABLISHED, text):
+        return "the drained BGP peer is still Established"
+    return None
+
+
+def operator_confirms():
+    if not sys.stdin.isatty():
+        print("post-checks cannot be asserted automatically and there is no terminal to ask: rolling back")
+        return False
+    return input("Review the post-check output above. Type 'yes' to keep the change: ").strip().lower() == "yes"
+
+
+def verified(post):
+    if post is None or post.failed:
+        return False
+    out = post[DEVICE][0].result
+    text = "\\n".join(str(v) for v in out.values()) if isinstance(out, dict) else str(out)
+    if REQUIRE is None:
+        return operator_confirms()
+    problem = assertion_failure(text)
+    if problem:
+        print("ASSERTION FAILED: " + problem)
+    return problem is None
+
+
 def main() -> int:
     nr = InitNornir(config_file="config.yaml").filter(name=DEVICE)
-    print_result(nr.run(task=napalm_cli, commands=PRE_CHECKS))
+    if DEVICE not in nr.inventory.hosts:
+        print("device " + DEVICE + " not found in the Nornir inventory")
+        return 1
+    if PRE_CHECKS:
+        print_result(nr.run(task=napalm_cli, commands=PRE_CHECKS))
     result = nr.run(task=napalm_configure, configuration=CONFIG, dry_run=not APPLY)
     print_result(result)
     if not APPLY or result.failed:
         return 1 if result.failed else 0
-    post = nr.run(task=napalm_cli, commands=POST_CHECKS)
-    print_result(post)
-    if post.failed:
+    post = nr.run(task=napalm_cli, commands=POST_CHECKS) if POST_CHECKS else None
+    if post is not None:
+        print_result(post)
+    if not verified(post):
         print_result(nr.run(task=rollback))
         return 2
     return 0
