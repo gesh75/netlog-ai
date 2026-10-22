@@ -653,8 +653,9 @@ def test_mcp_solarwinds_tools_registered() -> None:
 
 
 @pytest.mark.unit
-def test_mcp_fetch_and_explicit_push_note() -> None:
+def test_mcp_fetch_and_explicit_push_note(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("mcp")
+    monkeypatch.setenv("NETLOG_MCP_ALLOW_WRITE", "1")   # the writeback tool is gated off by default
     import asyncio
 
     from ai_log_analyzer.mcp_server.server import _build_server
