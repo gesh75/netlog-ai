@@ -9,16 +9,9 @@ import pytest
 
 from ai_log_analyzer.sources import SourceConfig
 from ai_log_analyzer.sources.syslog import SyslogListenerSource
+from tests._helpers import listen_on_free_port, wait_for
 
 pytestmark = pytest.mark.unit
-
-
-def _free_udp_port() -> int:
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
 
 
 def _mk_source(port: int, source_id: str = "tail-test") -> SyslogListenerSource:
@@ -37,11 +30,10 @@ def _send(port: int, line: bytes) -> None:
 
 
 def test_fetch_new_cursor_returns_only_new_lines():
-    port = _free_udp_port()
-    src = _mk_source(port)
+    port, src = listen_on_free_port(_mk_source)
     try:
         _send(port, b"<22>Jan  1 12:00:00 r1 rpd: bgp peer 10.0.0.1 down\n")
-        time.sleep(0.3)
+        assert wait_for(lambda: len(src.fetch_new(0)[0]) >= 1), "first datagram never arrived"
         events, cursor = src.fetch_new(0)
         assert len(events) == 1
         # No new lines → empty batch, cursor stable
@@ -49,7 +41,7 @@ def test_fetch_new_cursor_returns_only_new_lines():
         assert events2 == [] and cursor2 == cursor
         # One more line → exactly one new event
         _send(port, b"<22>Jan  1 12:00:01 r1 rpd: ospf neighbor 10.0.0.5 down\n")
-        time.sleep(0.3)
+        assert wait_for(lambda: len(src.fetch_new(cursor)[0]) >= 1), "second datagram never arrived"
         events3, cursor3 = src.fetch_new(cursor)
         assert len(events3) == 1 and cursor3 == cursor + 1
         assert "ospf" in f"{events3[0].appname} {events3[0].message}"
@@ -61,11 +53,14 @@ def test_sse_tail_streams_classified_events():
     from ai_log_analyzer.sources.manager import manager as source_manager
     from ai_log_analyzer.web.app import create_app
 
-    port = _free_udp_port()
-    cfg = SourceConfig(id="sse-test", type="syslog", url="udp://127.0.0.1",
-                       extra={"port": str(port), "proto": "udp",
-                              "bind": "127.0.0.1", "buffer_size": "100"})
-    source_manager.add(cfg)
+    def _register(p: int) -> SourceConfig:
+        cfg = SourceConfig(id="sse-test", type="syslog", url="udp://127.0.0.1",
+                           extra={"port": str(p), "proto": "udp",
+                                  "bind": "127.0.0.1", "buffer_size": "100"})
+        source_manager.add(cfg)
+        return cfg
+
+    port, _cfg = listen_on_free_port(_register)
     app = create_app()
     app.testing = True
     client = app.test_client()
