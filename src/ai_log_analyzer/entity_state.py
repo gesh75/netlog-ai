@@ -11,7 +11,8 @@ labels each one:
     flapping   >= flap_threshold down transitions inside flap_window_s
     up         only up transitions seen (no incident)
 
-Memory is bounded: at most ``max_entities`` entities and ``max_transitions``
+Memory is bounded: at most ``max_entities`` entities (least recently updated
+dropped first, counted in ``dropped_entities``) and ``max_transitions``
 transitions each (oldest dropped). Timestamps are interpreted with the same
 RFC 3164 year-inference as the causal console so mixed-vendor streams order
 consistently; unparseable stamps fall back to arrival order.
@@ -135,11 +136,13 @@ class EntityStateTracker:
         slot = self._entities.get(key)
         if slot is None:
             if len(self._entities) >= self.max_entities:
-                self._entities.popitem(last=False)
+                self._entities.popitem(last=False)   # least recently updated
                 self.dropped_entities += 1
             slot = {"t": [], "vendor": ev.vendor, "event_type": ev.event_type,
                     "host": ev.hostname}
             self._entities[key] = slot
+        else:
+            self._entities.move_to_end(key)   # LRU: a busy entity is never the one evicted
         slot["t"].append((ev.timestamp or "", seq, state))
         if len(slot["t"]) > self.max_transitions:
             del slot["t"][0]
@@ -147,6 +150,15 @@ class EntityStateTracker:
 
     def __len__(self) -> int:
         return len(self._entities)
+
+    def status(self) -> dict[str, int]:
+        """Capacity counters: entities tracked, the cap, and how many were evicted."""
+        return {"tracked": len(self._entities), "max_entities": self.max_entities,
+                "dropped_entities": self.dropped_entities}
+
+    def summary(self, limit: int = 50) -> dict[str, Any]:
+        """``summarize`` over this tracker's report, including the eviction counter."""
+        return summarize(self.report().values(), limit, dropped_entities=self.dropped_entities)
 
     def report(self) -> dict[EntityKey, EntityState]:
         ref = _reference_dt(
@@ -218,14 +230,21 @@ class EntityStateTracker:
         )
 
 
-def summarize(states: Iterable[EntityState], limit: int = 50) -> dict[str, Any]:
-    """JSON-ready roll-up for AnalysisResult.entity_states."""
+def summarize(states: Iterable[EntityState], limit: int = 50, dropped_entities: int = 0) -> dict[str, Any]:
+    """JSON-ready roll-up for AnalysisResult.entity_states.
+
+    ``dropped_entities`` (evictions from a full tracker) is reported only when
+    non-zero, so the shape is unchanged for the normal case.
+    """
     items = sorted(states, key=lambda s: (_STATUS_RANK.get(s.status, 9), s.hostname, s.entity))
     counts: dict[str, int] = {}
     for s in items:
         counts[s.status] = counts.get(s.status, 0) + 1
-    return {"counts": counts, "entities": [s.to_dict() for s in items[:limit]],
-            "total": len(items)}
+    out: dict[str, Any] = {"counts": counts, "entities": [s.to_dict() for s in items[:limit]],
+                           "total": len(items)}
+    if dropped_entities:
+        out["dropped_entities"] = dropped_entities
+    return out
 
 
 def group_state(keys: Iterable[EntityKey], report: dict[EntityKey, EntityState]) -> tuple[str, dict[str, Any]]:

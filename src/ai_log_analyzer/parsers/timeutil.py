@@ -56,6 +56,33 @@ def normalize_ts(stamp: str, tz: str | None = None) -> tuple[str, bool]:
     return _normalize_cached(stamp or "", tz, now.replace(minute=0, second=0, microsecond=0))
 
 
+# A stamp this close to the next 1 January, from a device a little ahead of us,
+# belongs to the *coming* year. Wider than the clock's hour precision (see
+# normalize_ts) so a few seconds of skew at New Year's Eve cannot flip a year.
+_NEXT_YEAR_SKEW = timedelta(hours=6)
+_FUTURE_SKEW = timedelta(days=2)
+
+
+def _yearless(month: int, day: int, hh: int, mi: int, ss: int, off: timezone, now: datetime) -> datetime | None:
+    """Assign a year to an RFC 3164 stamp: the latest one that is not in the future."""
+    def build(year: int) -> datetime | None:
+        try:
+            return datetime(year, month, day, hh, mi, ss, tzinfo=off)
+        except ValueError:   # 29 Feb in a common year
+            return None
+
+    nxt = build(now.year + 1)
+    if nxt is not None and nxt - now <= _NEXT_YEAR_SKEW:
+        return nxt
+    # A stamp from "the future" belongs to last year (Dec → Jan rollover); 29 Feb
+    # walks back to the nearest leap year instead of failing.
+    for year in range(now.year, now.year - 8, -1):
+        dt = build(year)
+        if dt is not None and dt - now <= _FUTURE_SKEW:
+            return dt
+    return None
+
+
 @lru_cache(maxsize=8192)
 def _normalize_cached(stamp: str, tz: str | None, now: datetime) -> tuple[str, bool]:
     text = stamp.strip()
@@ -79,11 +106,9 @@ def _normalize_cached(stamp: str, tz: str | None, now: datetime) -> tuple[str, b
             if not month:
                 return "", False
             day, hh, mi, ss = (int(x) for x in m.groups()[1:])
-            off = _offset(tz) or timezone.utc
-            dt = datetime(now.year, month, day, hh, mi, ss, tzinfo=off)
-            # Yearless stamp from "the future" belongs to last year (Dec → Jan rollover).
-            if dt - now > timedelta(days=2):
-                dt = dt.replace(year=now.year - 1)
+            dt = _yearless(month, day, hh, mi, ss, _offset(tz) or timezone.utc, now)
+            if dt is None:
+                return "", False
             return _fmt(dt), _offset(tz) is None
         if _EPOCH_RE.match(text):
             n = int(text)
