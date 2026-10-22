@@ -327,10 +327,31 @@ _CANDIDATE_CACHE: dict[tuple[str, ...], list[tuple[re.Pattern[str], str, str, st
 _CANDIDATE_CACHE_MAX = 4096
 
 
+def _present_literals(text: str) -> tuple[str, ...]:
+    """Every gate literal contained in ``text``, via one compiled alternation.
+
+    ``_KEYWORDS`` is substring-free, so at most one keyword can start at any
+    index (two starting together would make the shorter a prefix of the longer)
+    and stepping the search one past each hit finds every keyword, overlapping
+    ones included. A literal that contains a keyword is then confirmed with a
+    plain ``in`` check, so the result equals a scan of all ``_GATE_LITERALS``.
+    """
+    found: set[str] = set()
+    pos = 0
+    while (m := _GATE_RE.search(text, pos)):
+        found.add(m.group())
+        pos = m.start() + 1
+    if not found:
+        return ()
+    return tuple(sorted({lit for k in found for lit in _LITERALS_WITH[k] if lit in text}))
+
+
 def _gated_candidates(combined: str) -> list[tuple[re.Pattern[str], str, str, str]]:
     """Ordered KB patterns that can possibly match ``combined`` (ASCII only)."""
-    present = tuple(k for k in _GATE_LITERALS if k in combined)
-    if not present or not _KEYWORDS:
+    if not _KEYWORDS:
+        return _UNGUARDED
+    present = _present_literals(combined)
+    if not present:
         return _UNGUARDED
     cached = _CANDIDATE_CACHE.get(present)
     if cached is None:
@@ -348,6 +369,12 @@ _KEYWORDS = tuple(sorted(
     k for k in _kw
     if not any(other != k and other in k for other in _kw)
 ))
+# One alternation over the substring-free keywords (longest first) replaces the
+# per-line scan of every literal; see _present_literals for why it is exact.
+_GATE_RE = re.compile("|".join(re.escape(k) for k in sorted(_KEYWORDS, key=len, reverse=True)))
+_LITERALS_WITH: dict[str, tuple[str, ...]] = {
+    k: tuple(lit for lit in _GATE_LITERALS if k in lit) for k in _KEYWORDS
+}
 
 # ── Custom user rules ────────────────────────────────────────────────────
 # Loaded from a JSON file (env AI_LOG_ANALYZER_CUSTOM_RULES or add_custom_rules()).
@@ -681,6 +708,14 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
         )
 
 
+def _time_sort_key(ev: ClassifiedEvent) -> tuple[str, str]:
+    """(UTC ISO stamp, raw fallback): unparseable stamps sort oldest, then lexicographically."""
+    from ai_log_analyzer.parsers.timeutil import normalize_ts
+
+    norm = ev.normalized_utc_ts or normalize_ts(ev.timestamp)[0]
+    return (norm, "" if norm else ev.timestamp)
+
+
 def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], dict[str, int], dict[str, int]]:
     """Classify a stream of LogEvents.
 
@@ -699,7 +734,8 @@ def classify_events(events: Iterable[LogEvent]) -> tuple[list[ClassifiedEvent], 
         sev_counts[ce.severity] = sev_counts.get(ce.severity, 0) + 1
         cat_counts[ce.category] = cat_counts.get(ce.category, 0) + 1
 
-    # Stable sort: pass 1 sorts newest first by ISO timestamp; pass 2 buckets by severity.
-    classified.sort(key=lambda e: e.timestamp, reverse=True)
+    # Stable sort: pass 1 sorts newest first; pass 2 buckets by severity. The time key is the
+    # parser's UTC-normalized stamp, so ISO, RFC 3164 and PAN-OS stamps order against each other.
+    classified.sort(key=_time_sort_key, reverse=True)
     classified.sort(key=lambda e: SEV_ORDER.get(e.severity, 5))
     return classified, sev_counts, cat_counts
