@@ -245,12 +245,6 @@ class SyslogListenerSource:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.rcvbuf)
         except OSError:
             log.warning("syslog %s: could not set SO_RCVBUF=%d", self.name, self.rcvbuf)
-        effective = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
-        # Linux reports twice the (clamped) value it applied; anything below the request means clamped.
-        if effective < self.rcvbuf:
-            log.warning("syslog %s: SO_RCVBUF requested %d but the kernel granted %d; raise net.core.rmem_max "
-                        "(sysctl) to absorb bursts without UDP loss", self.name, self.rcvbuf, effective)
-        self._stats["rcvbuf_effective"] = effective
         if self.proto == "udp" and sys.platform.startswith("linux"):
             try:
                 sock.setsockopt(socket.SOL_SOCKET, _SO_RXQ_OVFL, 1)
@@ -264,6 +258,12 @@ class SyslogListenerSource:
         except OSError:
             sock.close()
             raise
+        effective = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+        # Linux reports twice the (clamped) value it applied; anything below the request means clamped.
+        if effective < self.rcvbuf:
+            log.warning("syslog %s: SO_RCVBUF requested %d but the kernel granted %d; raise net.core.rmem_max "
+                        "(sysctl) to absorb bursts without UDP loss", self.name, self.rcvbuf, effective)
+        self._stats["rcvbuf_effective"] = effective
         sock.setblocking(False)
         return sock
 
