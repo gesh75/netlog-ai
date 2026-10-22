@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 import regex
 
+from ai_log_analyzer.hostnames import short_host
+
 # (regex, severity, category, description) — first match wins.
 # Patterns tested against f"{appname} {message}".lower()
 _KB_PATTERNS: list[tuple[str, str, str, str]] = [
@@ -607,7 +609,7 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
 
         yield ClassifiedEvent(
             timestamp=ev.timestamp,
-            hostname=ev.hostname.split(".")[0] if ev.hostname else "",
+            hostname=short_host(ev.hostname, fold=False),
             appname=ev.appname,
             severity=sev,
             severity_raw=ev.severity_raw,

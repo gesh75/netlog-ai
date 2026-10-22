@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent, classify_events
+from ai_log_analyzer.hostnames import short_host
 
 # Severity rank used to pick a device's worst severity across sources.
 _SEV_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -22,7 +23,7 @@ _SEV_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3, "i
 
 def _short_host(hostname: str) -> str:
     """Normalize a hostname to its short form (strip domain), lowercased."""
-    return (hostname or "").split(".")[0].strip().lower()
+    return short_host(hostname)
 
 
 def _site_of(hostname: str) -> str:
