@@ -181,9 +181,55 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
 
 SEV_ORDER: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
+# ── ReDoS bounds ─────────────────────────────────────────────────────────
+# Ingest caps a line at 64 KB and any syslog sender controls the text, so the
+# built-in table must not be able to pin a worker. Two layers: the text the KB
+# loop sees is cut to _MAX_MATCH_CHARS (head and tail kept, so trailing state
+# words such as "... changed state to down" survive), and every unbounded `.*`
+# gap between keywords is compiled as `.{0,_GAP_CHARS}` so backtracking per
+# start position is bounded. Real log lines keep their keywords well inside 300
+# characters of each other; the bound only bites on adversarial input.
+_MAX_MATCH_CHARS = 4096
+_HEAD_CHARS = 3072
+_GAP_CHARS = 300
+
+
+def _bound_for_kb(text: str) -> str:
+    """Head + tail of an over-long line (the KB loop never scans more than 4 KB)."""
+    if len(text) <= _MAX_MATCH_CHARS:
+        return text
+    return f"{text[:_HEAD_CHARS]} {text[-(_MAX_MATCH_CHARS - _HEAD_CHARS - 1):]}"
+
+
+def _bound_gaps(pattern: str, limit: int = _GAP_CHARS) -> str:
+    """Rewrite every top-level-syntax ``.*`` as ``.{0,limit}`` (escapes and [classes] untouched)."""
+    out: list[str] = []
+    i, in_class = 0, False
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\":
+            out.append(pattern[i:i + 2])
+            i += 2
+        elif in_class:
+            in_class = ch != "]"
+            out.append(ch)
+            i += 1
+        elif ch == "[":
+            in_class = True
+            out.append(ch)
+            i += 1
+        elif ch == "." and pattern[i + 1:i + 2] == "*":
+            out.append(f".{{0,{limit}}}")
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 # Pre-compile patterns once for speed
 _COMPILED: list[tuple[re.Pattern[str], str, str, str]] = [
-    (re.compile(p, re.IGNORECASE), s, c, d) for (p, s, c, d) in _KB_PATTERNS
+    (re.compile(_bound_gaps(p), re.IGNORECASE), s, c, d) for (p, s, c, d) in _KB_PATTERNS
 ]
 
 # ── Fast-path literal gate ───────────────────────────────────────────────
@@ -558,6 +604,7 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
         # markers, FRR vtysh color codes, and any colorized adapter output.
         clean_message = strip_ansi(ev.message)
         combined = f"{ev.appname} {clean_message}".lower()
+        kb_text = _bound_for_kb(combined)
         sev, cat, desc = "info", "other", ""
         confidence = 0.9
 
@@ -581,9 +628,9 @@ def iter_classify(events: Iterable[LogEvent]) -> Iterator[ClassifiedEvent]:
             # substring checks do not, so only use the literal gate for ASCII.
             # No keyword → only the unproven patterns can possibly match (their
             # relative order is preserved, so precedence holds).
-            candidates = _COMPILED if not combined.isascii() else _gated_candidates(combined)
+            candidates = _COMPILED if not kb_text.isascii() else _gated_candidates(kb_text)
             for pattern, p_sev, p_cat, p_desc in candidates:
-                if pattern.search(combined):
+                if pattern.search(kb_text):
                     sev, cat, desc = p_sev, p_cat, p_desc
                     break
 
