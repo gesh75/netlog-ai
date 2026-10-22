@@ -35,7 +35,7 @@ def test_timeline_orders_chronologically_and_links_linkdown_to_bgp():
         _ce(timestamp="2026-08-29T10:01:00", description="BGP peer down / connect failure",
             category="routing", hostname="spine-01"),
         _ce(timestamp="2026-08-29T10:00:00", description="Interface link down",
-            category="interface", hostname="leaf-01", severity="high"),
+            category="interface", hostname="spine-01", severity="high"),
     ]
     nodes = build_timeline(events)
     assert [n["t"] for n in nodes] == ["2026-08-29T10:00:00", "2026-08-29T10:01:00"]
