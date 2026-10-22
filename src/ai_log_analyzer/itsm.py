@@ -11,14 +11,34 @@ import base64
 import hashlib
 import json
 import os
+import re
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
 from ai_log_analyzer.remediation import RemediationPlan
+from ai_log_analyzer.sanitize import sanitize
+from ai_log_analyzer.sources import outbound as _outbound
+from ai_log_analyzer.sources.base import validate_outbound_url
 
 _ATTACHMENT_CHARS = 6000   # Jira descriptions cap near 32 KB; leave room for the RCA card
+
+
+def _user_agent() -> str:
+    # lazy import: avoids a cycle at package load
+    from ai_log_analyzer import __version__
+    return f"netlog-ai/{__version__}"
+
+
+def _clean(text: str) -> str:
+    """Redact secrets from free text before it is posted to an external ITSM."""
+    return sanitize(text or "", mask_pii=False)[0]
+
+
+def _jira_label(text: str) -> str:
+    """Jira labels cannot contain spaces or most punctuation."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", text or "").strip("-") or "unknown"
 
 
 @dataclass
@@ -83,7 +103,7 @@ class IncidentEnrichmentPayload:
             "description": self.to_markdown_body(),
             "issuetype": {"name": issue_type},
             "priority": {"name": priority},
-            "labels": ["netlog-ai", f"site-{self.site}", self.fingerprint],
+            "labels": ["netlog-ai", _jira_label(f"site-{self.site}"), self.fingerprint],
         }
 
     def to_servicenow_record(self, caller_id: str = "netlog-ai") -> dict[str, Any]:
@@ -133,10 +153,23 @@ class JiraITSMClient:
         api_token: str,
         project_key: str = "NET",
         timeout: int = 15,
+        *,
+        allow_private: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.project_key = project_key
         self.timeout = timeout
+        # Server-environment credentials only ever go to the environment's own URL.
+        trusted = _outbound.require_env_bound_target(
+            "Jira", self.base_url,
+            supplied={"email": email, "api_token": api_token},
+            env_creds={"email": _outbound.env_values("JIRA_EMAIL"),
+                       "api_token": _outbound.env_values("JIRA_API_TOKEN")},
+            env_urls=_outbound.env_values("JIRA_URL", "JIRA_BASE_URL"),
+        )
+        self.allow_private = allow_private or trusted
+        validate_outbound_url(self.base_url, allow_private=self.allow_private,
+                              require_https=True, resolve=False)
         creds = f"{email}:{api_token}".encode()
         self._auth_header = "Basic " + base64.b64encode(creds).decode("ascii")
 
@@ -157,17 +190,18 @@ class JiraITSMClient:
             "Authorization": self._auth_header,
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "netlog-ai/2.1.0",
+            "User-Agent": _user_agent(),
         }
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+        with _outbound.safe_urlopen(req, timeout=self.timeout, allow_private=self.allow_private) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else {}
 
     def find_open_issue_by_fingerprint(self, fingerprint: str) -> str | None:
         """Query JQL for an existing unresolved incident matching the fingerprint label."""
+        project = self.project_key.replace("\\", "\\\\").replace('"', '\\"')
         jql = (
-            f'project = "{self.project_key}" AND labels = "{fingerprint}" '
+            f'project = "{project}" AND labels = "{fingerprint}" '
             "AND statusCategory != Done ORDER BY created DESC"
         )
         params = urllib.parse.urlencode({"jql": jql, "maxResults": 1, "fields": "key"})
@@ -182,15 +216,14 @@ class JiraITSMClient:
             self._request(
                 "POST",
                 f"/rest/api/2/issue/{existing_key}/comment",
-                {"body": payload.to_markdown_body()},
+                {"body": _clean(payload.to_markdown_body())},
             )
             return {"action": "updated", "issue_key": existing_key, "fingerprint": payload.fingerprint}
 
-        created = self._request(
-            "POST",
-            "/rest/api/2/issue",
-            {"fields": payload.to_jira_issue_fields(self.project_key)},
-        )
+        fields = payload.to_jira_issue_fields(self.project_key)
+        fields["summary"] = _clean(fields["summary"])[:255]
+        fields["description"] = _clean(fields["description"])
+        created = self._request("POST", "/rest/api/2/issue", {"fields": fields})
         return {
             "action": "created",
             "issue_key": created.get("key", "UNKNOWN"),
@@ -205,9 +238,20 @@ class JiraITSMClient:
 class ServiceNowITSMClient:
     """Two-way ServiceNow Incident Table API connector with correlation_id deduplication."""
 
-    def __init__(self, instance_url: str, username: str, password: str, timeout: int = 15) -> None:
+    def __init__(self, instance_url: str, username: str, password: str, timeout: int = 15,
+                 *, allow_private: bool = False) -> None:
         self.base_url = instance_url.rstrip("/")
         self.timeout = timeout
+        trusted = _outbound.require_env_bound_target(
+            "ServiceNow", self.base_url,
+            supplied={"username": username, "password": password},
+            env_creds={"username": _outbound.env_values("SERVICENOW_USER", "SNOW_USER"),
+                       "password": _outbound.env_values("SERVICENOW_PASSWORD", "SNOW_PASSWORD")},
+            env_urls=_outbound.env_values("SERVICENOW_URL", "SNOW_URL"),
+        )
+        self.allow_private = allow_private or trusted
+        validate_outbound_url(self.base_url, allow_private=self.allow_private,
+                              require_https=True, resolve=False)
         creds = f"{username}:{password}".encode()
         self._auth_header = "Basic " + base64.b64encode(creds).decode("ascii")
 
@@ -218,10 +262,10 @@ class ServiceNowITSMClient:
             "Authorization": self._auth_header,
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "netlog-ai/2.1.0",
+            "User-Agent": _user_agent(),
         }
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+        with _outbound.safe_urlopen(req, timeout=self.timeout, allow_private=self.allow_private) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else {}
 
@@ -240,7 +284,7 @@ class ServiceNowITSMClient:
             self._request(
                 "PATCH",
                 f"/api/now/table/incident/{sys_id}",
-                {"work_notes": payload.to_markdown_body()},
+                {"work_notes": _clean(payload.to_markdown_body())},
             )
             return {
                 "action": "updated",
@@ -249,11 +293,10 @@ class ServiceNowITSMClient:
                 "fingerprint": payload.fingerprint,
             }
 
-        created = self._request(
-            "POST",
-            "/api/now/table/incident",
-            payload.to_servicenow_record(),
-        )
+        record = payload.to_servicenow_record()
+        record["work_notes"] = _clean(record["work_notes"])
+        record["short_description"] = _clean(record["short_description"])[:160]
+        created = self._request("POST", "/api/now/table/incident", record)
         result_obj = created.get("result") or {}
         return {
             "action": "created",

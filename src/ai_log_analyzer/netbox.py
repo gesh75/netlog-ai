@@ -56,6 +56,15 @@ def _nested_name(payload: Any, *keys: str) -> str:
     return ""
 
 
+def _guarded_open(request: Request, timeout: float = 10.0):
+    """Default transport: SSRF-validated, redirects refused (the ``Authorization``
+    token must not follow a 3xx). NETBOX_URL is operator-configured, so private
+    addresses are allowed; metadata/link-local targets never are."""
+    # lazy import: avoids a cycle at package load
+    from ai_log_analyzer.sources import outbound
+    return outbound.safe_urlopen(request, timeout=timeout, allow_private=True, require_https=False)
+
+
 class NetBoxClient:
     """Minimal NetBox REST client (devices + interfaces)."""
 
@@ -69,7 +78,7 @@ class NetBoxClient:
         self.url = (url if url is not None else _env("NETBOX_URL")).rstrip("/")
         self._token = token if token is not None else _env("NETBOX_TOKEN")
         self.timeout = timeout
-        self._opener = opener or urllib.request.urlopen
+        self._opener = opener or _guarded_open
 
     def __repr__(self) -> str:
         return f"NetBoxClient(url={self.url!r}, token={_REDACTED})"
@@ -110,14 +119,18 @@ class NetBoxClient:
         return payload if isinstance(payload, dict) else {"results": []}
 
     def lookup_device(self, hostname: str) -> dict[str, Any] | None:
-        """Return a compact device record, or None if missing/disabled."""
-        if not hostname or not self.configured:
-            return None
+        """Return a compact device record, or None if missing/disabled/unreachable."""
         try:
-            payload = self._request("/api/dcim/devices/", {"name": hostname})
+            return self._device_record(hostname)
         except NetBoxError as exc:
             log.warning("NetBox device lookup failed for %s: %s", hostname, exc)
             return None
+
+    def _device_record(self, hostname: str) -> dict[str, Any] | None:
+        """Like ``lookup_device`` but raises NetBoxError instead of hiding an API error."""
+        if not hostname or not self.configured:
+            return None
+        payload = self._request("/api/dcim/devices/", {"name": hostname})
         results = payload.get("results") or []
         if not results:
             return None
@@ -140,17 +153,20 @@ class NetBoxClient:
         }
 
     def lookup_interface(self, hostname: str, ifname: str) -> dict[str, Any] | None:
-        """Return a compact interface record, or None if missing/disabled."""
-        if not hostname or not ifname or not self.configured:
-            return None
+        """Return a compact interface record, or None if missing/disabled/unreachable."""
         try:
-            payload = self._request(
-                "/api/dcim/interfaces/",
-                {"device": hostname, "name": ifname},
-            )
+            return self._interface_record(hostname, ifname)
         except NetBoxError as exc:
             log.warning("NetBox interface lookup failed for %s %s: %s", hostname, ifname, exc)
             return None
+
+    def _interface_record(self, hostname: str, ifname: str) -> dict[str, Any] | None:
+        if not hostname or not ifname or not self.configured:
+            return None
+        payload = self._request(
+            "/api/dcim/interfaces/",
+            {"device": hostname, "name": ifname},
+        )
         results = payload.get("results") or []
         if not results:
             return None
@@ -168,7 +184,13 @@ class NetBoxClient:
         if not self.configured:
             return {"configured": False, "hostname": hostname}
         record: dict[str, Any] = {"configured": True, "hostname": hostname}
-        device = self.lookup_device(hostname)
+        try:
+            device = self._device_record(hostname)
+        except NetBoxError as exc:
+            # An API/transport failure is not "device not in NetBox".
+            log.warning("NetBox device lookup failed for %s: %s", hostname, exc)
+            record.update({"found": None, "error": str(exc)})
+            return record
         if device:
             record.update(device)
         else:
@@ -176,9 +198,14 @@ class NetBoxClient:
             return record
         record["found"] = True
         if interface:
-            iface = self.lookup_interface(hostname, interface)
-            if iface:
-                record["interface"] = iface
+            try:
+                iface = self._interface_record(hostname, interface)
+            except NetBoxError as exc:
+                log.warning("NetBox interface lookup failed for %s %s: %s", hostname, interface, exc)
+                record["interface_error"] = str(exc)
+            else:
+                if iface:
+                    record["interface"] = iface
         return record
 
     def _iter_results(
