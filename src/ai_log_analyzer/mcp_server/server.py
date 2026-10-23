@@ -378,7 +378,8 @@ def _build_server():
         try:
             rx = regex.compile(pattern, regex.IGNORECASE)
         except regex.error as exc:
-            return {"ok": False, "error": f"bad regex: {exc}"}
+            pos = getattr(exc, "pos", None)
+            return {"ok": False, "error": "bad regex" + (f" (syntax error at position {pos})" if isinstance(pos, int) else "")}
         wanted = _clamp(max_matches, 1, _MAX_MATCHES, 100)
         events = source_manager.fetch(
             source_id, since_seconds=_clamp(since_seconds, 1, _MAX_WINDOW_S, 3600),

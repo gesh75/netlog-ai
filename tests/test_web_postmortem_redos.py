@@ -64,7 +64,10 @@ def test_route_returns_400_on_timeout(client, monkeypatch):
 
 def test_route_returns_400_on_invalid_regex(client):
     r = client.post(f"/api/postmortem/{_site()}", json={"pattern": "*invalid[regex"})
-    assert r.status_code == 400 and "invalid regex" in r.get_json()["error"]
+    import re
+    assert r.status_code == 400
+    # Position only: the regex library's message text is not echoed back to the client.
+    assert re.fullmatch(r"invalid regex( \(syntax error at position \d+\))?", r.get_json()["error"])
 
 
 def test_route_returns_400_on_oversized_pattern(client):

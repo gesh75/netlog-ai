@@ -44,7 +44,9 @@ def search_fleet(
         try:
             compiled = regex.compile(pattern, flags)
         except regex.error as e:
-            return _error(f"invalid regex: {e}")
+            # Report where the syntax error is, not the library's message text (kept out of API responses).
+            pos = getattr(e, "pos", None)
+            return _error("invalid regex" + (f" (syntax error at position {pos})" if isinstance(pos, int) else ""))
 
     deadline = time.monotonic() + TOTAL_TIMEOUT_SECONDS
     hits: list[dict] = []

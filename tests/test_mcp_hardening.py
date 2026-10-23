@@ -248,7 +248,23 @@ def test_search_logs_redos_pattern_is_bounded(server, monkeypatch: pytest.Monkey
     start = time.monotonic()
     out = call(server, "search_logs", {"source_id": "s", "pattern": "(a+)+$"})
     assert time.monotonic() - start < 3.0               # was 5.7 s per 26-char line with stdlib re
+    # The real `regex` engine may finish this input quickly or hit the timeout; either is bounded.
+    assert out["ok"] is True or "expensive" in out["error"]
+
+
+def test_search_logs_timeout_path_returns_an_error_and_passes_the_timeout(server, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    class _Slow:
+        def search(self, text: str, timeout: float | None = None):
+            seen["timeout"] = timeout
+            raise TimeoutError
+
+    monkeypatch.setattr(srv_mod.regex, "compile", lambda *a, **k: _Slow())
+    monkeypatch.setattr(srv_mod.source_manager, "fetch", lambda *a, **k: _events(3, "x"))
+    out = call(server, "search_logs", {"source_id": "s", "pattern": "x"})
     assert out["ok"] is False and "expensive" in out["error"]
+    assert seen["timeout"] and seen["timeout"] > 0
 
 
 def test_search_logs_pattern_cap_and_syntax_errors(server) -> None:
@@ -279,7 +295,8 @@ def test_list_sources_hides_url_credentials(server, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(srv_mod.source_manager, "describe", lambda: [
         {"id": "a", "type": "kibana", "url": "https://elastic:s3cr3t@es.example.com:9200/x", "extra": {}}])
     out = call(server, "list_sources")
-    assert "s3cr3t" not in str(out) and "es.example.com:9200" in str(out)
+    assert "s3cr3t" not in str(out)
+    assert out["sources"][0]["url"] == "https://es.example.com:9200/x"
 
 
 # ── C8: audit ────────────────────────────────────────────────────────────────
