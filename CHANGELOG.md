@@ -6,6 +6,57 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+Security, privacy, reliability and correctness hardening from a full code review (see the PR for the
+per-finding evidence). **Several defaults are now fail-closed**; see *Changed (breaking)*.
+
+### Security
+- **Sanitizer:** every secret format found leaking through the LLM gateway is now redacted: `password 0|7 X` (the digit stays, the secret goes), `enable password|secret`, `username … secret 5|8|9|sha512`, OSPF/IS-IS authentication and message-digest keys, TACACS/RADIUS keys, `crypto isakmp key`, Junos pre-shared keys, SNMP communities in `snmp-server host`, `key-string`, Bearer/Basic headers, `api_key=`/`token=`/`password=` pairs, URL credentials, cloud/API tokens, JWTs, bare crypt hashes and PEM/PGP blocks (including truncated ones). `sanitize()` runs to a fixed point, so it is idempotent, and every rule is ReDoS-safe.
+- **Pseudonyms** (`PUB-…`, `user-…`) are HMAC-SHA256 with a per-process key (`AI_LOG_ANALYZER_PSEUDONYM_KEY` for stable tokens) instead of an unsalted 32-bit hash that could be brute-forced.
+- **Credential forwarding:** ITSM clients refuse to send server-held credentials to a URL other than the configured one, require `https://`, reject `file://`/`ftp://`, and never follow redirects on authenticated requests.
+- **SSRF guard** resolves hostnames and checks every address (loopback, link-local, metadata, CGNAT, private, IPv4-mapped IPv6), normalises `127.1`/`2130706433`/`0x7f.0.0.1`, fails closed, and is applied to every connector. `allow_private` can no longer be set from a request body or MCP `extra`.
+- **Remediation:** the command guardrail normalises case, whitespace, `do`/`sudo` and IOS-style abbreviations (`rel`, `wr er`, `cle ip bgp *`, `request vmhost reboot`, `init 6`, `erase /all nvram:` …); device, interface and neighbor inputs are validated; generated Nornir/Ansible files cannot be injected through device names or rationale text; pre/post checks are screened and limited to read-only verbs.
+- **MCP server:** write tools are gated behind `NETLOG_MCP_ALLOW_WRITE`; HTTP transports require a bearer token; outputs are sanitized; `search_logs` uses a time-limited regex; list sizes are bounded; tool calls are audited; `list_sources` no longer returns connector option values.
+- **Web:** the Docker image is non-root and fail-closed; file analysis is confined to `/var/log` plus `AI_LOG_ANALYZER_DATA_DIR`, with dotfiles and credential files always denied and responses sanitized; every previously open GET route requires a viewer token; `/api/postmortem` regexes are time-limited; Host-header allow-list (DNS-rebinding defense) while auth is off; request size limit; `nosniff`/`DENY`/`no-referrer` headers; rate-limited audit of failed logins; at most `AI_LOG_ANALYZER_MAX_SSE` live streams.
+- **Release pipeline** runs the CI workflow, asserts the tag equals the package version, runs `twine check` and a clean-venv wheel smoke test before anything is published. CodeQL, Dependabot and `SECURITY.md` are new.
+
+### Fixed
+- **Ingest:** the triage worker drains backlogs instead of reading 5,000 rows per 15 s, and counts rows the spool pruned before triage read them (`gap_rows`); spool pruning is O(excess); `load_from_env()` no longer rebuilds live listeners (and drops their buffered lines) on every request; only "address in use" makes a listener a reader; UDP drops are counted (`SO_RXQ_OVFL`) and spool writes moved off the event loop; failed flushes re-queue instead of dropping; a TCP line starting with `<digits><space>` is no longer read as an octet count.
+- **Triage:** cursors commit after delivery, pending deliveries survive a crash, per-sink backoff and circuit breaker, partial multi-sink failure is retried, critical incidents are sent first, repeats no longer hide an ongoing incident, send times persist across restarts, the lease is checked between candidates.
+- **Parsing:** asdot ASNs are no longer truncated (`1.10` and `1.20` previously joined as AS `1`); rsyslog ISO, SONiC microsecond, PRI-prefixed IOS/NX-OS and IOS-XR framings parse with host, time and vendor; IS-IS and OSPF `ADJCHANGE` are no longer labelled BGP; CLI-audit lines are no longer incidents; JSON, CEF and LEEF lines are parsed; NX-OS/FRR/PAN-OS/IOS-XR peer and VRF forms; New Year and Feb 29 timestamps.
+- **Classification:** state-aware BGP severity (`Established → Idle` is a failure); built-in regexes are bounded (an 11.6 KB line took 13.6 s, now under 1 s); known-down interface/LAG/IPsec/IS-IS/LDP events no longer stay at info; new rules for STP guards, CPU/memory, restarts, AAA, SRX HA, PSU/alarm severity, optics, `sshd` brute force; 14 new playbooks so every incident category gets one.
+- **Correlation:** IP-addressed devices are no longer merged into host `10`; suppression requires a shared entity and one root rule is used by both engines; order-independent clustering; confidence is capped at *medium* when clusters are bridged only by same-device timing; transit-AS clusters are rooted at the shared AS instead of an arbitrary device; the 2,000-event pool is deduplicated and warns when it truncates; the health score counts distinct active entities; flaps are per entity; `cause_of` needs the same host or a shared entity.
+- **Performance:** suppression 3.1 s → 0.09 s at 2,000 events; topology inference 79 s → 0.1 s at 120 devices; RFC 3164 timestamp parsing 5× faster.
+- **Remediation wording:** only Junos, IOS-XE and EOS claim an automatic revert; the exports gate the confirm step on a post-check assertion (or an operator prompt) instead of confirming unconditionally.
+- **LLM gateway** never raises on malformed provider replies, has an overall deadline (`LLM_TOTAL_TIMEOUT_S`) and a per-provider circuit breaker; an off-host `OLLAMA_URL` is reported as `remote-host` instead of "local only".
+- **Connectors:** ServiceNow change queries (reference-field match, `^` escaping, newest first, `active=true`), SolarWinds fair per-stream cap and ordering, Loki truncation flag, Jira label sanitising, NetBox errors no longer reported as "not found", host-filter injection.
+- **RAG:** citations keep original line numbers; changed site files are re-indexed automatically; same host in different sites no longer collides.
+- **CLI:** `analyze --remediation` derives vendor and interface from the events; clean exit 2 on usage errors; `--version`; new `doctor` command.
+
+### Changed (breaking)
+- The Docker image and compose refuse to start without `AI_LOG_ANALYZER_API_TOKEN`/RBAC tokens; compose publishes on `127.0.0.1` only and mounts the Docker socket only in the `lab` profile. RBAC tokens under 16 characters are refused. A non-loopback `python -m` bind without a token exits unless `AI_LOG_ANALYZER_ALLOW_NOAUTH=1`.
+- Default file-analysis roots shrink to `/var/log` (+ `AI_LOG_ANALYZER_DATA_DIR`).
+- Connectors refuse private, loopback and unresolvable hosts unless the URL is operator-configured or `NETLOG_ALLOW_PRIVATE_OUTBOUND=1`; ServiceNow/Jira clients require `https://` (`NETLOG_ALLOW_INSECURE_HTTP=1`).
+- MCP write tools are off by default (`NETLOG_MCP_ALLOW_WRITE=1`).
+- Remediation exports without an assertable post-check require an interactive `yes`; non-interactive runs roll back. Custom plans reject non-read-only checks. `RemediationPlan.to_dict()` gains `interface` and `bgp_neighbor_ip`.
+- `DOCKER_EXEC_FALLBACK` defaults to `false`.
+- `/api/postmortem` returns 400 for invalid input.
+- Fewer events are suppressed, some incidents drop from *high* to *medium* confidence, and the health score is lower for noisy runs.
+- Pseudonym tokens differ per worker and restart unless `AI_LOG_ANALYZER_PSEUDONYM_KEY` is set.
+
+### Added
+- `docs/ENVIRONMENT.md` (every environment variable, enforced by a test), `SECURITY.md`, `CODEOWNERS`, Dependabot, CodeQL, issue and PR templates, a mypy baseline and `py.typed`, Python 3.13 classifier.
+- Dashboard: triage backlog and loss signals (spool rows lost, pending deliveries, open sink circuits, UDP drops) and a "Remote LLM host" egress label.
+- New event types `isis_adjacency` and `ldp_session`; `netlog-ai doctor`; `hostnames.short_host`.
+- Incident output: `device_count`, `warning`, `collapsed`, `flapping_entity_id`, `external_as`/`shared_vrf` roots.
+
+### Known limitations
+- FQDN short-naming is unchanged: `edge1.dc1.example.com` and `edge1.dc2.example.com` still share `edge1`.
+- Content-Security-Policy and subresource-integrity hashes for the mermaid CDN script are not set (the UI relies on inline styles; no vendored copy to hash).
+- Jira find-then-create can still duplicate under search-index lag; a local idempotency record owned by the caller is the real fix.
+- The `requests`-based connectors re-validate redirects but have no connect-time address re-check (a DNS-rebinding window remains there).
+- A tunnel failure followed within 240 s by an unrelated BGP drop on the same device is still suppressed as a child of the tunnel failure (the BGP hold timer can legitimately take that long, and logs alone cannot tell the two apart).
+- Suppression's /31 peer-ownership guess is unchanged (not derivable from logs alone).
+
 ## [2.1.0] - 2026-10-20
 
 ### Added
