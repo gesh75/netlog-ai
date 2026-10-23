@@ -372,3 +372,19 @@ def test_http_run_wires_token_middleware(monkeypatch: pytest.MonkeyPatch) -> Non
     assert started["host"] == "0.0.0.0" and started["port"] == 9911
     classes = [m.cls for m in started["app"].user_middleware]
     assert srv_mod._BearerAuthMiddleware in classes
+
+
+def test_list_sources_never_returns_extra_values(server, monkeypatch: pytest.MonkeyPatch) -> None:
+    """list_sources is documented as "no secrets": connector options (API keys, key paths) are names only."""
+    monkeypatch.setenv("NETLOG_MCP_ALLOW_WRITE", "1")
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, port, *a, **k: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 0))])
+    call(server, "add_source", {"source_id": "mcp-secret", "source_type": "loki", "url": "https://loki.example.com",
+                                "api_token": "t", "extra": {"api_key": "sk-live-SECRETVALUE", "org_id": "tenant-7"}})
+    try:
+        out = call(server, "list_sources")
+        row = next(r for r in out["sources"] if r["id"] == "mcp-secret")
+        assert "SECRETVALUE" not in str(out) and "tenant-7" not in str(out)
+        assert set(row["extra"]) >= {"api_key", "org_id"} and set(row["extra"].values()) == {"***"}
+    finally:
+        srv_mod.source_manager.remove("mcp-secret")

@@ -120,7 +120,11 @@ def test_sitedoc_dev_mode_keeps_llm_default(monkeypatch, llm_calls):
 
 # ── /api/sources redaction ──────────────────────────────────────────────────
 
-def test_sources_listing_redacts_extra_values_and_url_userinfo(client):
+def test_sources_listing_redacts_extra_values_and_url_userinfo(client, monkeypatch):
+    # The outbound guard resolves hostnames and fails closed; keep this test offline.
+    import socket
+    monkeypatch.setattr(socket, "getaddrinfo",
+                        lambda host, port, *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 0))])
     source_manager.add(SourceConfig(
         id="w3-redact", type="loki", url="https://svc-user:hunter2pw@loki.example.test:3100/x",
         api_token="tok-abc", auth_methods=("api_token",),

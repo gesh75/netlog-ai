@@ -51,7 +51,8 @@ CHANGELOG for the exact semantics shipped.
 | `AI_LOG_ANALYZER_SITES_DIR` | packaged `data/sites` | Override the site manifests / golden-config directory (web app, CLI and MCP server). |
 | `AI_LOG_ANALYZER_DATA_DIR` | unset | **(new in this release)** One extra directory, besides `/var/log`, from which file analysis may read (for example the container's `/data` volume). |
 | `AI_LOG_ANALYZER_PSEUDONYM_KEY` | random per process | **(new in this release)** HMAC key for PUB-/user- pseudonym tokens. Each gunicorn worker generates its own random key, so tokens differ per worker and after a restart; set a long random value for stable tokens. **Security:** treat as a secret; anyone holding it can regenerate the tokens. |
-| `NETLOG_ALLOW_INSECURE_HTTP` | `false` | **(new in this release)** Allow plain `http://` for outbound integrations (ITSM, NetBox, webhooks, log sources). Default requires `https://` except for loopback. **Security:** sends credentials in clear text if enabled. |
+| `NETLOG_ALLOW_INSECURE_HTTP` | `false` | **(new in this release)** Allow plain `http://` for the ITSM and ServiceNow integrations (they require `https://` otherwise, except for private test hosts). **Security:** sends credentials in clear text. |
+| `NETLOG_ALLOW_PRIVATE_OUTBOUND` | `false` | **(new in this release)** Lets network connectors (Kibana, Splunk, Loki, LibreNMS, ServiceNow, SolarWinds) reach private, loopback and non-resolving hosts. A URL set by the operator through `NETLOG_SOURCE_<id>_URL` / `SOLARWINDS_URL` is already trusted; this is for sources added at runtime. NetBox keeps private addresses allowed because `NETBOX_URL` is operator-set. |
 | `AI_LOG_ANALYZER_DEBUG` | unset | Any non-empty value prints which `.env` files were loaded. |
 
 ## LLM gateway
@@ -182,6 +183,8 @@ tokenization) are shared across workers through the state DB, API keys never are
 
 | Variable | Default | Purpose / notes |
 | --- | --- | --- |
-| `NETLOG_MCP_TRANSPORT` | `stdio` | `stdio` or `streamable-http`. **Security:** `streamable-http` exposes the tools over the network; pair it with `NETLOG_MCP_TOKEN` and a loopback or firewalled bind. |
-| `NETLOG_MCP_TOKEN` | unset | **(new in this release)** Bearer token required by the HTTP transport. **Secret.** |
-| `NETLOG_MCP_ALLOW_WRITE` | `false` | **(new in this release)** Allow MCP tools that create tickets or otherwise change external systems. Read-only by default. |
+| `NETLOG_MCP_TRANSPORT` | `stdio` | `stdio`, `streamable-http` or `sse`. **Security:** the HTTP transports expose the tools over the network and need `Authorization: Bearer <NETLOG_MCP_TOKEN>`; the server refuses a non-loopback bind without a token. |
+| `NETLOG_MCP_HOST` | `127.0.0.1` | **(new in this release)** Bind address for the HTTP transports. |
+| `NETLOG_MCP_PORT` | `8000` | **(new in this release)** Port for the HTTP transports. |
+| `NETLOG_MCP_TOKEN` | unset | **(new in this release)** Bearer token required by the HTTP transports (compared in constant time). On loopback with no token the server starts with a warning. **Secret.** |
+| `NETLOG_MCP_ALLOW_WRITE` | `false` | **(new in this release)** Enables the MCP tools that change external systems: `add_source`, live `enrich_itsm_incident`, `push_solarwinds_alert_note` and live `netlog_servicenow_sync_incident`. Dry-run and preview paths stay available. |

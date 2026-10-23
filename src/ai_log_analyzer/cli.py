@@ -653,7 +653,7 @@ def main() -> None:
     dr.set_defaults(func=cmd_doctor)
 
     mp = sub.add_parser("mcp", help="Run as an MCP server (for Claude Code / Cursor / Continue)")
-    mp.add_argument("--transport", default="stdio", choices=["stdio", "streamable-http"],
+    mp.add_argument("--transport", default="stdio", choices=["stdio", "streamable-http", "sse"],
                     help="MCP transport (default: stdio)")
     mp.set_defaults(func=cmd_mcp)
 

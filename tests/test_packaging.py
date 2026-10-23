@@ -168,14 +168,6 @@ def test_init_fallback_version_matches_pyproject():
     assert m.group(1) == _project()["version"]
 
 
-# TEMPORARY: W2 (User-Agent strings in itsm.py/servicenow_sync.py/sources/servicenow.py)
-# and W3 (web/static/index.html) remove the remaining literals in parallel branches.
-# The integrator should delete this marker once both are merged; XPASS is expected then.
-@pytest.mark.xfail(
-    strict=False,
-    reason="version literal still present in files owned by other workstreams (W2/W3); "
-           "remove this marker after they merge",
-)
 def test_version_literal_not_scattered_through_src():
     """The current version must live in pyproject.toml (plus the single __init__
     fallback), not be hard-coded into User-Agent strings, HTML, etc. Every such copy

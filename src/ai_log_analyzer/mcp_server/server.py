@@ -280,6 +280,8 @@ def _build_server():
         sources = source_manager.describe()
         for row in sources:
             row["url"] = _redact_url(str(row.get("url", "")))
+            # ``extra`` carries connector options such as API keys and TLS key paths: names only.
+            row["extra"] = {k: "***" for k in (row.get("extra") or {})}
         return {"sources": sources}
 
     @tool(read_only=False, open_world=True)
