@@ -18,6 +18,10 @@ concurrency:
 
 jobs:
   test:
+    # Fixed name: the `main` branch ruleset requires the checks "test (3.10)", "test (3.11)" and
+    # "test (3.12)". Without this the matrix's extra `experimental` key would rename them
+    # (e.g. "test (3.12, false)") and the required checks would never report.
+    name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # 3.13 is experimental until the dependency set is confirmed on it.
