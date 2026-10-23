@@ -16,8 +16,10 @@ import statistics
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 
+from ai_log_analyzer.causal import _reference_dt, event_time
 from ai_log_analyzer.diff import ConfigDiff
 from ai_log_analyzer.topology import Topology, TopologyGraph
 
@@ -217,7 +219,7 @@ def analyze_flap_dynamics(
     """RFC 2439-style exponential penalty per (device, entity)."""
     if half_life_sec <= 0:
         raise ValueError("half_life_sec must be positive")
-    grouped = _group_transitions(events)
+    grouped = _group_transitions(events, untimed_gap_s=half_life_sec)
     entities: list[FlapEntityMetrics] = []
     for (device, entity_id), stamps in grouped.items():
         entities.append(_score_entity(
@@ -332,13 +334,16 @@ def build_device_overlays(
 
 # ── flap helpers ─────────────────────────────────────────────────────────────
 
-def _group_transitions(events: Iterable[Any]) -> dict[tuple[str, str], list[datetime]]:
+def _group_transitions(events: Iterable[Any], untimed_gap_s: float = 900.0) -> dict[tuple[str, str], list[datetime]]:
     grouped: dict[tuple[str, str], list[datetime]] = {}
-    for index, row in enumerate(_iter_rows(events)):
+    rows = list(_iter_rows(events))
+    # The batch's own dated events fix the year of yearless (RFC3164) stamps.
+    ref = _reference_dt(SimpleNamespace(timestamp=stamp) for _d, _m, stamp in rows)
+    for index, row in enumerate(rows):
         device, message, stamp = row
         if not _is_transition(message):
             continue
-        when = _parse_ts(stamp, index)
+        when = _parse_ts(stamp, index, ref, untimed_gap_s)
         key = (device or "unknown", _entity_id(message))
         grouped.setdefault(key, []).append(when)
     for stamps in grouped.values():
@@ -398,25 +403,26 @@ def _entity_id(message: str) -> str:
     return "session"
 
 
-def _parse_ts(value: str, index: int) -> datetime:
+def _parse_ts(value: str, index: int, ref: datetime | None = None, untimed_gap_s: float = 900.0) -> datetime:
+    """Stamp -> UTC instant. Yearless stamps take their year from ``ref`` (the batch).
+
+    A row with no usable stamp is placed ``untimed_gap_s`` after the previous
+    row: arrival order is all we know, and packing such rows one second apart
+    would read as a flap storm.
+    """
     text = (value or "").strip()
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
+    anchor = ref or _reference_dt(())
     if text:
         try:
             return _as_utc(datetime.fromisoformat(text))
         except ValueError:
             pass
-        for fmt, sample in (
-            ("%Y-%m-%d %H:%M:%S", text),
-            ("%Y %b %d %H:%M:%S", f"2026 {text}"),
-        ):
-            try:
-                parsed = datetime.strptime(sample, fmt)
-            except ValueError:
-                continue
-            return _as_utc(parsed)
-    return _as_utc(datetime(2026, 1, 1) + timedelta(seconds=index))
+        when = event_time(SimpleNamespace(timestamp=text), anchor)
+        if when is not None:
+            return _as_utc(when)
+    return _as_utc(datetime(anchor.year, 1, 1) + timedelta(seconds=index * untimed_gap_s))
 
 
 def _as_utc(moment: datetime) -> datetime:
@@ -558,32 +564,43 @@ def _edge_pair(edge: Any) -> tuple[str, str] | None:
 
 
 def _articulation_points(adj: dict[str, set[str]]) -> set[str]:
-    """Tarjan DFS cut vertices. Pure Python, deterministic neighbor order."""
+    """Tarjan cut vertices. Iterative (no recursion limit on long chains) with
+    deterministic neighbour order."""
     disc: dict[str, int] = {}
     low: dict[str, int] = {}
     parent: dict[str, str | None] = {}
     cuts: set[str] = set()
+    children: dict[str, int] = {}
     timer = 0
 
-    def dfs(node: str) -> None:
-        nonlocal timer
-        timer += 1
-        disc[node] = low[node] = timer
-        children = 0
-        for nxt in sorted(adj.get(node, ())):
-            if nxt not in disc:
-                parent[nxt] = node
-                children += 1
-                dfs(nxt)
-                low[node] = min(low[node], low[nxt])
-                _mark_cut(node, nxt, children, parent, disc, low, cuts)
-            elif nxt != parent.get(node):
-                low[node] = min(low[node], disc[nxt])
-
     for start in sorted(adj):
-        if start not in disc:
-            parent[start] = None
-            dfs(start)
+        if start in disc:
+            continue
+        parent[start] = None
+        timer += 1
+        disc[start] = low[start] = timer
+        stack = [(start, iter(sorted(adj.get(start, ()))))]
+        while stack:
+            node, neighbours = stack[-1]
+            descended = False
+            for nxt in neighbours:
+                if nxt not in disc:
+                    parent[nxt] = node
+                    children[node] = children.get(node, 0) + 1
+                    timer += 1
+                    disc[nxt] = low[nxt] = timer
+                    stack.append((nxt, iter(sorted(adj.get(nxt, ())))))
+                    descended = True
+                    break
+                if nxt != parent.get(node):
+                    low[node] = min(low[node], disc[nxt])
+            if descended:
+                continue
+            stack.pop()
+            if stack:
+                above = stack[-1][0]
+                low[above] = min(low[above], low[node])
+                _mark_cut(above, node, children[above], parent, disc, low, cuts)
     return cuts
 
 

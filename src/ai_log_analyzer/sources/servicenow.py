@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import ssl
 import urllib.error
 import urllib.parse
@@ -16,16 +17,24 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.sources import outbound as _outbound
 from ai_log_analyzer.sources.base import (
     SourceAuthError,
     SourceConfig,
     SourceError,
     SourceTimeoutError,
     registry,
+    source_allow_private,
+    validate_host_filter,
     validate_outbound_url,
 )
 
+log = logging.getLogger(__name__)
 LogLine = LogEvent
+
+_PAGE_SIZE = 1000
+_MAX_PAGES = 50          # hard cap on pagination: 50k rows per fetch
+_warned_unverified: set[str] = set()
 
 _TABLES = frozenset({"em_alert", "incident", "syslog"})
 _DEVICE_FIELDS = ("cmdb_ci", "node", "source", "u_device")
@@ -41,8 +50,9 @@ class ServiceNowSource:
 
     def __init__(self, config: SourceConfig) -> None:
         self.config = config
-        self._allow_private = _extra_bool(config.extra, "allow_private", False)
-        validate_outbound_url(config.url, allow_private=self._allow_private)
+        self._allow_private = source_allow_private(config)
+        validate_outbound_url(config.url, allow_private=self._allow_private,
+                              require_https=True, resolve=False)
 
     @classmethod
     def from_config(cls, config: SourceConfig) -> ServiceNowSource:
@@ -70,20 +80,32 @@ class ServiceNowSource:
         """Yield normalized syslog-style events for the requested window."""
         cfg = config or self.config
         table = _table(cfg)
-        params = {
-            "sysparm_limit": str(max(1, int(limit))),
-            "sysparm_display_value": "true",
-            "sysparm_query": _query(cfg, since_seconds=since_seconds, host_filter=host_filter),
-        }
-        payload = _get_json(cfg, _table_url(cfg.url, table, params))
-        rows = payload.get("result")
-        if not isinstance(rows, list):
-            raise SourceError("ServiceNow response is missing a result array")
-        for row in rows:
-            if isinstance(row, dict):
-                event = _row_to_event(row)
-                if event is not None:
-                    yield event
+        query = _query(cfg, since_seconds=since_seconds, host_filter=host_filter)
+        wanted = max(1, int(limit))
+        seen = offset = 0
+        for _page in range(_MAX_PAGES):
+            size = min(_PAGE_SIZE, wanted - seen)
+            params = {
+                "sysparm_limit": str(size),
+                "sysparm_offset": str(offset),
+                "sysparm_display_value": "true",
+                "sysparm_query": query,
+            }
+            payload = _get_json(cfg, _table_url(cfg.url, table, params))
+            rows = payload.get("result")
+            if not isinstance(rows, list):
+                raise SourceError("ServiceNow response is missing a result array")
+            for row in rows:
+                if isinstance(row, dict):
+                    event = _row_to_event(row)
+                    if event is not None:
+                        yield event
+            seen += len(rows)
+            offset += len(rows)
+            if len(rows) < size or seen >= wanted:
+                return
+        log.warning("ServiceNow %s: stopped after %d pages (%d rows); more rows may exist",
+                    cfg.id, _MAX_PAGES, seen)
 
     def close(self) -> None:
         return None
@@ -102,8 +124,11 @@ def _query(config: SourceConfig, *, since_seconds: int, host_filter: str) -> str
     custom = str((config.extra or {}).get("sysparm_query") or "").strip()
     if custom:
         parts.append(custom)
+    host_filter = validate_host_filter(host_filter)
     if host_filter:
         parts.append(f"cmdb_ciLIKE{host_filter}")
+    # Newest first, so a row limit keeps the most recent alerts.
+    parts.append("ORDERBYDESCsys_created_on")
     return "^".join(parts)
 
 
@@ -113,13 +138,18 @@ def _table_url(base: str, table: str, params: dict[str, str]) -> str:
 
 
 def _get_json(config: SourceConfig, url: str) -> dict:
-    allow_private = _extra_bool(config.extra, "allow_private", False)
-    validate_outbound_url(url, allow_private=allow_private)
+    allow_private = source_allow_private(config)
     verify = _verify_ssl(config)
     req = urllib.request.Request(url, headers=_headers(config), method="GET")
-    context = None if verify else ssl._create_unverified_context()
+    context = None
+    if not verify:
+        if config.id not in _warned_unverified:
+            _warned_unverified.add(config.id)
+            log.warning("ServiceNow %s: TLS certificate verification is DISABLED (verify_ssl off)", config.id)
+        context = ssl._create_unverified_context()
     try:
-        with urllib.request.urlopen(req, timeout=config.timeout_seconds, context=context) as resp:
+        with _outbound.safe_urlopen(req, timeout=config.timeout_seconds, context=context,
+                                    allow_private=allow_private) as resp:
             raw = resp.read().decode("utf-8")
     except TimeoutError as exc:
         raise SourceTimeoutError(f"ServiceNow {config.id} timed out") from exc
@@ -142,7 +172,9 @@ def _headers(config: SourceConfig) -> dict[str, str]:
     auth_type = str((config.extra or {}).get("auth_type") or "").strip().lower()
     if auth_type not in {"basic", "bearer"}:
         auth_type = "basic" if config.username else "bearer"
-    headers = {"Accept": "application/json", "User-Agent": "netlog-ai/2.1.0"}
+    # lazy import: avoids a cycle at package load
+    from ai_log_analyzer import __version__
+    headers = {"Accept": "application/json", "User-Agent": f"netlog-ai/{__version__}"}
     if auth_type == "basic":
         if not config.username:
             raise SourceAuthError(f"ServiceNow {config.id} basic auth requires a username")
@@ -221,4 +253,4 @@ def _severity(row: dict) -> str:
     return "INFO"
 
 
-registry.register("servicenow", ServiceNowSource.from_config)
+registry.register("servicenow", ServiceNowSource.from_config, outbound=True)

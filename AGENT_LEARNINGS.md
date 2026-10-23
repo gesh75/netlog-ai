@@ -6,7 +6,7 @@ Repo-only lessons for netlog-ai. Cross-repo lessons stay in `~/.cursor/AGENT_LEA
 
 ### [2026-09-25] [env] The src-layout .env path was already the repo root
 - **Mistake:** Replacing `pkg_dir.parent.parent` with `pkg_dir.parents[1]` and treating it as the reason `.env` did not load.
-- **Avoid:** Committing that edit. Both expressions resolve to the repo root (`/Users/georgigaydarov/Projects/netlog-ai`).
+- **Avoid:** Committing that edit. Both expressions resolve to the repo root (the repository checkout root).
 - **Instead:** Check the serve process. `ps eww -p <listener>` must show `AI_LOG_ANALYZER_INCIDENT_STORE`. A `.env` on disk does nothing for a process that started without it.
 
 ### [2026-09-25] [journal] No action items means nothing is stored

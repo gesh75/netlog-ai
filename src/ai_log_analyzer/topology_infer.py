@@ -15,6 +15,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config feature extraction (per device)
@@ -562,6 +563,35 @@ class InferredEdge:
                 "evidence": self.evidence}
 
 
+# A /28-/31 shared by more hosts than this is a LAN segment, not a link: a
+# clique of "directly connected" edges between all of them would be noise.
+_MAX_SUBNET_OWNERS = 6
+_NAME_TOKEN_RE = re.compile(r"[\w-]+")        # a hostname is a run of these
+_PLAIN_NAME_RE = re.compile(r"[\w-]+")
+
+
+def _ip_index(all_facts: list[DeviceFacts]) -> dict[Any, list[str]]:
+    """interface address → hosts owning it, parsed once (not per query)."""
+    index: dict[Any, list[str]] = {}
+    for f in all_facts:
+        for cidr in f.interface_ips:
+            try:
+                ip = ipaddress.ip_interface(cidr).ip
+            except (ipaddress.AddressValueError, ValueError):
+                continue
+            owners = index.setdefault(ip, [])
+            if f.hostname not in owners:
+                owners.append(f.hostname)
+    return index
+
+
+def _owners_of(query_ip: str, index: dict[Any, list[str]]) -> list[str]:
+    try:
+        return index.get(ipaddress.ip_address(query_ip), [])
+    except (ipaddress.AddressValueError, ValueError):
+        return []
+
+
 def infer_edges(facts_by_host: dict[str, DeviceFacts]) -> list[InferredEdge]:
     """Apply all inference rules and return a deduplicated edge list.
 
@@ -579,42 +609,53 @@ def infer_edges(facts_by_host: dict[str, DeviceFacts]) -> list[InferredEdge]:
     all_facts = list(facts_by_host.values())
 
     # ─── Rule 1: interface description names a sibling hostname ──────────────
+    # Whole-name match only: "uplink to sw-10" names sw-10, not sw-1, and
+    # "core-02" does not name a device called "core". Indexed by token so the
+    # cost is O(description tokens), not O(descriptions x hosts).
+    plain: dict[str, list[str]] = {}      # lowercased plain hostname → hosts
+    dotted: list[tuple[str, re.Pattern[str], str]] = []   # names with "." etc. need an explicit boundary check
+    shortform: dict[str, list[str]] = {}  # name minus its first "-" segment → hosts
+    for other in hosts:
+        o = other.lower()
+        if _PLAIN_NAME_RE.fullmatch(o):
+            plain.setdefault(o, []).append(other)
+        elif o:
+            dotted.append((o, re.compile(r"(?<![\w-])" + re.escape(o) + r"(?![\w-])"), other))
+        parts = other.split("-", 1)
+        if len(parts) == 2:
+            shortform.setdefault(parts[1].lower(), []).append(other)
     for f in all_facts:
         for desc in f.descriptions:
             d_lc = desc.lower()
-            for other in hosts:
-                if other == f.hostname:
-                    continue
-                # exact substring match
-                if other.lower() in d_lc:
+            named = {h for tok in _NAME_TOKEN_RE.findall(d_lc) for h in plain.get(tok, ())}
+            named.update(h for o, rx, h in dotted if o in d_lc and rx.search(d_lc))
+            for other in sorted(named, key=hosts.index):
+                if other != f.hostname:
                     upsert(f.hostname, other, "description-hostname", 0.95,
                            f"{f.hostname} description: '{desc[:50]}'")
-                    continue
-                # short-form match (e.g. "sw-03b" inside config for "demo-east-sw-03b")
-                parts = other.split("-", 1)
-                if len(parts) == 2 and parts[1].lower() in d_lc.split():
-                    upsert(f.hostname, other, "description-shortform", 0.7,
-                           f"{f.hostname} description: '{desc[:50]}'")
+            # short-form match (e.g. "sw-03b" inside config for "demo-east-sw-03b")
+            for tok in d_lc.split():
+                for other in shortform.get(tok, ()):
+                    if other != f.hostname and other not in named:
+                        upsert(f.hostname, other, "description-shortform", 0.7,
+                               f"{f.hostname} description: '{desc[:50]}'")
 
     # ─── Rule 2: MLAG peer-address → match to interface IP elsewhere ─────────
+    ip_owner = _ip_index(all_facts)
     for f in all_facts:
         for peer_ip in f.mlag_peers:
-            for g in all_facts:
-                if g.hostname == f.hostname:
-                    continue
-                if _ip_owned_by(peer_ip, g.interface_ips):
-                    upsert(f.hostname, g.hostname, "mlag-peer", 1.0,
-                           f"{f.hostname} MLAG peer-address {peer_ip} owned by {g.hostname}")
+            for g in _owners_of(peer_ip, ip_owner):
+                if g != f.hostname:
+                    upsert(f.hostname, g, "mlag-peer", 1.0,
+                           f"{f.hostname} MLAG peer-address {peer_ip} owned by {g}")
 
     # ─── Rule 3: BGP neighbor IP owned by another device ─────────────────────
     for f in all_facts:
         for n_ip in f.bgp_neighbors:
-            for g in all_facts:
-                if g.hostname == f.hostname:
-                    continue
-                if _ip_owned_by(n_ip, g.interface_ips):
-                    upsert(f.hostname, g.hostname, "bgp-neighbor", 0.95,
-                           f"{f.hostname} BGP neighbor {n_ip} → {g.hostname}")
+            for g in _owners_of(n_ip, ip_owner):
+                if g != f.hostname:
+                    upsert(f.hostname, g, "bgp-neighbor", 0.95,
+                           f"{f.hostname} BGP neighbor {n_ip} → {g}")
 
     # ─── Rule 4: subnet co-membership on small subnets ───────────────────────
     # Build subnet → [hosts] map for /28-/31 prefixes
@@ -632,14 +673,14 @@ def infer_edges(facts_by_host: dict[str, DeviceFacts]) -> list[InferredEdge]:
                 subnet_owners.setdefault(str(net), set()).add(f.hostname)
 
     for net, owners in subnet_owners.items():
-        if len(owners) < 2:
+        if len(owners) < 2 or len(owners) > _MAX_SUBNET_OWNERS:
             continue
         owners_l = sorted(owners)
         for i in range(len(owners_l)):
             for j in range(i + 1, len(owners_l)):
                 a, b = owners_l[i], owners_l[j]
                 upsert(a, b, "subnet-co-membership", 0.85,
-                       f"Both on {net} (/{ipaddress.ip_network(net).prefixlen})")
+                       f"Both on {net} ({net[net.index('/'):]})")
 
     # ─── Rule 5: Junos chassis-cluster HA partner inference ──────────────────
     # When two devices share a hostname prefix and one is an "a" / one is "b" /

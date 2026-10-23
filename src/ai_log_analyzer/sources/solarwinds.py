@@ -33,7 +33,9 @@ from ai_log_analyzer.sources.base import (
     SourceConfig,
     SourceError,
     SourceTimeoutError,
+    guarded_session,
     registry,
+    source_allow_private,
 )
 from ai_log_analyzer.sources.telemetry import InterfaceTelemetrySnapshot
 
@@ -89,6 +91,12 @@ _EVENTS_SWQL_HOST = (
     _EVENTS_SWQL + " AND n.Caption CONTAINS @host"
 )
 
+# TOP without ORDER BY returns arbitrary rows: always keep the newest.
+_ALERT_ORDER = " ORDER BY aa.TriggeredDateTime DESC"
+_OLM_ORDER = " ORDER BY le.DateTime DESC"
+_SYSLOG_ORDER = " ORDER BY s.DateTime DESC"
+_EVENTS_ORDER = " ORDER BY e.EventTime DESC"
+
 _NODES_SWQL = (
     "SELECT NodeID, Caption, IPAddress, Status, Vendor, MachineType, Location FROM Orion.Nodes"
 )
@@ -106,7 +114,13 @@ _IFACE_SWQL = (
     "WHERE n.Caption = @device AND i.Caption = @interface"
 )
 
+class _SolarWindsHTTPError(SourceError):
+    """A non-timeout HTTP/transport failure (so OLM -> SysLog fallback can tell it
+    apart from a timeout, while every caller still only has to catch SourceError)."""
+
+
 _HTTP_ERRORS = (
+    _SolarWindsHTTPError,
     requests.exceptions.HTTPError,
     requests.exceptions.ConnectionError,
     requests.exceptions.InvalidURL,
@@ -243,6 +257,26 @@ def normalize_saas_log(row: dict[str, Any]) -> str:
     return format_log_line(timestamp, host, program, severity, msg)
 
 
+def _fair_cap(streams: list[list[str]], cap: int) -> list[str]:
+    """Take up to ``cap`` lines, sharing the budget across streams so a noisy
+    stream (alerts) cannot crowd every other one (syslog) out. Stream order is
+    kept; a stream that is short frees its share for the others."""
+    counts = [0] * len(streams)
+    remaining = cap
+    active = [i for i, lines in enumerate(streams) if lines]
+    while remaining > 0 and active:
+        share = max(1, remaining // len(active))
+        pending = []
+        for i in active:
+            take = min(share, len(streams[i]) - counts[i], remaining)
+            counts[i] += take
+            remaining -= take
+            if counts[i] < len(streams[i]):
+                pending.append(i)
+        active = pending
+    return [line for lines, n in zip(streams, counts) for line in lines[:n]]
+
+
 def _unreachable_mode(mode: SolarWindsMode) -> NoReturn:
     raise SourceError(f"unsupported SolarWinds mode: {mode}")
 
@@ -316,11 +350,10 @@ class SolarWindsConnector:
 
     kind = "solarwinds"
 
-    def __init__(self, config: SolarWindsConfig) -> None:
+    def __init__(self, config: SolarWindsConfig, *, allow_private: bool = False) -> None:
         self.config = config
         self.name = "solarwinds"
-        self.session = requests.Session()
-        self.session.verify = config.verify_ssl
+        self.session = guarded_session(verify=config.verify_ssl, allow_private=allow_private)
         self.session.headers["Accept"] = "application/json"
         self.session.headers["User-Agent"] = _user_agent()
 
@@ -337,13 +370,14 @@ class SolarWindsConnector:
             timeout=timeout,
             mode=mode,
         )
-        inst = cls(sw_config)
+        inst = cls(sw_config, allow_private=source_allow_private(config))
         inst.name = config.id
         return inst
 
     @classmethod
     def from_env(cls) -> SolarWindsConnector:
-        return cls(SolarWindsConfig.from_env())
+        # SOLARWINDS_URL is operator-configured: a private Orion server is expected.
+        return cls(SolarWindsConfig.from_env(), allow_private=True)
 
     def _auth_headers(self) -> dict[str, str]:
         if self.config.api_token:
@@ -383,10 +417,19 @@ class SolarWindsConnector:
             raise SourceTimeoutError(
                 f"SolarWinds {self.name} {method} {path} timed out"
             ) from exc
-        response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            raise _SolarWindsHTTPError(f"SolarWinds {self.name} {method} {path} failed: {exc}") from exc
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise _SolarWindsHTTPError(
+                f"SolarWinds {self.name} {method} {path} HTTP {response.status_code}") from exc
         if not response.content:
             return {}
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise SourceError(f"SolarWinds {self.name} {method} {path} returned non-JSON") from exc
 
     def _swql(self, query: str, parameters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """POST parameterized SWQL. Never interpolates values into the query string."""
@@ -400,12 +443,12 @@ class SolarWindsConnector:
         return params
 
     def _swis_alerts(self, *, since_seconds: int, host_filter: str) -> list[dict[str, Any]]:
-        query = _ALERT_SWQL_HOST if host_filter else _ALERT_SWQL
+        query = (_ALERT_SWQL_HOST if host_filter else _ALERT_SWQL) + _ALERT_ORDER
         return self._swql(query, self._bind(since_seconds, host_filter))
 
     def _swis_syslog(self, *, since_seconds: int, host_filter: str) -> list[dict[str, Any]]:
         params = self._bind(since_seconds, host_filter)
-        olm = _OLM_SWQL_HOST if host_filter else _OLM_SWQL
+        olm = (_OLM_SWQL_HOST if host_filter else _OLM_SWQL) + _OLM_ORDER
         try:
             return self._swql(olm, params)
         except _HTTP_ERRORS as exc:
@@ -413,11 +456,11 @@ class SolarWindsConnector:
                 "Orion.OLM.LogEntry unavailable (%s); falling back to Orion.SysLog",
                 type(exc).__name__,
             )
-            syslog = _SYSLOG_SWQL_HOST if host_filter else _SYSLOG_SWQL
+            syslog = (_SYSLOG_SWQL_HOST if host_filter else _SYSLOG_SWQL) + _SYSLOG_ORDER
             return self._swql(syslog, params)
 
     def _swis_events(self, *, since_seconds: int, host_filter: str) -> list[dict[str, Any]]:
-        query = _EVENTS_SWQL_HOST if host_filter else _EVENTS_SWQL
+        query = (_EVENTS_SWQL_HOST if host_filter else _EVENTS_SWQL) + _EVENTS_ORDER
         return self._swql(query, self._bind(since_seconds, host_filter))
 
     def _saas_paginate(
@@ -481,45 +524,45 @@ class SolarWindsConnector:
         """Normalize alerts, syslog/logs, and events to syslog-shaped lines."""
         cap = max(0, int(limit))
         mode = self.config.mode
-        lines: list[str] = []
+        streams: list[list[str]] = []
         if mode == "swis":
             if include_alerts:
-                lines.extend(normalize_alert(row) for row in self.fetch_active_alerts(
+                streams.append([normalize_alert(row) for row in self.fetch_active_alerts(
                     since_seconds=since_seconds, host_filter=host_filter,
-                ))
+                )])
             if include_syslog:
-                lines.extend(normalize_syslog(row) for row in self._swis_syslog(
+                streams.append([normalize_syslog(row) for row in self._swis_syslog(
                     since_seconds=since_seconds, host_filter=host_filter,
-                ))
+                )])
             if include_events:
-                lines.extend(normalize_event(row) for row in self._swis_events(
+                streams.append([normalize_event(row) for row in self._swis_events(
                     since_seconds=since_seconds, host_filter=host_filter,
-                ))
+                )])
         elif mode == "saas":
             if include_syslog:
                 log_params: dict[str, Any] = {}
                 if host_filter:
                     log_params["hostname"] = host_filter
                 log_params["startTime"] = _since_iso(since_seconds)
-                lines.extend(
+                streams.append([
                     normalize_saas_log(row)
                     for row in self._saas_paginate(
                         _SAAS_LOGS_PATH, log_params, limit=cap or _SWQL_TOP,
                         keys=("logs", "results", "data", "items"),
                     )
-                )
+                ])
             if include_alerts:
-                lines.extend(
+                streams.append([
                     normalize_alert(row)
                     for row in self.fetch_active_alerts(
                         since_seconds=since_seconds, host_filter=host_filter,
                     )
-                )
+                ])
         else:
             _unreachable_mode(mode)
         if host_filter:
-            lines = [line for line in lines if host_filter in line]
-        return lines[:cap]
+            streams = [[line for line in lines if host_filter in line] for lines in streams]
+        return _fair_cap(streams, cap)
 
     def build_site_manifest(self, site_name: str) -> dict[str, Any]:
         """Devices + TopologyConnections adjacency in the NetBox manifest shape."""
@@ -706,4 +749,4 @@ def fetch_interface_telemetry(
 
 SolarWindsSource = SolarWindsConnector
 
-registry.register("solarwinds", SolarWindsConnector.from_config)
+registry.register("solarwinds", SolarWindsConnector.from_config, outbound=True)

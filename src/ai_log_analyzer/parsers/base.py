@@ -21,12 +21,25 @@ from typing import Protocol
 
 from ai_log_analyzer.classifier import LogEvent
 
-# RFC3164: "<PRI>Mmm dd HH:MM:SS host appname[pid]: message"
+# Stamps seen in front of the host: BSD ("Oct 22 10:15:01"), optionally with a
+# year (IOS "Oct 22 2026 10:15:01"), microseconds (SONiC) and a timezone
+# abbreviation ("... UTC"), or rsyslog's ISO-8601 with fractions and offset.
+_TZ_ABBR = r"(?:UTC|GMT|UT|[ECMP][SD]T|CES?T|EES?T|BST|IST|JST)"
+_BSD_TS = (r"[A-Z][a-z]{2}\s+\d{1,2}(?:\s+\d{4})?\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?"
+           rf"(?:\s+{_TZ_ABBR}(?=[\s:]))?")
+_ISO_TS = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
+_TS = rf"(?:{_BSD_TS}|{_ISO_TS})"
+# SONiC native severity word between host and tag: "leaf1 NOTICE bgp#bgpd[12]: ..."
+_SEV_WORD = r"(?:(?P<sev>EMERG|ALERT|CRIT|ERR(?:OR)?|WARN(?:ING)?|NOTICE|INFO|DEBUG)\s+)?"
+
+# RFC3164: "<PRI>Mmm dd HH:MM:SS host appname[pid]: message". The tag may be a
+# Cisco "%FAC-SEV-MNEM" or SONiC "container#proc"; "host:" (IOS) loses its colon.
 RFC3164_RE = re.compile(
     r"^(?:<(?P<pri>\d+)>)?"
-    r"(?P<ts>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"
-    r"(?P<host>\S+)\s+"
-    r"(?P<app>[\w\-./]+)(?:\[\d+\])?:\s*"
+    rf"(?P<ts>{_TS})\s+"
+    r"(?P<host>\S+?):?\s+"
+    rf"{_SEV_WORD}"
+    r"(?P<app>[\w\-./%#]+)(?:\[\d+\])?:\s*"
     r"(?P<msg>.*)$"
 )
 
@@ -44,7 +57,8 @@ RFC5424_RE = re.compile(
 
 # Junos-style: "Mmm dd HH:MM:SS host process: tag: message"
 JUNOS_RE = re.compile(
-    r"^(?P<ts>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"
+    r"^(?:<(?P<pri>\d+)>)?"
+    rf"(?P<ts>{_TS})\s+"
     r"(?P<host>\S+)\s+"
     r"(?P<app>\S+?):\s+"
     r"(?:%-?\w+-\d+-\w+:\s+)?"
@@ -55,18 +69,62 @@ JUNOS_RE = re.compile(
 # "<PRI>Mmm dd HH:MM:SS host <body>" or ISO timestamp.
 _LOOSE_RE = re.compile(
     r"^(?:<(?P<pri>\d+)>)?"
-    r"(?P<ts>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}"
-    r"|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s+"
+    rf"(?P<ts>{_TS})\s+"
     r"(?P<host>[A-Za-z0-9][\w.\-]*)\s+"
     r"(?P<body>.+)$"
 )
 _PRI_ONLY_RE = re.compile(r"^<(?P<pri>\d{1,3})>(?P<body>.*)$")
 
 SEV_NAMES = ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"]
+_SEV_BY_WORD = {"EMERG": "emerg", "ALERT": "alert", "CRIT": "crit", "ERR": "err", "ERROR": "err",
+                "WARN": "warning", "WARNING": "warning", "NOTICE": "notice", "INFO": "info",
+                "DEBUG": "debug"}
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+_BSD_PARTS_RE = re.compile(
+    r"^([A-Z][a-z]{2})\s+(\d{1,2})(?:\s+(\d{4}))?\s+(\d{2}:\d{2}:\d{2})(\.\d+)?(?:\s+(\w+))?$")
+# IOS-XR wraps the tag: "RP/0/RP0/CPU0:Oct 22 10:15:01.1 UTC: bgp[1052]: %ROUTING-BGP-5-..."
+_XR_LOC_RE = re.compile(r"^(?:RP|LC|SC|FC)/\d+/[\w/]+$")
+_XR_LOC_PREFIX_RE = re.compile(r"^(?:RP|LC|SC|FC)/\d+/[\w/]+:")
+_XR_INNER_RE = re.compile(
+    rf"^(?:\*?{_BSD_TS}\s*:\s*)?(?P<app>[\w\-./#]+)(?:\[\d+\])?:\s*(?P<msg>.*)$")
 
 
 def pri_to_severity(pri: int) -> str:
     return SEV_NAMES[pri & 0x07]
+
+
+def _canon_ts(ts: str) -> str:
+    """Reduce an extended BSD stamp to a shape downstream code can order.
+
+    Fractions are dropped, a year turns the stamp into ISO-8601, a trailing
+    UTC/GMT is dropped. A non-UTC abbreviation (offset unknown) is left as
+    written so it is never mis-dated. Plain "Mmm dd HH:MM:SS" is untouched.
+    """
+    m = _BSD_PARTS_RE.match(ts)
+    if not m:
+        return ts
+    mon, day, year, hms, frac, tz = m.groups()
+    if not (year or frac or tz):
+        return ts
+    if tz and tz not in ("UTC", "GMT", "UT"):
+        return ts
+    month = _MONTHS.index(mon.lower()) + 1 if mon.lower() in _MONTHS else 0
+    if year and month:
+        return f"{year}-{month:02d}-{int(day):02d}T{hms}"
+    return f"{mon} {day} {hms}"
+
+
+def _unwrap_xr(app: str, msg: str) -> tuple[str, str]:
+    """IOS-XR: replace the "RP/0/RP0/CPU0" location tag by the real process tag."""
+    if app.isdigit():
+        m = _XR_LOC_PREFIX_RE.match(msg)
+        if not m:
+            return app, msg
+        msg = msg[m.end():]
+    elif not _XR_LOC_RE.match(app):
+        return app, msg
+    inner = _XR_INNER_RE.match(msg)
+    return (inner.group("app"), inner.group("msg")) if inner else (app, msg)
 
 
 @dataclass(frozen=True)
@@ -77,19 +135,29 @@ class Envelope:
     hostname: str
     appname: str
     body: str
+    severity: str = ""  # syslog severity word carried without a PRI (SONiC "NOTICE")
 
 
 def split_envelope(line: str) -> Envelope:
     for fmt, regex in (("rfc5424", RFC5424_RE), ("rfc3164", RFC3164_RE), ("junos", JUNOS_RE)):
         m = regex.match(line)
         if m:
-            pri = m.groupdict().get("pri")
-            return Envelope(fmt, int(pri) if pri else None, m.group("ts"),
-                            m.group("host") or "", m.group("app") or "", m.group("msg"))
+            g = m.groupdict()
+            pri = g.get("pri")
+            ts, app, msg = m.group("ts"), m.group("app") or "", m.group("msg")
+            if fmt == "rfc5424":
+                ts = "" if ts == "-" else ts   # RFC 5424 NILVALUE
+            else:
+                ts = _canon_ts(ts)
+            if fmt == "rfc3164":
+                app, msg = _unwrap_xr(app, msg)
+            return Envelope(fmt, int(pri) if pri else None, ts, m.group("host") or "", app, msg,
+                            _SEV_BY_WORD.get(g.get("sev") or "", ""))
     m = _LOOSE_RE.match(line)
     if m:
         pri = m.group("pri")
-        return Envelope("loose", int(pri) if pri else None, m.group("ts"), m.group("host"), "", m.group("body"))
+        return Envelope("loose", int(pri) if pri else None, _canon_ts(m.group("ts")), m.group("host"), "",
+                        m.group("body"))
     m = _PRI_ONLY_RE.match(line)
     if m:
         return Envelope("pri", int(m.group("pri")), "", "", "", m.group("body"))

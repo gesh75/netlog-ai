@@ -14,7 +14,7 @@ from ai_log_analyzer import audit, llm, rbac
 from ai_log_analyzer.state_store import StateDB, open_db
 from ai_log_analyzer.web.app import create_app
 
-VIEW, OPER, ADMIN = "view-tok-1", "oper-tok-1", "admin-tok-1"
+VIEW, OPER, ADMIN = "view-tok-0123456789", "oper-tok-0123456789", "admin-tok-0123456789"
 
 
 @pytest.fixture
@@ -48,12 +48,12 @@ def test_principals_from_env_and_hashed_file(tmp_path, monkeypatch):
         {"name": "bad", "role": "superuser", "token": "x"},
     ]}))
     monkeypatch.setenv("AI_LOG_ANALYZER_RBAC_FILE", str(f))
-    monkeypatch.setenv("AI_LOG_ANALYZER_VIEWER_TOKENS", "bare-token")
+    monkeypatch.setenv("AI_LOG_ANALYZER_VIEWER_TOKENS", "bare-token-0123456789")
     assert rbac.authenticate("alice-secret").name == "alice"
     assert rbac.authenticate("alice-secret").role == "operator"
-    assert rbac.authenticate("bare-token").role == "viewer"
+    assert rbac.authenticate("bare-token-0123456789").role == "viewer"
     assert rbac.authenticate("x") is None                 # invalid role entry skipped
-    assert rbac.authenticate("legacy", legacy_token="legacy").role == "admin"
+    assert rbac.authenticate("legacy-token-0123456789", legacy_token="legacy-token-0123456789").role == "admin"
     assert rbac.authenticate("") is None
 
 
@@ -94,8 +94,8 @@ def test_operator_analyzes_but_privileged_actions_need_admin(client):
 def test_admin_passes_every_gate_and_legacy_token_is_admin(client, monkeypatch):
     assert client.post("/api/llm/provider", json={"provider": "ollama"}, headers=_h(ADMIN)).status_code == 200
     assert client.get("/api/audit", headers=_h(ADMIN)).status_code == 200
-    monkeypatch.setattr(web_app, "API_TOKEN", "legacy-shared")
-    assert client.get("/api/audit", headers={"X-API-Token": "legacy-shared"}).status_code == 200
+    monkeypatch.setattr(web_app, "API_TOKEN", "legacy-shared-token-0123")
+    assert client.get("/api/audit", headers={"X-API-Token": "legacy-shared-token-0123"}).status_code == 200
     llm.set_provider("ollama")
 
 
