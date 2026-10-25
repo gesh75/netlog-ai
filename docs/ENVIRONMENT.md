@@ -24,7 +24,7 @@ environment always wins; `.env` never overrides it):
 Because `~/.env` and sibling-project files are read, a stray file there can change behavior.
 Set `AI_LOG_ANALYZER_DEBUG=1` to print which files were loaded.
 
-Items marked **(new in this release)** are introduced by this release's hardening work; see the
+Items marked **(new in 2.2.0)** are introduced by this release's hardening work; see the
 CHANGELOG for the exact semantics shipped.
 
 ## Server and security
@@ -38,21 +38,21 @@ CHANGELOG for the exact semantics shipped.
 | `AI_LOG_ANALYZER_OPERATOR_TOKENS` | unset | Same format, role `operator` (viewer plus running analyses, ITSM enrichment and incident resolution). |
 | `AI_LOG_ANALYZER_ADMIN_TOKENS` | unset | Same format, role `admin` (everything, including provider, rules, source and triage-worker control). |
 | `AI_LOG_ANALYZER_RBAC_FILE` | unset | JSON file `{"users": [{"name", "role", "token_sha256"}]}`. Prefer `token_sha256` so the file holds no usable secret. |
-| `AI_LOG_ANALYZER_REQUIRE_AUTH` | `false` (`1` in the Docker image) | **(new in this release)** When set, `create_app()` raises at startup unless an API token or RBAC principal is configured, so a gunicorn deployment can never start open. |
-| `AI_LOG_ANALYZER_ALLOW_NOAUTH` | `false` | **(new in this release)** `python -m` / `main()` refuses to bind a non-loopback address without a token unless this is `1`. Demos and isolated labs only. |
-| `AI_LOG_ANALYZER_ITSM_ALLOW_PRIVATE` | `false` | **(new in this release)** Lets the ServiceNow sync reach a private-range instance URL. Read from the server environment only; request bodies cannot set it. |
-| `AI_LOG_ANALYZER_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` plus `ANALYZER_HOST` | **(new in this release)** Comma-separated `Host` header allow-list (DNS-rebinding defense). Enforced only while authentication is off; a bad Host gets 400. `*` disables the check. |
-| `AI_LOG_ANALYZER_MAX_SSE` | `8` | **(new in this release)** Maximum concurrent server-sent-event streams (`/api/tail`); further clients get 503. |
-| `AI_LOG_ANALYZER_MAX_CONTENT_LENGTH` | `16777216` (16 MiB) | **(new in this release)** Maximum request body size; larger requests get a JSON 413. |
+| `AI_LOG_ANALYZER_REQUIRE_AUTH` | `false` (`1` in the Docker image) | **(new in 2.2.0)** When set, `create_app()` raises at startup unless an API token or RBAC principal is configured, so a gunicorn deployment can never start open. |
+| `AI_LOG_ANALYZER_ALLOW_NOAUTH` | `false` | **(new in 2.2.0)** `python -m` / `main()` refuses to bind a non-loopback address without a token unless this is `1`. Demos and isolated labs only. |
+| `AI_LOG_ANALYZER_ITSM_ALLOW_PRIVATE` | `false` | **(new in 2.2.0)** Lets the ServiceNow sync reach a private-range instance URL. Read from the server environment only; request bodies cannot set it. |
+| `AI_LOG_ANALYZER_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` plus `ANALYZER_HOST` | **(new in 2.2.0)** Comma-separated `Host` header allow-list (DNS-rebinding defense). Enforced only while authentication is off; a bad Host gets 400. `*` disables the check. |
+| `AI_LOG_ANALYZER_MAX_SSE` | `8` | **(new in 2.2.0)** Maximum concurrent server-sent-event streams (`/api/tail`); further clients get 503. |
+| `AI_LOG_ANALYZER_MAX_CONTENT_LENGTH` | `16777216` (16 MiB) | **(new in 2.2.0)** Maximum request body size; larger requests get a JSON 413. |
 | `AI_LOG_ANALYZER_CORS_ORIGINS` | `http://localhost:6060,http://127.0.0.1:6060` | Comma-separated CORS allow-list for `/api/*`. Never use `*` together with authentication. |
 | `AI_LOG_ANALYZER_FILE_ROOTS` | `/var/log` plus `AI_LOG_ANALYZER_DATA_DIR` | Colon-separated directories that `POST /api/analyze {"source":"file"}` may read. Dotfiles, dot-directories and credential/state filenames are denied under every root. **Security:** keep it as narrow as you can; `$HOME` and the repo checkout are no longer included by default. |
 | `AI_LOG_ANALYZER_MAX_FILE_MB` | `200` | Web-route cap for single-file analysis (MB). Use the CLI for larger files. |
 | `AI_LOG_ANALYZER_SAMPLES_DIR` | packaged `data/samples` | Override the demo samples directory. |
 | `AI_LOG_ANALYZER_SITES_DIR` | packaged `data/sites` | Override the site manifests / golden-config directory (web app, CLI and MCP server). |
-| `AI_LOG_ANALYZER_DATA_DIR` | unset | **(new in this release)** One extra directory, besides `/var/log`, from which file analysis may read (for example the container's `/data` volume). |
-| `AI_LOG_ANALYZER_PSEUDONYM_KEY` | random per process | **(new in this release)** HMAC key for PUB-/user- pseudonym tokens. Each gunicorn worker generates its own random key, so tokens differ per worker and after a restart; set a long random value for stable tokens. **Security:** treat as a secret; anyone holding it can regenerate the tokens. |
-| `NETLOG_ALLOW_INSECURE_HTTP` | `false` | **(new in this release)** Allow plain `http://` for the ITSM and ServiceNow integrations (they require `https://` otherwise, except for private test hosts). **Security:** sends credentials in clear text. |
-| `NETLOG_ALLOW_PRIVATE_OUTBOUND` | `false` | **(new in this release)** Lets network connectors (Kibana, Splunk, Loki, LibreNMS, ServiceNow, SolarWinds) reach private, loopback and non-resolving hosts. A URL set by the operator through `NETLOG_SOURCE_<id>_URL` / `SOLARWINDS_URL` is already trusted; this is for sources added at runtime. NetBox keeps private addresses allowed because `NETBOX_URL` is operator-set. |
+| `AI_LOG_ANALYZER_DATA_DIR` | unset | **(new in 2.2.0)** One extra directory, besides `/var/log`, from which file analysis may read (for example the container's `/data` volume). |
+| `AI_LOG_ANALYZER_PSEUDONYM_KEY` | random per process | **(new in 2.2.0)** HMAC key for PUB-/user- pseudonym tokens. Each gunicorn worker generates its own random key, so tokens differ per worker and after a restart; set a long random value for stable tokens. **Security:** treat as a secret; anyone holding it can regenerate the tokens. |
+| `NETLOG_ALLOW_INSECURE_HTTP` | `false` | **(new in 2.2.0)** Allow plain `http://` for the ITSM and ServiceNow integrations (they require `https://` otherwise, except for private test hosts). **Security:** sends credentials in clear text. |
+| `NETLOG_ALLOW_PRIVATE_OUTBOUND` | `false` | **(new in 2.2.0)** Lets network connectors (Kibana, Splunk, Loki, LibreNMS, ServiceNow, SolarWinds) reach private, loopback and non-resolving hosts. A URL set by the operator through `NETLOG_SOURCE_<id>_URL` / `SOLARWINDS_URL` is already trusted; this is for sources added at runtime. NetBox keeps private addresses allowed because `NETBOX_URL` is operator-set. |
 | `AI_LOG_ANALYZER_DEBUG` | unset | Any non-empty value prints which `.env` files were loaded. |
 
 ## LLM gateway
@@ -66,10 +66,10 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `LLM_PROVIDER` | `ollama` | `ollama`, `local` (Docker Model Runner), `claude`, `claude-only`, `grok`. |
 | `LLM_ENABLED` | `true` | Master switch for LLM calls (`true`/`false` only). |
 | `LLM_TIMEOUT` | `120` | Per-request timeout in seconds. |
-| `LLM_TOTAL_TIMEOUT_S` | `180` | **(new in this release)** Overall wall-clock budget for one gateway call across providers, retries and backoff; per-request timeouts shrink to what is left. `0` = unlimited. |
-| `LLM_BREAKER_THRESHOLD` | `3` | **(new in this release)** Consecutive failures after which a provider's circuit opens and it is skipped. `0` disables the breaker. |
-| `LLM_BREAKER_COOLDOWN_S` | `60` | **(new in this release)** Seconds an open circuit stays open before one trial call is allowed. State is per process. |
-| `LLM_LOCAL_HOSTS` | empty | **(new in this release)** Comma-separated hostnames to treat as local for the egress policy. An `OLLAMA_URL` / `MODEL_RUNNER_URL` on any other off-host name reports mode `remote-host`. |
+| `LLM_TOTAL_TIMEOUT_S` | `180` | **(new in 2.2.0)** Overall wall-clock budget for one gateway call across providers, retries and backoff; per-request timeouts shrink to what is left. `0` = unlimited. |
+| `LLM_BREAKER_THRESHOLD` | `3` | **(new in 2.2.0)** Consecutive failures after which a provider's circuit opens and it is skipped. `0` disables the breaker. |
+| `LLM_BREAKER_COOLDOWN_S` | `60` | **(new in 2.2.0)** Seconds an open circuit stays open before one trial call is allowed. State is per process. |
+| `LLM_LOCAL_HOSTS` | empty | **(new in 2.2.0)** Comma-separated hostnames to treat as local for the egress policy. An `OLLAMA_URL` / `MODEL_RUNNER_URL` on any other off-host name reports mode `remote-host`. |
 | `LLM_MODEL` | `ai/qwen3:latest` | Model for the local Docker Model Runner. |
 | `MODEL_RUNNER_URL` | `http://localhost:12434` | Docker Model Runner base URL. |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama native API base URL. |
@@ -97,13 +97,13 @@ tokenization) are shared across workers through the state DB, API keys never are
 | Variable | Default | Purpose / notes |
 | --- | --- | --- |
 | `AI_LOG_ANALYZER_STATE_DB` | unset | Shared SQLite (WAL) file for the syslog spool, incident memory, audit log, retrieval index and runtime toggles. Required for multi-worker deployments and the streaming triage worker. |
-| `AI_LOG_ANALYZER_SQLITE_SYNC` | SQLite default | **(new in this release)** SQLite `synchronous` level (`OFF`, `NORMAL`, `FULL`) for the state DB; trade durability against write speed. |
+| `AI_LOG_ANALYZER_SQLITE_SYNC` | SQLite default | **(new in 2.2.0)** SQLite `synchronous` level (`OFF`, `NORMAL`, `FULL`) for the state DB; trade durability against write speed. |
 | `AI_LOG_ANALYZER_SYSLOG_SPOOL` | the state DB | Separate syslog spool DB. |
 | `AI_LOG_ANALYZER_INCIDENT_STORE` | unset | Incident journal: a `*.jsonl` path, or a `*.db`/`*.sqlite` path. Falls back to the state DB. Local only, bounded. |
 | `AI_LOG_ANALYZER_AUDIT_DB` | the state DB | Audit log database. Auditing is on when this or the state DB is set. |
 | `AI_LOG_ANALYZER_RAG_DB` | the state DB | Retrieval (BM25) index database. |
 | `AI_LOG_ANALYZER_RAG` | enabled | Set to `0`, `false`, `off` or `no` to disable evidence retrieval. |
-| `AI_LOG_ANALYZER_RAG_REFRESH_SECONDS` | `30` | **(new in this release)** How often a search re-checks site config files for changes and re-indexes them. `0` = check on every search; negative = never. |
+| `AI_LOG_ANALYZER_RAG_REFRESH_SECONDS` | `30` | **(new in 2.2.0)** How often a search re-checks site config files for changes and re-indexes them. `0` = check on every search; negative = never. |
 | `AI_LOG_ANALYZER_GOLDEN_DIR` | unset | Golden configs for drift detection: `<site>/<host>.txt` or `<host>.txt`. |
 | `AI_LOG_ANALYZER_TEMPLATE_STORE` | unset | JSON file remembering mined log templates across runs, to flag never-seen patterns. Written owner-only. |
 | `AI_LOG_ANALYZER_CUSTOM_RULES` | unset | JSON list of custom classification rules loaded at startup; they override the built-in knowledge base. |
@@ -114,7 +114,7 @@ tokenization) are shared across workers through the state DB, API keys never are
 | Variable | Default | Purpose / notes |
 | --- | --- | --- |
 | `AI_LOG_ANALYZER_DEDUP` | off | Collapse near-identical lines before classification. |
-| `AI_LOG_ANALYZER_DEDUP_MAX_CLUSTERS` | `20000` | **(new in this release)** Upper bound on distinct dedup clusters kept per run; further shapes fall into one overflow cluster so memory stays bounded. |
+| `AI_LOG_ANALYZER_DEDUP_MAX_CLUSTERS` | `20000` | **(new in 2.2.0)** Upper bound on distinct dedup clusters kept per run; further shapes fall into one overflow cluster so memory stays bounded. |
 | `AI_LOG_ANALYZER_EVPN_CAUSAL` | off | Enable the protocol-aware EVPN causal overlay by default. |
 | `AI_LOG_ANALYZER_MAX_LINE_BYTES` | `65536` | Longer log lines are truncated before parsing (protects against pathological input). |
 | `AI_LOG_ANALYZER_MAX_FILE_BYTES` | `0` (unlimited) | Cap on the bytes read from one file by the ingest layer. |
@@ -130,8 +130,8 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `AI_LOG_ANALYZER_TRIAGE_MIN_SEVERITY` | `high` | Minimum severity that opens a ticket. |
 | `AI_LOG_ANALYZER_TRIAGE_WINDOW_S` | `300` | Correlation window in seconds. |
 | `AI_LOG_ANALYZER_TRIAGE_POLL_S` | `15` | Spool poll interval in seconds. |
-| `AI_LOG_ANALYZER_TRIAGE_TICK_BUDGET_S` | `10` | **(new in this release)** Time budget for one triage tick. A tick keeps draining full batches from the spool until it is empty or this budget is spent, then re-polls immediately. |
-| `AI_LOG_ANALYZER_TRIAGE_RETENTION_DAYS` | `30` | **(new in this release)** Age after which non-active triage ticket records are pruned. |
+| `AI_LOG_ANALYZER_TRIAGE_TICK_BUDGET_S` | `10` | **(new in 2.2.0)** Time budget for one triage tick. A tick keeps draining full batches from the spool until it is empty or this budget is spent, then re-polls immediately. |
+| `AI_LOG_ANALYZER_TRIAGE_RETENTION_DAYS` | `30` | **(new in 2.2.0)** Age after which non-active triage ticket records are pruned. |
 | `AI_LOG_ANALYZER_TRIAGE_COOLDOWN_S` | `900` | Per-incident ticket cooldown in seconds. |
 | `AI_LOG_ANALYZER_TRIAGE_MAX_TICKETS_PER_HOUR` | `30` | Hard cap on tickets per hour. |
 | `AI_LOG_ANALYZER_TRIAGE_SITE` | `default` | Site label stamped on triage incidents. |
@@ -184,7 +184,7 @@ tokenization) are shared across workers through the state DB, API keys never are
 | Variable | Default | Purpose / notes |
 | --- | --- | --- |
 | `NETLOG_MCP_TRANSPORT` | `stdio` | `stdio`, `streamable-http` or `sse`. **Security:** the HTTP transports expose the tools over the network and need `Authorization: Bearer <NETLOG_MCP_TOKEN>`; the server refuses a non-loopback bind without a token. |
-| `NETLOG_MCP_HOST` | `127.0.0.1` | **(new in this release)** Bind address for the HTTP transports. |
-| `NETLOG_MCP_PORT` | `8000` | **(new in this release)** Port for the HTTP transports. |
-| `NETLOG_MCP_TOKEN` | unset | **(new in this release)** Bearer token required by the HTTP transports (compared in constant time). On loopback with no token the server starts with a warning. **Secret.** |
-| `NETLOG_MCP_ALLOW_WRITE` | `false` | **(new in this release)** Enables the MCP tools that change external systems: `add_source`, live `enrich_itsm_incident`, `push_solarwinds_alert_note` and live `netlog_servicenow_sync_incident`. Dry-run and preview paths stay available. |
+| `NETLOG_MCP_HOST` | `127.0.0.1` | **(new in 2.2.0)** Bind address for the HTTP transports. |
+| `NETLOG_MCP_PORT` | `8000` | **(new in 2.2.0)** Port for the HTTP transports. |
+| `NETLOG_MCP_TOKEN` | unset | **(new in 2.2.0)** Bearer token required by the HTTP transports (compared in constant time). On loopback with no token the server starts with a warning. **Secret.** |
+| `NETLOG_MCP_ALLOW_WRITE` | `false` | **(new in 2.2.0)** Enables the MCP tools that change external systems: `add_source`, live `enrich_itsm_incident`, `push_solarwinds_alert_note` and live `netlog_servicenow_sync_incident`. Dry-run and preview paths stay available. |

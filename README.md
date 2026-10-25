@@ -17,7 +17,7 @@
 
 [![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-2100%2B%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
-> 📓 Release **v2.1.0** — the V2 platform: a sanitize-first LLM gateway, multi-vendor security and SD-WAN parsing with cross-vendor correlation, durable multi-worker ingest with topology-aware suppression, evidence-cited RCA with streaming ticket triage, RBAC with an audit trail, and a dashboard for all of it. Details in [`CHANGELOG.md`](CHANGELOG.md); upgrade notes in [What's new in v2.0.0](#whats-new-in-v200). The unreleased security and reliability hardening pass (with some **breaking defaults**) is described in [Upgrade notes: hardening pass](#upgrade-notes-hardening-pass). Every environment variable is listed in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md); report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
+> 📓 Release **v2.2.0** — the V2 platform: a sanitize-first LLM gateway, multi-vendor security and SD-WAN parsing with cross-vendor correlation, durable multi-worker ingest with topology-aware suppression, evidence-cited RCA with streaming ticket triage, RBAC with an audit trail, and a dashboard for all of it. Details in [`CHANGELOG.md`](CHANGELOG.md); upgrade notes in [What's new in v2.0.0](#whats-new-in-v200). v2.2.0 is a security and reliability hardening release with some **breaking defaults**, described in [Upgrade notes: hardening pass](#upgrade-notes-hardening-pass). Every environment variable is listed in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md); report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
 
 ## V2 at a glance
 
@@ -87,7 +87,7 @@ If you have ever watched an AI dashboard hallucinate a "root cause" with no acti
 
 ## Upgrade notes: hardening pass
 
-These changes are unreleased (see `CHANGELOG.md` → *Unreleased*). Some defaults are now safer and can break existing deployments:
+These changes shipped in v2.2.0 (see `CHANGELOG.md` → *[2.2.0]*). Some defaults are now safer and can break existing deployments:
 
 | Area | Change | If you depended on the old behavior |
 |---|---|---|
