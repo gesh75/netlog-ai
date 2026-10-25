@@ -287,7 +287,8 @@ def test_site_doc_pins_mermaid_to_an_exact_version():
 
 def test_index_html_has_no_hardcoded_version():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    assert __version__ not in html
+    # As a standalone token: `cytoscape-elk@2.2.0`-style pins of vendored packages are not our version.
+    assert not re.search(r"(?<![\d.@])" + re.escape(__version__) + r"(?!\d)", html)
     assert not re.search(r'class="brand-version"[^>]*>\s*v?\d', html)
 
 
