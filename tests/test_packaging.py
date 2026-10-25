@@ -168,12 +168,26 @@ def test_init_fallback_version_matches_pyproject():
     assert m.group(1) == _project()["version"]
 
 
+def _version_pattern(ver: str) -> re.Pattern[str]:
+    """Match the app's version as a standalone token. `pkg@x.y.z` pins (vendored npm packages named in
+    comments) are another project's version that may coincide with ours, so they are not matches."""
+    return re.compile(r"(?<![\d.@])" + re.escape(ver) + r"(?![\d])")
+
+
+def test_version_pattern_catches_real_copies_but_not_package_pins():
+    pat = _version_pattern("2.2.0")
+    assert pat.search('headers = {"User-Agent": "netlog-ai/2.2.0"}')
+    assert pat.search('<span class="brand-version">v2.2.0</span>')
+    assert not pat.search("vendored locally (cytoscape-elk@2.2.0)")
+    assert not pat.search("netlog-ai/12.2.0") and not pat.search("netlog-ai/2.2.01")
+
+
 def test_version_literal_not_scattered_through_src():
     """The current version must live in pyproject.toml (plus the single __init__
     fallback), not be hard-coded into User-Agent strings, HTML, etc. Every such copy
     goes stale at the next release."""
     ver = _project()["version"]
-    pattern = re.compile(r"(?<![\d.])" + re.escape(ver) + r"(?![\d])")
+    pattern = _version_pattern(ver)
     offenders: list[str] = []
     for path in sorted((SRC / "ai_log_analyzer").rglob("*")):
         if not path.is_file() or path.suffix in {".pyc", ".png", ".ico", ".woff", ".woff2"}:

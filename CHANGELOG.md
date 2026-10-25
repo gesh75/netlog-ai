@@ -6,8 +6,13 @@ loose semantic versioning.
 
 ## [Unreleased]
 
-Security, privacy, reliability and correctness hardening from a full code review (see the PR for the
-per-finding evidence). **Several defaults are now fail-closed**; see *Changed (breaking)*.
+## [2.2.0] - 2026-10-25
+
+**Hardening release.** Security, privacy, reliability and correctness fixes from a full review of v2.1.0
+([#65](https://github.com/gesh75/netlog-ai/pull/65)). **Several defaults are now fail-closed and can break
+existing deployments**: read *Changed (breaking)* below and the README's *Upgrade notes: hardening pass*
+before upgrading. A deployment that sets an API token (16+ characters) and keeps its sources on `https://`
+needs no other change.
 
 ### Security
 - **Sanitizer:** every secret format found leaking through the LLM gateway is now redacted: `password 0|7 X` (the digit stays, the secret goes), `enable password|secret`, `username … secret 5|8|9|sha512`, OSPF/IS-IS authentication and message-digest keys, TACACS/RADIUS keys, `crypto isakmp key`, Junos pre-shared keys, SNMP communities in `snmp-server host`, `key-string`, Bearer/Basic headers, `api_key=`/`token=`/`password=` pairs, URL credentials, cloud/API tokens, JWTs, bare crypt hashes and PEM/PGP blocks (including truncated ones). `sanitize()` runs to a fixed point, so it is idempotent, and every rule is ReDoS-safe.
