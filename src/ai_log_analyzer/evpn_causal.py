@@ -13,6 +13,7 @@ import hashlib
 import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import IntEnum
@@ -110,8 +111,28 @@ def is_evpn_causal_enabled() -> bool:
     return os.environ.get("AI_LOG_ANALYZER_EVPN_CAUSAL", "").strip().lower() in _TRUTHY
 
 
+# Anchor for yearless (RFC3164) stamps while a batch is being coerced: the
+# batch's first dated event (or now). Set by ingest() / analyze().
+_STAMP_REF: ContextVar[datetime | None] = ContextVar("evpn_stamp_ref", default=None)
+
+
+def _batch_reference(events: Sequence[Any]) -> datetime:
+    from types import SimpleNamespace
+
+    from ai_log_analyzer.causal import _reference_dt
+
+    return _reference_dt(
+        SimpleNamespace(timestamp=str(getattr(e, "timestamp", None) or getattr(e, "t", None) or ""))
+        for e in events if not isinstance(e, str)
+    )
+
+
 def _as_datetime(stamp: Any) -> datetime | None:
-    """Parse ISO, RFC5424, FRR, and RFC3164 timestamps into datetime."""
+    """Parse ISO, RFC5424, FRR, and RFC3164 timestamps into datetime.
+
+    RFC3164 has no year: it is taken from the batch being processed (see
+    ``_STAMP_REF``), else from the current time, with Dec / Jan rollover.
+    """
     if stamp is None:
         return None
     if isinstance(stamp, datetime):
@@ -141,9 +162,10 @@ def _as_datetime(stamp: Any) -> datetime | None:
             day = int(parts[1])
             time_part = parts[2].split(".")[0]
             hour, minute, sec = (int(p) for p in time_part.split(":"))
-            return datetime(
-                2026, _RFC3164_MONTHS[parts[0][:3]], day, hour, minute, sec, tzinfo=timezone.utc
-            )
+            from ai_log_analyzer.causal import _RFC3164_YEARLESS, _now, _restamp_yearless
+
+            yearless = datetime(_RFC3164_YEARLESS, _RFC3164_MONTHS[parts[0][:3]], day, hour, minute, sec)
+            return _restamp_yearless(yearless, _STAMP_REF.get() or _now()).replace(tzinfo=timezone.utc)
         except ValueError:
             return None
     return None
@@ -498,19 +520,20 @@ class EVPNBipartiteCausalEngine:
 
     def ingest(self, events: Iterable[Any]) -> list[FabricEvent]:
         out: list[FabricEvent] = []
-        for item in events:
-            coerced = _coerce_fabric_event(item)
-            if coerced is not None:
-                out.append(coerced)
+        batch = list(events)
+        token = _STAMP_REF.set(_batch_reference(batch))
+        try:
+            for item in batch:
+                coerced = _coerce_fabric_event(item)
+                if coerced is not None:
+                    out.append(coerced)
+        finally:
+            _STAMP_REF.reset(token)
         return out
 
     def analyze(self, events: Iterable[Any]) -> list[CausalHypothesis]:
         """Group fabric events into root-cause hypotheses ordered by confidence."""
-        fabric: list[FabricEvent] = []
-        for e in events:
-            coerced = _coerce_fabric_event(e)
-            if coerced is not None and coerced.layer != ProtocolLayer.UNKNOWN:
-                fabric.append(coerced)
+        fabric = [e for e in self.ingest(events) if e.layer != ProtocolLayer.UNKNOWN]
 
         if not fabric:
             return []
@@ -565,7 +588,10 @@ class EVPNBipartiteCausalEngine:
                     if later.vni:
                         affected_vnis.add(later.vni)
 
-            # Calculate confidence based on layer depth and corroborated downstream symptoms
+            # Calculate confidence based on layer depth and corroborated downstream symptoms.
+            # Heuristic ordinal score: these constants are not calibrated against
+            # labelled incidents. Read it as "higher ranks above lower", never as a
+            # probability; the numbers are only meaningful relative to each other.
             base_conf = 0.65 if candidate.layer == ProtocolLayer.L1_PHYSICAL else 0.55
             symptom_boost = min(0.30, len(symptoms) * 0.08)
             layer_span_boost = (

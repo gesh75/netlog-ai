@@ -25,6 +25,7 @@ _PEER_RES = (
     re.compile(rf"\b(?:vsmart|vbond|vmanage|peer|at)\s+(?P<ip>{_IP})", re.IGNORECASE),
     re.compile(rf"->\s*(?P<ip>{_IP})"),
 )
+_OMP_RE = re.compile(r"(?<![a-z])omp(?![a-z])")  # not the "omp" inside "completed" / "computing"
 _STATE_WORD_RE = re.compile(r"\b(?:is|state)\s+(?P<s>up|down|init|handshake)\b", re.IGNORECASE)
 _DOWN_WORDS = frozenset({"down", "init", "handshake", "connect", "tear_down", "challenge", "disconnected"})
 
@@ -58,8 +59,10 @@ class CiscoSdwanParser:
         out: dict[str, str] = {"vendor": "cisco_sdwan"}
         if "bfd" in low:
             out["event_type"] = "bfd_session"
-        elif "omp" in low:
+        elif _OMP_RE.search(low):
             out["event_type"] = "omp_peer"
+        elif "system-config-commit" in low:
+            out["event_type"] = "config_change"
         elif "control-connection" in low or "vdaemon" in low or re.search(r"\b(?:vsmart|vbond|vmanage)\b", low):
             out["event_type"] = "control_connection"
 

@@ -172,11 +172,13 @@ const NV2 = (() => {
     chipText("spool-badge", `Spool ${human(sp.rows || 0)} lines · ${ago(newest)}`);
     const listeners = (sp.listeners || []).map((l) =>
       `${l.id} [${l.role || "?"}/${l.proto || "?"}:${l.port || "?"}] received ${l.received || 0}, ` +
-      `rejected ${(l.rejected_sender || 0) + (l.rejected_conn_limit || 0)}, oversize ${l.dropped_oversize || 0}`);
+      `rejected ${(l.rejected_sender || 0) + (l.rejected_conn_limit || 0)}, oversize ${l.dropped_oversize || 0}, ` +
+      `udp drops ${l.udp_drops || 0}, lost ${l.spool_lines_lost || 0}`);
+    const lossy = (sp.listeners || []).some((l) => (l.udp_drops || 0) > 0 || (l.spool_lines_lost || 0) > 0);
     const title = ["SQLite WAL syslog spool",
       ...sources.map((x) => `${x.source}: ${x.rows} rows, newest ${ago(x.age_s)}`),
       ...listeners, sp.error ? `error: ${sp.error}` : ""].filter(Boolean).join("\n");
-    chipState("spool-badge", sp.error ? "crit" : newest != null && newest < 300 ? "ok" : "warn", title);
+    chipState("spool-badge", sp.error ? "crit" : newest != null && newest < 300 && !lossy ? "ok" : "warn", title);
   }
 
   function paintTriage(t) {
@@ -193,8 +195,14 @@ const NV2 = (() => {
     }
     chipText("triage-badge", `Triage ${t.role}${tickets}`);
     const tot = t.totals || {};
-    chipState("triage-badge", t.role === "active" ? "ok" : "warn",
-      [`role ${t.role} · sinks ${(t.sinks || []).join(", ")}`, `window ${t.window_events || 0} events`,
+    const gap = Object.values(t.spool_gap_rows || {}).reduce((a, n) => a + n, 0);
+    const pending = t.pending_deliveries || 0;
+    const openSinks = Object.entries(t.sink_state || {}).filter(([, st]) => st.open).map(([name]) => name);
+    const problems = [gap ? `${gap} spool rows lost before triage read them` : "",
+      pending ? `${pending} ticket deliveries pending` : "",
+      openSinks.length ? `sink circuit open: ${openSinks.join(", ")}` : ""].filter(Boolean);
+    chipState("triage-badge", t.role === "active" && !problems.length ? "ok" : "warn",
+      [...problems, `role ${t.role} · sinks ${(t.sinks || []).join(", ")}`, `window ${t.window_events || 0} events`,
         `opened ${tot.opened || 0} · updated ${tot.updated || 0} · held ${tot.held || 0} · deferred ${tot.deferred || 0}`,
         `last tick ${t.last_tick_at ? new Date(t.last_tick_at * 1000).toLocaleTimeString() : "—"}`].join("\n"));
   }
@@ -209,6 +217,9 @@ const NV2 = (() => {
     if (l.mode === "local-only") {
       chipText("egress-badge", "🔒 Local only · no cloud fallback");
       chipState("egress-badge", "ok", `Provider ${l.provider}. Order: ${order}. ALLOW_CLOUD_FALLBACK is off.`);
+    } else if (l.mode === "remote-host") {
+      chipText("egress-badge", "⚠ Remote LLM host");
+      chipState("egress-badge", "warn", `Provider ${l.provider} points at an off-host address (${(l.remote_hosts || []).join(", ")}); prompts leave this host. Order: ${order}.`);
     } else if (l.mode === "cloud-fallback") {
       chipText("egress-badge", "☁ Cloud fallback enabled");
       chipState("egress-badge", "warn", `Provider ${l.provider}; a cloud API is used when it fails. Order: ${order}.`);

@@ -20,7 +20,9 @@ from dataclasses import dataclass
 import requests
 
 DCN_TOOL_URL = os.environ.get("DCN_TOOL_URL", "http://localhost:5757")
-DOCKER_EXEC_FALLBACK = os.environ.get("DOCKER_EXEC_FALLBACK", "true").lower() == "true"
+# Off by default: the docker-exec fallback runs commands inside lab containers via the host's Docker
+# socket, so it is opt-in (DOCKER_EXEC_FALLBACK=true).
+DOCKER_EXEC_FALLBACK = os.environ.get("DOCKER_EXEC_FALLBACK", "false").lower() == "true"
 
 
 @dataclass

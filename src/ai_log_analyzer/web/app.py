@@ -21,7 +21,9 @@ try:
 except ImportError:
     pass
 
+import fnmatch
 import itertools
+import threading
 from collections.abc import Callable
 from functools import wraps
 
@@ -81,17 +83,30 @@ SITES_DIR = _data_dir("AI_LOG_ANALYZER_SITES_DIR", "sites")
 
 API_TOKEN: str = os.environ.get("AI_LOG_ANALYZER_API_TOKEN", "")
 
+def _default_file_roots() -> str:
+    """/var/log plus the optional AI_LOG_ANALYZER_DATA_DIR. $HOME and the repo checkout are
+    deliberately not roots: they hold credentials, .env files and this app's own state."""
+    data_dir = os.environ.get("AI_LOG_ANALYZER_DATA_DIR", "").strip()
+    return ":".join(["/var/log", *([data_dir] if data_dir else [])])
+
+
 # Roots that POST /api/analyze {source:"file"} may read from. Colon-separated
-# env override; default = home + /var/log + the repo checkout. Confines the
-# unauthenticated file-ingest path so an exposed port can't read /etc/* etc.
+# env override (AI_LOG_ANALYZER_FILE_ROOTS); default = /var/log + the optional
+# AI_LOG_ANALYZER_DATA_DIR. Confines the file-ingest path so an exposed port
+# can't read /etc/* or an operator's home directory.
 FILE_ROOTS: list[Path] = [
     Path(p).expanduser().resolve()
-    for p in os.environ.get(
-        "AI_LOG_ANALYZER_FILE_ROOTS",
-        f"{Path.home()}:/var/log:{Path(__file__).resolve().parents[3]}",
-    ).split(":")
+    for p in os.environ.get("AI_LOG_ANALYZER_FILE_ROOTS", _default_file_roots()).split(":")
     if p.strip()
 ]
+
+# Never served even inside an allowed root: dotfiles / dot-directories (.env, .ssh,
+# .aws, .netrc, ...) and well-known credential and state-store filenames.
+_DENIED_NAME_GLOBS = (
+    "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*", "*.pem", "*.key", "*.p12", "*.pfx",
+    "*.jks", "*.kdbx", "credentials*", "*rbac*", "shadow*", "htpasswd*",
+    "*.db", "*.db-wal", "*.db-shm", "*.sqlite", "*.sqlite3",
+)
 
 
 # Web-route cap for single-file analysis. Streaming keeps memory bounded at
@@ -119,12 +134,26 @@ def _events_from_registered_source(kind_or_id: str, *, limit: int) -> list[LogEv
 
 
 def _path_allowed(p: Path) -> bool:
-    """True when the resolved path sits under one of FILE_ROOTS."""
+    """True when the resolved path sits under one of FILE_ROOTS and is not a hidden
+    or credential-looking file (judged on the part below the root)."""
     try:
         resolved = p.resolve()
     except OSError:
         return False
-    return any(resolved.is_relative_to(root) for root in FILE_ROOTS)
+    for root in FILE_ROOTS:
+        if resolved.is_relative_to(root):
+            parts = resolved.relative_to(root).parts
+            return not any(
+                part.startswith(".") or any(fnmatch.fnmatchcase(part.lower(), g) for g in _DENIED_NAME_GLOBS)
+                for part in parts)
+    return False
+
+
+def _allowed_dir_files(directory: Path, pattern: str, recursive: bool) -> list[Path]:
+    """Files a directory scan may read: the adapter's matches minus anything _path_allowed denies."""
+    from ai_log_analyzer.adapters.file import _MAX_DIRECTORY_FILES, _matching_files
+    allowed = (f for f in _matching_files(directory, pattern, recursive) if _path_allowed(f))
+    return sorted(itertools.islice(allowed, _MAX_DIRECTORY_FILES))
 
 
 class BadCommand(ValueError):
@@ -146,8 +175,150 @@ def sanitize_line(line: str) -> str:
     return sanitize(line, mask_pii=False)[0]
 
 
+def _scrub_text(value):
+    """sanitize_line for str values; anything else passes through."""
+    return sanitize_line(value) if isinstance(value, str) and value else value
+
+
+def _scrub_event(d: dict) -> dict:
+    """Run the free-text fields of one classified-event dict through the sanitizer."""
+    for key in ("message", "sample_message", "description"):
+        if key in d:
+            d[key] = _scrub_text(d[key])
+    return d
+
+
+def _scrub_tree(node, memo: dict):
+    """Copy of a JSON-like tree with every string of 8+ chars run through the sanitizer.
+
+    ``memo`` dedups: logs repeat the same message thousands of times and the sanitizer
+    costs ~45 us a call."""
+    if isinstance(node, str):
+        if len(node) < 8:
+            return node
+        hit = memo.get(node)
+        if hit is None:
+            hit = memo[node] = sanitize_line(node)
+        return hit
+    if isinstance(node, list):
+        return [_scrub_tree(x, memo) for x in node]
+    if isinstance(node, dict):
+        return {k: _scrub_tree(v, memo) for k, v in node.items()}
+    return node
+
+
+def _scrub_analysis(result: dict) -> dict:
+    """Sanitize raw log text in an analyze() result before it leaves the API.
+
+    Event messages come straight from the log source (a secret in a log line, or in
+    a file read through the file source, must not be echoed back) and also surface in
+    sample messages, timelines, the sanitize preview and LLM evidence. A whole-tree
+    pass catches every such place, including ones added later.
+    """
+    return _scrub_tree(result, {})
+
+
+_SECRET_KEY_HINTS = ("token", "secret", "password", "passwd", "key", "cookie", "auth", "cred")
+
+
+def _redact_url(url: str) -> str:
+    """Drop userinfo (user:pass@) and sanitize the rest of a stored source URL."""
+    from urllib.parse import urlsplit, urlunsplit
+    try:
+        parts = urlsplit(url)
+        if parts.username is not None or parts.password is not None:
+            host = parts.hostname or ""
+            if ":" in host:
+                host = f"[{host}]"
+            netloc = host + (f":{parts.port}" if parts.port else "")
+            url = urlunsplit(parts._replace(netloc=netloc))
+    except ValueError:
+        pass
+    return sanitize_line(url)
+
+
+def _redact_source(src: dict) -> dict:
+    """/api/sources view of one source: no URL userinfo, no ``extra`` values.
+
+    ``extra`` holds connector-specific options (TLS key paths, API keys, bind
+    addresses); viewers get the key names only.
+    """
+    out = dict(src)
+    if isinstance(out.get("url"), str):
+        out["url"] = _redact_url(out["url"])
+    out["extra"] = {k: "***" for k in (out.get("extra") or {})}
+    return out
+
+
+def _tail_start_cursor(src) -> int:
+    """Where a new live tail starts ("now"). Spool mode: the newest spool row id, since
+    the cursor is a row id there (the in-process ingest counter is unrelated to it, and
+    is 0 on reader workers). Memory mode: the monotonic ingest counter."""
+    db = getattr(src, "_db", None)
+    if db is not None:
+        try:
+            flush = getattr(src, "_flush", None)
+            if callable(flush):
+                flush()
+            return int(db.spool_max_id(src.name))
+        except Exception:   # sqlite3.Error: fall back to replaying from the start of the spool
+            return 0
+    return int(getattr(src, "_total_ingested", 0))
+
+
 def _remote() -> str:
     return request.remote_addr or ""
+
+
+def _host_only(host: str) -> str:
+    """Host header without its port: ``Example.com:6060`` -> ``example.com``, ``[::1]:80`` -> ``[::1]``."""
+    h = host.strip().lower()
+    if h.startswith("["):
+        end = h.find("]")
+        return h[:end + 1] if end != -1 else h
+    return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
+
+
+def _allowed_hosts() -> set[str]:
+    """Host values accepted when auth is off: AI_LOG_ANALYZER_ALLOWED_HOSTS (comma list, ``*`` = any)
+    defaulting to loopback, plus the configured bind host."""
+    raw = os.environ.get("AI_LOG_ANALYZER_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]")
+    hosts = {_host_only(h) for h in raw.split(",") if h.strip()}
+    bind = os.environ.get("ANALYZER_HOST", "").strip()
+    if bind and bind not in ("0.0.0.0", "::"):
+        hosts.add(_host_only(f"[{bind}]" if ":" in bind and not bind.startswith("[") else bind))
+    return hosts
+
+
+def _is_loopback_host(host: str) -> bool:
+    import ipaddress
+    h = host.strip().strip("[]").lower()
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def _check_auth_config() -> bool:
+    """Validate the auth configuration at startup; returns whether auth is on.
+
+    A malformed token (too short) is an error, and ``AI_LOG_ANALYZER_REQUIRE_AUTH=1``
+    (set by the Docker image) refuses to start with no token at all, so a container
+    published on 0.0.0.0 can never come up as an open admin API.
+    """
+    try:
+        enabled = rbac.auth_enabled(API_TOKEN)
+    except rbac.RbacConfigError as exc:
+        raise RuntimeError(f"invalid API token configuration: {exc}") from exc
+    if rbac.auth_required() and not enabled:
+        raise RuntimeError(
+            "AI_LOG_ANALYZER_REQUIRE_AUTH is set but no API token is configured, so every route "
+            "would be unauthenticated. Set AI_LOG_ANALYZER_API_TOKEN (>= 16 characters) or "
+            "AI_LOG_ANALYZER_{VIEWER,OPERATOR,ADMIN}_TOKENS / AI_LOG_ANALYZER_RBAC_FILE "
+            "(e.g. `python -c \"import secrets; print(secrets.token_urlsafe(32))\"`).")
+    return enabled
 
 
 def current_principal(allow_query_token: bool = False) -> rbac.Principal | None:
@@ -179,6 +350,7 @@ def require_role(role: str, audit_action: str | None = None,
             if rbac.auth_enabled(API_TOKEN):
                 principal = current_principal()
                 if principal is None:
+                    _audit_auth_failure()
                     abort(401)
                 if not principal.allows(role):
                     audit.record("authz.denied", target=request.path, outcome="denied",
@@ -202,6 +374,21 @@ def require_role(role: str, audit_action: str | None = None,
                 return resp
         return wrapper
     return deco
+
+
+def _audit_auth_failure(allow_query_token: bool = False) -> None:
+    """Audit a 401 (rate-limited per source address: anyone can generate these)."""
+    supplied = bool(_token_supplied() or (allow_query_token and request.args.get("token")))
+    audit.record_throttled(
+        "authn.failed", key=_remote(), target=request.path, outcome="unauthorized",
+        actor=audit.Actor("unknown", "none", _remote()),
+        detail={"method": request.method, "token": "invalid" if supplied else "missing"})
+
+
+def _actor_allows(role: str) -> bool:
+    """Whether the current request's actor holds ``role`` (dev mode = everything)."""
+    actor = audit.current_actor()
+    return actor.role == "dev" or rbac.RANK.get(actor.role, 0) >= rbac.RANK[role]
 
 
 def _audit_route(action: str, detail_fn: Callable[[], dict] | None, status: int) -> None:
@@ -313,7 +500,12 @@ def _parse_frr_command(raw: str) -> list[str]:
 
 
 def create_app() -> Flask:
+    _check_auth_config()
     app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
+    # Request bodies are JSON only (no uploads); refuse anything huge before it is parsed.
+    app.config["MAX_CONTENT_LENGTH"] = int(
+        os.environ.get("AI_LOG_ANALYZER_MAX_CONTENT_LENGTH", str(16 * 1024 * 1024)))
+    allowed_hosts = _allowed_hosts()
     # Restrict CORS to specific origins by default. Override via
     # AI_LOG_ANALYZER_CORS_ORIGINS=https://your-host,https://other-host
     allowed_origins = [
@@ -323,6 +515,33 @@ def create_app() -> Flask:
         ).split(",") if o.strip()
     ]
     CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
+
+    # ── DNS-rebinding guard ───────────────────────────────────────────────
+    # With auth off (loopback dev use) a hostile web page could re-point its own
+    # name at 127.0.0.1 and drive the open API from the victim's browser. Such a
+    # request carries the attacker's name in Host, so refuse unknown Host values.
+    # With auth on, the token (which a rebinding page cannot know) is the gate.
+    @app.before_request
+    def _reject_unknown_host():
+        if "*" in allowed_hosts or rbac.auth_enabled(API_TOKEN):
+            return None
+        host = request.host or ""   # HTTP/1.0 without Host cannot be a rebinding page
+        if host and _host_only(host) not in allowed_hosts:
+            return jsonify({"error": "host not allowed",
+                            "hint": "set AI_LOG_ANALYZER_ALLOWED_HOSTS to the name you browse to"}), 400
+        return None
+
+    @app.errorhandler(413)
+    def _too_large(_exc):
+        return jsonify({"error": "request body too large",
+                        "hint": "raise AI_LOG_ANALYZER_MAX_CONTENT_LENGTH (bytes)"}), 413
+
+    @app.after_request
+    def _security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
 
     # ── Cache headers for static HTML/JS/CSS ──────────────────────────────
     # The UI is a single-page Flask app — we ship layout/JS fixes by editing
@@ -386,6 +605,7 @@ def create_app() -> Flask:
 
     # ── Classification rules ──────────────────────────────────────────────
     @app.route("/api/rules", methods=["GET"])
+    @require_role("viewer")
     def api_rules_list():
         """Built-in rule count + the operator's custom classification rules."""
         from ai_log_analyzer import classifier as _clf
@@ -440,10 +660,12 @@ def create_app() -> Flask:
 
     # ── Inventory ─────────────────────────────────────────────────────────
     @app.route("/api/lab/containers", methods=["GET"])
+    @require_role("viewer")
     def lab_containers():
         return jsonify({"containers": frr.list_lab_containers()})
 
     @app.route("/api/network-tool/devices", methods=["GET"])
+    @require_role("viewer")
     def network_tool_devices():
         return jsonify({
             "available": network_tool.is_available(),
@@ -452,24 +674,26 @@ def create_app() -> Flask:
 
     # ── Real-config samples (Junos / EOS production gear — sanitized) ─────
     @app.route("/api/samples", methods=["GET"])
+    @require_role("viewer")
     def api_samples():
-        """List available sanitized real-device sample configs."""
+        """List available sanitized real-device sample configs (no server paths)."""
         manifest_path = SAMPLES_DIR / "_manifest.json"
         if not manifest_path.is_file():
-            return jsonify({"samples": [], "samples_dir": str(SAMPLES_DIR)})
+            return jsonify({"samples": []})
         import json as _json
         try:
             manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
         except _json.JSONDecodeError:
             manifest = []
-        return jsonify({"samples": manifest, "samples_dir": str(SAMPLES_DIR)})
+        return jsonify({"samples": manifest})
 
     # ── Site bundles (whole-site cross-device analysis) ───────────────────
     @app.route("/api/sites", methods=["GET"])
+    @require_role("viewer")
     def api_sites():
         """List available site bundles (each is a directory under sites/)."""
         if not SITES_DIR.is_dir():
-            return jsonify({"sites": [], "sites_dir": str(SITES_DIR)})
+            return jsonify({"sites": []})
         out: list[dict] = []
         for site_dir in sorted(p for p in SITES_DIR.iterdir() if p.is_dir()):
             manifest_path = site_dir / "manifest.json"
@@ -489,10 +713,11 @@ def create_app() -> Flask:
                 "total_bytes": sum(d.get("sanitized_bytes", 0) for d in manifest.get("devices", [])),
                 "devices": manifest.get("devices", []),
             })
-        return jsonify({"sites": out, "sites_dir": str(SITES_DIR)})
+        return jsonify({"sites": out})
 
     # ── Topology + diagrams ───────────────────────────────────────────────
     @app.route("/api/topology/<site_id>", methods=["GET"])
+    @require_role("viewer")
     def api_topology(site_id: str):
         """Build a topology graph from a site bundle. Optional ?findings_id=...
         to overlay severities on the nodes."""
@@ -538,12 +763,14 @@ def create_app() -> Flask:
 
     # ── Comprehensive site documentation (PEER-D-style) ─────────────────────
     @app.route("/api/sitedoc/<site_id>", methods=["GET"])
+    @require_role("viewer")
     def api_sitedoc(site_id: str):
         """Generate a comprehensive site documentation report.
 
         Query params:
           format: md | html | pdf   (default: md)
-          llm:    0 | 1             (default: 1 — use LLM for exec summary)
+          llm:    0 | 1             (default: 1 for operators, 0 for viewers; llm=1
+                                     calls the paid LLM, so it needs the operator role)
           diagram: 0 | 1            (default: 1)
           compliance: 0 | 1         (default: 1)
         """
@@ -555,7 +782,10 @@ def create_app() -> Flask:
             return jsonify({"error": f"site bundle not found: {safe}"}), 404
 
         fmt = (request.args.get("format") or "md").lower()
-        use_llm = request.args.get("llm", "1") not in ("0", "false", "no")
+        can_llm = _actor_allows("operator")
+        use_llm = request.args.get("llm", "1" if can_llm else "0") not in ("0", "false", "no")
+        if use_llm and not can_llm:
+            return jsonify({"error": "llm=1 needs the operator role"}), 403
         include_diagram = request.args.get("diagram", "1") not in ("0", "false", "no")
         include_compliance = request.args.get("compliance", "1") not in ("0", "false", "no")
 
@@ -601,6 +831,7 @@ def create_app() -> Flask:
 
     # ── Compliance ────────────────────────────────────────────────────────
     @app.route("/api/compliance/<site_id>", methods=["GET"])
+    @require_role("viewer")
     def api_compliance(site_id: str):
         safe = "".join(c for c in site_id if c.isalnum() or c in "-_").lower()
         if safe != site_id.lower():
@@ -624,7 +855,9 @@ def create_app() -> Flask:
         devices, _ = _load_site_devices(safe)
         if devices is None:
             return jsonify({"error": f"site bundle not found: {safe}"}), 404
-        return jsonify(postmortem.search_fleet(devices, pattern))
+        result = postmortem.search_fleet(devices, pattern)
+        # Invalid regex, oversized pattern or search timeout: the operator's input is at fault.
+        return jsonify(result), (400 if result.get("error") else 200)
 
     # ── Snapshot diff ─────────────────────────────────────────────────────
     @app.route("/api/diff", methods=["POST"])
@@ -757,6 +990,7 @@ def create_app() -> Flask:
         return jsonify(result)
 
     @app.route("/api/samples/<sample_id>", methods=["GET"])
+    @require_role("viewer")
     def api_sample_preview(sample_id: str):
         """Return a snippet (first 200 lines) of a sample config for preview."""
         safe = "".join(c for c in sample_id if c.isalnum() or c in "-_")
@@ -825,27 +1059,23 @@ def create_app() -> Flask:
                 }), 403
             if not p or not p.exists():
                 return jsonify({"error": f"Path not found: {path}"}), 404
-            from ai_log_analyzer.adapters.file import (
-                count_directory_files,
-                parse_directory,
-                parse_file,
-            )
+            from ai_log_analyzer.adapters.file import parse_file
             if p.is_dir():
                 # Directory scan. Walk recursively for *.log files (overridable
-                # via body.pattern). Cap at 500 files for safety.
+                # via body.pattern). Cap at 500 files for safety; hidden and
+                # credential-looking files are skipped even under an allowed root.
                 pattern = body.get("pattern", "*.log")
                 recursive = _parse_bool(body.get("recursive", True), default=True)
                 try:
-                    file_count = count_directory_files(p, pattern=pattern,
-                                                       recursive=recursive)
+                    files = _allowed_dir_files(p, pattern, recursive)
                 except ValueError as exc:
                     return jsonify({"error": str(exc)}), 400
-                if file_count == 0:
+                if not files:
                     return jsonify({
                         "error": f"No files matching {pattern!r} in {path}",
                     }), 404
                 # Generator — analyze() streams it in bounded memory
-                events = parse_directory(p, pattern=pattern, recursive=recursive)
+                events = itertools.chain.from_iterable(parse_file(f) for f in files)
             elif p.is_file():
                 size_mb = p.stat().st_size / 1_048_576
                 if size_mb > MAX_FILE_MB:
@@ -878,7 +1108,7 @@ def create_app() -> Flask:
         events = itertools.chain([first], event_iter)
 
         result = analyze(events, use_llm=use_llm, dedup=dedup, evpn_causal=evpn_causal)
-        result_dict = result.to_dict()
+        result_dict = _scrub_analysis(result.to_dict())
         webhooks.notify_analysis(result_dict, source)
         return jsonify(result_dict)
 
@@ -905,8 +1135,9 @@ def create_app() -> Flask:
                 return jsonify(result.to_dict())
             # SSH failed — fall through to docker exec if it's a lab container
 
-        # docker-exec fallback for FRR lab containers
-        if frr.is_lab_container(hostname):
+        # docker-exec fallback for FRR lab containers (off when DOCKER_EXEC_FALLBACK=false,
+        # the container image default: no docker socket, no host-level exec).
+        if network_tool.DOCKER_EXEC_FALLBACK and frr.is_lab_container(hostname):
             try:
                 container_cmd = _parse_frr_command(command)
             except BadCommand as exc:
@@ -917,8 +1148,9 @@ def create_app() -> Flask:
             return jsonify(d)
 
         return jsonify({
-            "error": "Could not execute — SSH proxy down and not a FRR lab container",
-            "hint": "Fix DCN_Network_Tool SSH key path or use a known lab container name",
+            "error": "Could not execute — SSH proxy down and no docker-exec fallback for this host",
+            "hint": ("Fix DCN_Network_Tool SSH key path, or use a known lab container name with "
+                     "DOCKER_EXEC_FALLBACK=true"),
         }), 503
 
     # ── Config-aware Optimization (LLM killer feature) ────────────────────
@@ -1012,6 +1244,9 @@ def create_app() -> Flask:
                         "matches": store.find_similar(q, top_n=top)})
 
     # ── Live tail (SSE) ────────────────────────────────────────────────────
+    sse_lock = threading.Lock()
+    sse_active = [0]
+
     @app.route("/api/tail/<source_id>", methods=["GET"])
     def api_tail(source_id: str):
         """Server-Sent Events stream of classified events from a syslog source.
@@ -1022,6 +1257,7 @@ def create_app() -> Flask:
         Optional ?min_severity=critical|high|medium|low filters server-side.
         """
         if rbac.auth_enabled(API_TOKEN) and current_principal(allow_query_token=True) is None:
+            _audit_auth_failure(allow_query_token=True)
             abort(401)   # any role may watch the live tail
         src = source_manager.get(source_id)
         if src is None:
@@ -1032,14 +1268,30 @@ def create_app() -> Flask:
         from ai_log_analyzer.classifier import SEV_ORDER
         min_sev = (request.args.get("min_severity") or "info").lower()
         max_rank = SEV_ORDER.get(min_sev, 4)
-        poll_s = min(5.0, max(0.2, float(request.args.get("poll") or 1.0)))
+        try:
+            poll_s = min(5.0, max(0.2, float(request.args.get("poll") or 1.0)))
+        except ValueError:
+            return jsonify({"error": "poll must be a number of seconds"}), 400
+        cursor0 = _tail_start_cursor(src)   # start at "now"
+
+        # Every open stream pins a worker for its whole life: cap them so a couple
+        # of viewers cannot starve the API. The slot is freed when the response closes.
+        try:
+            max_streams = max(1, int(os.environ.get("AI_LOG_ANALYZER_MAX_SSE", "8")))
+        except ValueError:
+            max_streams = 8
+        with sse_lock:
+            if sse_active[0] >= max_streams:
+                return jsonify({"error": f"too many live tail streams (max {max_streams})",
+                                "hint": "close another tail or raise AI_LOG_ANALYZER_MAX_SSE"}), 503
+            sse_active[0] += 1
 
         def stream():
             import json as _json
             import time as _time
 
             from ai_log_analyzer.classifier import iter_classify
-            cursor = getattr(src, "_total_ingested", 0)  # start at "now"
+            cursor = cursor0
             yield "event: hello\ndata: {}\n\n"
             idle = 0.0
             while True:
@@ -1047,7 +1299,7 @@ def create_app() -> Flask:
                 sent = False
                 for ce in iter_classify(iter(events)):
                     if SEV_ORDER.get(ce.severity, 4) <= max_rank:
-                        yield f"data: {_json.dumps(ce.to_dict())}\n\n"
+                        yield f"data: {_json.dumps(_scrub_event(ce.to_dict()))}\n\n"
                         sent = True
                 if sent:
                     idle = 0.0
@@ -1058,18 +1310,27 @@ def create_app() -> Flask:
                         idle = 0.0
                 _time.sleep(poll_s)
 
-        return app.response_class(
+        resp = app.response_class(
             stream(),
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
+        def release() -> None:
+            with sse_lock:
+                sse_active[0] -= 1
+        resp.call_on_close(release)
+        return resp
+
     # ── External log sources (Kibana, Splunk, Loki, syslog, LibreNMS, SolarWinds, ...) ────
     @app.route("/api/sources", methods=["GET"])
+    @require_role("viewer")
     def api_sources_list():
-        """List configured sources + the connector kinds the registry knows."""
+        """List configured sources + the connector kinds the registry knows.
+
+        URL userinfo and ``extra`` values are redacted (key names only)."""
         return jsonify({
-            "sources": source_manager.describe(),
+            "sources": [_redact_source(x) for x in source_manager.describe()],
             "known_kinds": source_manager.known_kinds(),
         })
 
@@ -1142,7 +1403,7 @@ def create_app() -> Flask:
                 {
                     "timestamp": e.timestamp, "hostname": e.hostname,
                     "appname": e.appname, "severity_raw": e.severity_raw,
-                    "message": e.message,
+                    "message": _scrub_text(e.message),
                 }
                 for e in events
             ],
@@ -1171,7 +1432,7 @@ def create_app() -> Flask:
             dedup=_parse_bool(body.get("dedup"), default=False),
             evpn_causal=_parse_bool(body.get("evpn_causal"), default=False),
         )
-        result_dict = result.to_dict()
+        result_dict = _scrub_analysis(result.to_dict())
         webhooks.notify_analysis(result_dict, f"source:{source_id}")
         return jsonify({"ok": True, "count": len(events), "result": result_dict})
 
@@ -1395,9 +1656,13 @@ def create_app() -> Flask:
         # Live dispatch
         try:
             if system == "jira":
-                base_url = (body.get("instance_url") or os.environ.get("JIRA_URL") or os.environ.get("JIRA_BASE_URL") or "").strip()
-                email = (body.get("email") or os.environ.get("JIRA_EMAIL") or "").strip()
-                token = (body.get("api_token") or os.environ.get("JIRA_API_TOKEN") or "").strip()
+                env_url = (os.environ.get("JIRA_URL") or os.environ.get("JIRA_BASE_URL") or "").strip()
+                base_url = (body.get("instance_url") or env_url).strip()
+                # A body-supplied URL other than the configured one never inherits the
+                # server's stored credentials (they would be sent to the caller's host).
+                env_creds = base_url.rstrip("/") == env_url.rstrip("/")
+                email = (body.get("email") or (os.environ.get("JIRA_EMAIL") if env_creds else "") or "").strip()
+                token = (body.get("api_token") or (os.environ.get("JIRA_API_TOKEN") if env_creds else "") or "").strip()
                 project = (body.get("project_key") or os.environ.get("JIRA_PROJECT_KEY") or "NET").strip()
                 if not (base_url and email and token):
                     return jsonify({"ok": False, "error": "missing Jira credentials (instance_url, email, api_token)"}), 400
@@ -1405,9 +1670,13 @@ def create_app() -> Flask:
                 res = client.enrich_incident(payload)
                 return jsonify({"ok": True, "dry_run": False, "system": "jira", "result": res})
             else:
-                instance_url = (body.get("instance_url") or os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL") or "").strip()
-                user = (body.get("username") or os.environ.get("SERVICENOW_USER") or os.environ.get("SNOW_USER") or "").strip()
-                pwd = (body.get("password") or os.environ.get("SERVICENOW_PASSWORD") or os.environ.get("SNOW_PASSWORD") or "").strip()
+                env_url = (os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL") or "").strip()
+                instance_url = (body.get("instance_url") or env_url).strip()
+                env_creds = instance_url.rstrip("/") == env_url.rstrip("/")   # see the Jira branch
+                user = (body.get("username") or (os.environ.get("SERVICENOW_USER") or os.environ.get("SNOW_USER")
+                                                 if env_creds else "") or "").strip()
+                pwd = (body.get("password") or (os.environ.get("SERVICENOW_PASSWORD") or os.environ.get("SNOW_PASSWORD")
+                                                if env_creds else "") or "").strip()
                 if not (instance_url and user and pwd):
                     return jsonify({"ok": False, "error": "missing ServiceNow credentials (instance_url, username, password)"}), 400
                 client = ServiceNowITSMClient(instance_url, user, pwd)
@@ -1457,7 +1726,8 @@ def create_app() -> Flask:
                 username=str(body.get("username") or ""),
                 password=str(body.get("password") or ""),
                 bearer_token=str(body.get("bearer_token") or ""),
-                allow_private=_parse_bool(body.get("allow_private"), default=False),
+                # Admin-controlled only: a request body must never relax the SSRF guard.
+                allow_private=_parse_bool(os.environ.get("AI_LOG_ANALYZER_ITSM_ALLOW_PRIVATE"), default=False),
             )
             result = client.sync_incident(
                 bundle.summary,
@@ -1506,7 +1776,10 @@ def create_app() -> Flask:
             st = worker.status()
             triage.update(running=st["running"], role=st["role"], sinks=st["sinks"],
                           window_events=st["window_events"], totals=st["totals"],
-                          last_tick_at=(st.get("last_tick") or {}).get("at"))
+                          last_tick_at=(st.get("last_tick") or {}).get("at"),
+                          spool_gap_rows=st.get("spool_gap_rows", {}),
+                          pending_deliveries=st.get("pending_deliveries", 0),
+                          sink_state=st.get("sink_state", {}))
         if db is not None:
             try:
                 triage["tickets"] = db.triage_count()
@@ -1704,15 +1977,25 @@ def create_app() -> Flask:
 
 
 def main() -> None:
-    app = create_app()
     port = int(os.environ.get("ANALYZER_PORT", "6060"))
-    # Bind localhost by default — operators must opt-in to external exposure
-    # via ANALYZER_HOST=0.0.0.0, and should set AI_LOG_ANALYZER_API_TOKEN
-    # before doing so.
+    # Bind localhost by default — operators must opt in to external exposure via
+    # ANALYZER_HOST, and must configure an API token before doing so.
     host = os.environ.get("ANALYZER_HOST", "127.0.0.1")
-    if host == "0.0.0.0" and not rbac.auth_enabled(API_TOKEN):
-        print("[WARN] Binding 0.0.0.0 without AI_LOG_ANALYZER_API_TOKEN or RBAC tokens — "
+    allow_noauth = _parse_bool(os.environ.get("AI_LOG_ANALYZER_ALLOW_NOAUTH"), default=False)
+    try:
+        auth_on = rbac.auth_enabled(API_TOKEN)
+    except rbac.RbacConfigError as exc:
+        raise SystemExit(f"[ERROR] invalid API token configuration: {exc}") from exc
+    if not _is_loopback_host(host) and not auth_on:
+        if not allow_noauth:
+            raise SystemExit(
+                f"[ERROR] Refusing to bind {host!r} without authentication: every route, including "
+                "/api/run, would be open to the network. Set AI_LOG_ANALYZER_API_TOKEN (>= 16 "
+                "characters) or AI_LOG_ANALYZER_{VIEWER,OPERATOR,ADMIN}_TOKENS, bind 127.0.0.1, or "
+                "set AI_LOG_ANALYZER_ALLOW_NOAUTH=1 to accept the risk.")
+        print(f"[WARN] Binding {host} with no authentication (AI_LOG_ANALYZER_ALLOW_NOAUTH=1): "
               "all routes are unauthenticated.")
+    app = create_app()
     app.run(host=host, port=port, debug=False)
 
 

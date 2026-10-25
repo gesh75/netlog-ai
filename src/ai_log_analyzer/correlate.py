@@ -12,9 +12,11 @@ import ipaddress
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent, classify_events
+from ai_log_analyzer.hostnames import short_host
 
 # Severity rank used to pick a device's worst severity across sources.
 _SEV_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -22,7 +24,7 @@ _SEV_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3, "i
 
 def _short_host(hostname: str) -> str:
     """Normalize a hostname to its short form (strip domain), lowercased."""
-    return (hostname or "").split(".")[0].strip().lower()
+    return short_host(hostname)
 
 
 def _site_of(hostname: str) -> str:
@@ -243,7 +245,12 @@ _LAYER_BY_EVENT_TYPE: dict[str, tuple[int, str]] = {
     "ike_phase2": (2, "transport"), "bfd_session": (2, "transport"), "control_connection": (2, "transport"),
     "bgp_session": (3, "routing"), "bgp_max_prefix": (3, "routing"), "bgp_path_change": (3, "routing"),
     "ospf_adjacency": (3, "routing"), "omp_peer": (3, "routing"), "evpn": (4, "overlay"),
+    "isis_adjacency": (3, "routing"), "ldp_session": (3, "routing"),
 }
+# Events less than this far apart are one instant: syslog stamps have 1 s
+# resolution, so their arrival order says nothing about cause and effect.
+_SAME_INSTANT_S = 1.0
+_SEV_PRIORITY = {"critical": 0, "high": 1, "medium": 2}
 _IP_ATTRS = ("remip", "locip", "tunnelip", "local_ip", "system_ip", "local_tloc_ip",
              "remote_tloc_ip", "src_ip", "dst_ip")
 _P2P_EVENT_TYPES = frozenset({"bgp_session", "bgp_max_prefix", "ospf_adjacency"})
@@ -294,6 +301,130 @@ def normalize_asn(value: Any) -> str:
 def normalize_vrf(value: Any) -> str:
     """Lowercased VRF / virtual-router name ("" when unset)."""
     return str(value or "").strip().lower()
+
+
+def root_sort_key(layer: int, when: datetime | None, tiebreak: Any = ()) -> tuple:
+    """Sort key shared by correlation and suppression to name an incident's root.
+
+    The root is the lowest-layer event, then the earliest (untimed events
+    last), then ``tiebreak`` (event content, never arrival order, so that the
+    same events in any order name the same root).
+    """
+    return (layer, when is None, when or datetime.min, tiebreak)
+
+
+def _entity_of(ev: Any) -> str:
+    return getattr(ev, "peer_ip", "") or getattr(ev, "tunnel_id", "") or getattr(ev, "interface", "") or ""
+
+
+def _content_key(ev: Any) -> tuple[str, ...]:
+    """Arrival-order-independent identity used as the final sort tiebreak."""
+    return (_short_host(ev.hostname), ev.event_type or "", _entity_of(ev).lower(),
+            getattr(ev, "description", "") or "", getattr(ev, "timestamp", "") or "",
+            getattr(ev, "severity", "") or "")
+
+
+def _pool_key(ev: Any) -> tuple[str, str, str, str]:
+    return (_short_host(ev.hostname), ev.event_type or "", _entity_of(ev).lower(),
+            getattr(ev, "state", "") or "")
+
+
+def _pool_warning(dropped: int, collapsed: int, limit: int) -> str:
+    if not (dropped or collapsed):
+        return ""
+    bits = []
+    if collapsed:
+        bits.append(f"collapsed {collapsed} repeated event(s) to their first and last occurrence")
+    if dropped:
+        bits.append(f"dropped {dropped} lower-severity / later event(s) over the {limit}-event limit")
+    return "Correlation input was bounded: " + " and ".join(bits) + "; incidents may be incomplete."
+
+
+def bound_events(events: list[Any], max_events: int) -> tuple[list[Any], int, int]:
+    """Bound a correlation pool: ``(events, dropped, collapsed)``.
+
+    Within the limit nothing changes. Over it, repeats of the same
+    (host, event type, entity, state) collapse to their first AND last
+    occurrence (a flap storm keeps its span), then, if still over, the
+    most severe events win and the rest are dropped. Arrival order is kept.
+    """
+    if len(events) <= max_events:
+        return events, 0, 0
+    first: dict[tuple, int] = {}
+    last: dict[tuple, int] = {}
+    for i, ev in enumerate(events):
+        k = _pool_key(ev)
+        first.setdefault(k, i)
+        last[k] = i
+    keep = sorted(set(first.values()) | set(last.values()))
+    collapsed = len(events) - len(keep)
+    dropped = max(0, len(keep) - max_events)
+    if dropped:
+        ranked = sorted(keep, key=lambda i: (_SEV_PRIORITY.get(getattr(events[i], "severity", ""), 3), i))
+        keep = sorted(ranked[:max_events])
+    return [events[i] for i in keep], dropped, collapsed
+
+
+class CorrelationPool:
+    """Streaming, bounded intake for ``correlate_entities`` / ``suppress_alerts``.
+
+    ``analyze()`` feeds every failure event through ``add``. Keeping the first
+    N in arrival order lets a noisy storm starve a real incident that arrives
+    later; instead, once the buffer grows past twice the limit, repeats of the
+    same (host, event type, entity, state) collapse to their first and last
+    occurrence and, if that is not enough, the most severe events win.
+    Memory stays O(2 x max_events). Small inputs are never touched.
+    """
+
+    def __init__(self, max_events: int = 2000) -> None:
+        self.max_events = max_events
+        self._buf: list[Any] = []
+        self._collapsed = 0
+        self._dropped = 0
+
+    def add(self, ev: Any) -> None:
+        self._buf.append(ev)
+        if len(self._buf) > 2 * self.max_events:
+            self._compact()
+
+    def _compact(self) -> None:
+        buf = self._buf
+        first: dict[tuple, int] = {}
+        last: dict[tuple, int] = {}
+        for i, ev in enumerate(buf):
+            k = _pool_key(ev)
+            first.setdefault(k, i)
+            last[k] = i
+        keep = sorted(set(first.values()) | set(last.values()))
+        self._collapsed += len(buf) - len(keep)
+        room = self.max_events * 3 // 2
+        if len(keep) > room:
+            ranked = sorted(keep, key=lambda i: (_SEV_PRIORITY.get(getattr(buf[i], "severity", ""), 3), i))
+            self._dropped += len(keep) - room
+            keep = sorted(ranked[:room])
+        self._buf = [buf[i] for i in keep]
+
+    def events(self) -> list[Any]:
+        kept, dropped, collapsed = bound_events(self._buf, self.max_events)
+        self._dropped += dropped
+        self._collapsed += collapsed
+        self._buf = kept
+        return list(kept)
+
+    @property
+    def dropped(self) -> int:
+        return self._dropped
+
+    @property
+    def collapsed(self) -> int:
+        return self._collapsed
+
+    @property
+    def warning(self) -> str:
+        return _pool_warning(self._dropped, self._collapsed, self.max_events)
+
+    def __len__(self) -> int:
+        return len(self._buf)
 
 
 def _active_anomaly(ev: Any) -> bool:
@@ -387,17 +518,28 @@ def correlate_entities(
     share an entity key (IP, /30-/31 p2p subnet, device interface, device
     tunnel, external / origin ASN, tenant VRF) within ``window_s``, or sit on
     the same device within ``same_device_window_s`` with the later one at the
-    same or a higher layer.
+    same or a higher layer (events under a second apart count as simultaneous,
+    so the result never depends on arrival order).
     A transport → routing step on one device may take up to ``hold_window_s``
     (a BGP hold timer expires up to 180-240 s after the tunnel under it dies).
     Each cluster that spans >= 2 devices, vendors or layers is an incident;
-    its root is the lowest-layer, earliest event.
+    its root comes from ``root_sort_key``: lowest layer, then earliest, then a
+    content-based tiebreak (the same rule ``suppress_alerts`` uses).
+    Untimed events join only other untimed events.
 
     ASN and VRF joins carry noise guardrails: ASNs join only on active
     (non-recovered) routing / transport failures and never for iBGP, the
     local AS or reserved ASNs; default-like VRFs (``DEFAULT_VRF_NAMES``) never
     join on their own, only paired with the same external AS. Neither counts
-    as strong evidence, so an ASN- or VRF-only incident stays "medium".
+    as strong evidence, so an ASN- or VRF-only incident stays "medium"; so
+    does one whose parts are joined only by same-device timing (an unrelated
+    tunnel and BGP session on one device). Devices that merely lose sessions
+    to the same external AS are siblings, not downstream of each other: such an
+    incident is rooted at the shared AS, not at one of the devices.
+
+    Over ``max_events`` the pool is deduplicated (first and last occurrence of
+    each host / type / entity / state), then cut to the most severe events;
+    ``dropped`` and ``collapsed`` count what was lost and ``warning`` says so.
     """
     from ai_log_analyzer.causal import _reference_dt, event_time
 
@@ -406,37 +548,49 @@ def correlate_entities(
     pool = [e for e in events
             if _layer(e) is not None and getattr(e, "state", "") != "up"
             and getattr(e, "severity", "info") in ("critical", "high", "medium")]
-    dropped = max(0, len(pool) - max_events)
-    pool = pool[:max_events]
+    pool, dropped, collapsed = bound_events(pool, max_events)
+    note = ({"collapsed": collapsed, "warning": _pool_warning(dropped, collapsed, max_events)}
+            if collapsed or dropped else {})
     if not pool:
-        return {"incidents": [], "events_considered": 0, "dropped": dropped}
+        return {"incidents": [], "events_considered": 0, "dropped": dropped, **note}
 
     ref = _reference_dt(pool)
     times = [event_time(e, ref) for e in pool]
+    layers = [_layer(e)[0] for e in pool]
+    content = [_content_key(e) for e in pool]
     parent = list(range(len(pool)))
+    eparent = list(range(len(pool)))   # entity-based edges only (no same-device timing)
     edges: dict[int, set[tuple[str, str]]] = {}
 
-    def find(i: int) -> int:
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
+    def find(par: list[int], i: int) -> int:
+        while par[i] != i:
+            par[i] = par[par[i]]
+            i = par[i]
         return i
 
     def union(a: int, b: int, evidence: tuple[str, str]) -> None:
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
+        for par in (parent,) if evidence[0] == "same_device_temporal" else (parent, eparent):
+            ra, rb = find(par, a), find(par, b)
+            if ra != rb:
+                par[rb] = ra
         edges.setdefault(a, set()).add(evidence)
         edges.setdefault(b, set()).add(evidence)
 
-    def close(a: int, b: int, limit: float) -> bool:
+    def gap(a: int, b: int) -> float | None:
         ta, tb = times[a], times[b]
-        if ta is None or tb is None:
-            return True
-        return abs((tb - ta).total_seconds()) <= limit
+        return None if ta is None or tb is None else abs((tb - ta).total_seconds())
+
+    def close(a: int, b: int, limit: float) -> bool:
+        g = gap(a, b)
+        if g is None:  # an untimed event joins only another untimed one
+            return times[a] is None and times[b] is None
+        return g <= limit
+
+    def order_key(i: int) -> tuple:
+        return (times[i] is None, times[i] or datetime.min, layers[i], content[i])
 
     def order(idx: list[int]) -> list[int]:
-        return sorted(idx, key=lambda i: (times[i] is None, times[i] or 0, i))
+        return sorted(idx, key=order_key)
 
     by_key: dict[str, list[int]] = {}
     evidence_of: dict[str, str] = {}
@@ -459,7 +613,9 @@ def correlate_entities(
         ordered = order(members)
         for a, b in zip(ordered, ordered[1:]):
             la, lb = _layer(pool[a]), _layer(pool[b])
-            if not (la and lb and la[0] <= lb[0]):
+            g = gap(a, b)
+            simultaneous = g is not None and g <= _SAME_INSTANT_S
+            if not (la and lb and (simultaneous or la[0] <= lb[0])):
                 continue
             limit = hold_window_s if la[1] == "transport" and lb[1] == "routing" else same_device_window_s
             if close(a, b, limit):
@@ -467,7 +623,7 @@ def correlate_entities(
 
     clusters: dict[int, list[int]] = {}
     for i in range(len(pool)):
-        clusters.setdefault(find(i), []).append(i)
+        clusters.setdefault(find(parent, i), []).append(i)
 
     incidents: list[dict[str, Any]] = []
     for members in clusters.values():
@@ -475,24 +631,32 @@ def correlate_entities(
             continue
         hosts = {_short_host(pool[i].hostname) for i in members}
         vendors = {pool[i].vendor for i in members if pool[i].vendor}
-        layers = {_layer(pool[i])[0] for i in members}
-        if len(hosts) < 2 and len(vendors) < 2 and len(layers) < 2:
+        if len(hosts) < 2 and len(vendors) < 2 and len({layers[i] for i in members}) < 2:
             continue
         ordered = order(members)
-        root = min(members, key=lambda i: (_layer(pool[i])[0], times[i] is None, times[i] or 0, i))
+        root = min(members, key=lambda i: root_sort_key(layers[i], times[i], content[i]))
         evidence = sorted({e for i in members for e in edges.get(i, ())})
         kinds = {e[0] for e in evidence}
         root_first = all(times[root] is None or times[i] is None or times[root] <= times[i] for i in members)
+        # Parts that share no entity and are held together only by same-device
+        # timing. Parts over the same devices (a tunnel and the BGP session riding
+        # it) or nested ones are one story; parts with devices of their own (tunnel
+        # A-B, then an unrelated ISP session A-C) are two incidents on one box.
+        parts: dict[int, set[str]] = {}
+        for i in members:
+            parts.setdefault(find(eparent, i), set()).add(_short_host(pool[i].hostname))
+        chain_sets = sorted(parts.values(), key=len)
+        bridged = any(not a <= b for a, b in zip(chain_sets, chain_sets[1:]))
         # Cross-device joins are always entity-based; "high" needs at least one
-        # entity join and a root that really came first.
-        confidence = "high" if kinds & _STRONG_EVIDENCE and root_first else "medium"
-        incidents.append(_incident(pool, ordered, root, times, hosts, vendors, evidence, confidence))
+        # entity join, a root that really came first and no timing-only bridge.
+        confidence = "high" if kinds & _STRONG_EVIDENCE and root_first and not bridged else "medium"
+        incidents.append(_incident(pool, ordered, root, hosts, vendors, evidence, confidence))
 
-    incidents.sort(key=lambda inc: (-inc["device_count"], -inc["event_count"]))
-    return {"incidents": incidents, "events_considered": len(pool), "dropped": dropped}
+    incidents.sort(key=lambda inc: (-inc["device_count"], -inc["event_count"], inc["summary"]))
+    return {"incidents": incidents, "events_considered": len(pool), "dropped": dropped, **note}
 
 
-def _incident(pool, ordered, root, times, hosts, vendors, evidence, confidence) -> dict[str, Any]:
+def _incident(pool, ordered, root, hosts, vendors, evidence, confidence) -> dict[str, Any]:
     def step(i: int) -> dict[str, Any]:
         ev = pool[i]
         layer = _layer(ev)
@@ -516,11 +680,24 @@ def _incident(pool, ordered, root, times, hosts, vendors, evidence, confidence) 
     symptoms = [c for c in chain if (c["hostname"], c["event_type"], c["entity"]) !=
                 (r["hostname"], r["event_type"], r["entity"])]
     effect_layers = sorted({c["layer"] for c in symptoms if c["layer"]})
-    summary = (f"{r['description']} on {r['hostname']} ({r['vendor'] or 'unknown'}, {r['layer']}) → "
-               f"{len(symptoms)} downstream event(s) across {len(hosts)} device(s)"
-               + (f" [{', '.join(effect_layers)}]" if effect_layers else ""))
     shared_asns = sorted({k for t, k in evidence if t == "shared_asn"}, key=int)
     shared_vrfs = sorted({k.split("|", 1)[0] for t, k in evidence if t == "same_vrf"})
+    kinds = {t for t, _ in evidence}
+    if (shared_asns or shared_vrfs) and kinds <= {"shared_asn", "same_vrf"} and len(hosts) >= 2:
+        # Siblings that lost sessions to the same outside party: nothing among
+        # them is upstream of the others, so root the incident at that party.
+        what = f"AS{shared_asns[0]}" if shared_asns else f"VRF {shared_vrfs[0]}"
+        sev = min((pool[i].severity for i in ordered), key=lambda v: _SEV_PRIORITY.get(v, 3))
+        r = {"hostname": what, "vendor": "", "event_type": "external_as" if shared_asns else "shared_vrf",
+             "layer": "routing", "description": f"Sessions lost to {what}", "severity": sev,
+             "timestamp": next((pool[i].timestamp for i in ordered if pool[i].timestamp), ""), "entity": what}
+        symptoms = chain
+        summary = f"{len(hosts)} devices lost sessions to {what}" + (
+            f" [{', '.join(effect_layers)}]" if effect_layers else "")
+    else:
+        summary = (f"{r['description']} on {r['hostname']} ({r['vendor'] or 'unknown'}, {r['layer']}) → "
+                   f"{len(symptoms)} downstream event(s) across {len(hosts)} device(s)"
+                   + (f" [{', '.join(effect_layers)}]" if effect_layers else ""))
     if shared_asns:
         summary += f"; shared peer AS {', '.join(f'AS{a}' for a in shared_asns)}"
     if shared_vrfs:

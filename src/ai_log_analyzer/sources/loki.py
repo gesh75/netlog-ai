@@ -23,22 +23,30 @@ from ai_log_analyzer.sources.base import (
     SourceError,
     SourceTimeoutError,
     build_auth,
+    guarded_session,
     registry,
+    source_allow_private,
+    validate_host_filter,
 )
 
 log = logging.getLogger(__name__)
 
 
+_MAX_PAGE = 5_000  # Loki single-page default cap
+
+
 class LokiSource:
     """Loki via REST query_range API."""
     kind = "loki"
+    # True when the last fetch hit the single-page cap, i.e. more lines exist.
+    last_truncated = False
 
     def __init__(self, config: SourceConfig) -> None:
         self.config = config
         self.name = config.id
         self.query = config.extra.get("query", '{job=~".+"}')
-        self.session = requests.Session()
-        self.session.verify = config.verify_tls
+        self.session = guarded_session(
+            verify=config.verify_tls, allow_private=source_allow_private(config))
         headers, cookies, basic = build_auth(config, token_scheme="Bearer")
         if headers:
             self.session.headers.update(headers)
@@ -69,14 +77,22 @@ class LokiSource:
         end_ns = int(time.time() * 1e9)
         start_ns = end_ns - int(since_seconds) * 1_000_000_000
         query = self.query
+        host_filter = validate_host_filter(host_filter)
         if host_filter:
-            # Loki label filter; assumes a `host` or `hostname` label is set.
+            # Loki line filter; the allowlist keeps the value inside the quotes.
             query = f'{query} |= "{host_filter}"'
+        wanted = max(1, int(limit))
+        page = min(wanted, _MAX_PAGE)
+        self.last_truncated = False
+        if wanted > _MAX_PAGE:
+            self.last_truncated = True
+            log.warning("Loki %s: limit %d exceeds the %d-line page cap; results truncated",
+                        self.name, wanted, _MAX_PAGE)
         params = {
             "query": query,
             "start": str(start_ns),
             "end": str(end_ns),
-            "limit": str(min(int(limit), 5_000)),  # Loki single-page default cap
+            "limit": str(page),
             "direction": "backward",
         }
         url = f"{self.config.url.rstrip('/')}/loki/api/v1/query_range"
@@ -89,6 +105,7 @@ class LokiSource:
         except requests.exceptions.RequestException as exc:
             raise SourceError(f"Loki {self.name} query failed: {exc}") from exc
 
+        returned = 0
         for stream in (payload.get("data") or {}).get("result", []):
             labels = stream.get("stream") or {}
             host = labels.get("host") or labels.get("hostname") or labels.get("instance") or ""
@@ -97,6 +114,10 @@ class LokiSource:
             for ns_str, line in stream.get("values") or []:
                 if not line:
                     continue
+                returned += 1
+                if returned == page == _MAX_PAGE:
+                    self.last_truncated = True
+                    log.warning("Loki %s: page cap %d reached; more lines may exist", self.name, page)
                 yield LogEvent(
                     timestamp=ns_str,
                     hostname=str(host),
@@ -109,4 +130,4 @@ class LokiSource:
         self.session.close()
 
 
-registry.register("loki", LokiSource.from_config)
+registry.register("loki", LokiSource.from_config, outbound=True)

@@ -55,7 +55,7 @@ def test_api_remediation_copp_success(client) -> None:
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["ok"] is True
-    assert any("commit timer 5" in cmd for cmd in data["plan"]["commit_with_timer_commands"])
+    assert any("commit timer 00:05:00" in cmd for cmd in data["plan"]["commit_with_timer_commands"])
 
 
 def test_api_remediation_safety_guardrail_blocks_erase(client) -> None:
@@ -159,7 +159,7 @@ def test_cli_cmd_remediation_drain(capsys) -> None:
     assert rc == 0
     out = capsys.readouterr().out
     assert "Remediation Plan" in out
-    assert "commit timer 5" in out
+    assert "commit timer 00:05:00" in out
 
 
 def test_cli_cmd_remediation_json(capsys) -> None:
