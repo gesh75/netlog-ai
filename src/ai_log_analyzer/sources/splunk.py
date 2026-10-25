@@ -23,7 +23,10 @@ from ai_log_analyzer.sources.base import (
     SourceError,
     SourceTimeoutError,
     build_auth,
+    guarded_session,
     registry,
+    source_allow_private,
+    validate_host_filter,
 )
 
 log = logging.getLogger(__name__)
@@ -37,8 +40,8 @@ class SplunkSource:
         self.config = config
         self.name = config.id
         self.search = config.extra.get("search", "search index=*")
-        self.session = requests.Session()
-        self.session.verify = config.verify_tls
+        self.session = guarded_session(
+            verify=config.verify_tls, allow_private=source_allow_private(config))
         headers, cookies, basic = build_auth(config, token_scheme="Bearer")
         if headers:
             self.session.headers.update(headers)
@@ -68,6 +71,7 @@ class SplunkSource:
     def fetch(self, *, since_seconds: int = 3600, limit: int = 10_000,
               host_filter: str = "") -> Iterable[LogEvent]:
         search = self.search
+        host_filter = validate_host_filter(host_filter)
         if host_filter:
             search = f'{search} host="{host_filter}"'
         # Cap to single-page Splunk default to keep response sane.
@@ -112,4 +116,4 @@ def _result_to_event(r: dict) -> LogEvent | None:
     )
 
 
-registry.register("splunk", SplunkSource.from_config)
+registry.register("splunk", SplunkSource.from_config, outbound=True)

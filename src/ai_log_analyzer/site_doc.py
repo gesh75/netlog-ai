@@ -1330,7 +1330,7 @@ def render_site_doc_html(site_id: str, devices: list[dict], **kwargs) -> str:
                   th {{ background:#eee; color:#586069; }}
                   pre {{ font-size:10px; }} }}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js" crossorigin="anonymous"></script>
 <script>document.addEventListener('DOMContentLoaded', () => {{
   mermaid.initialize({{startOnLoad:false,theme:'default'}});
   mermaid.run({{querySelector:'pre.lang-mermaid'}});

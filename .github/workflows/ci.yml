@@ -4,20 +4,43 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Reused by release.yml as the pre-publish gate, so a tag can never ship code
+  # that has not passed exactly these checks.
+  workflow_call:
+
+permissions:
+  contents: read
+
+# New pushes to a PR supersede older runs; never cancel runs on main or release gates.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
+    # Fixed name: the `main` branch ruleset requires the checks "test (3.10)", "test (3.11)" and
+    # "test (3.12)". Without this the matrix's extra `experimental` key would rename them
+    # (e.g. "test (3.12, false)") and the required checks would never report.
+    name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 3.13 is experimental until the dependency set is confirmed on it.
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
+        experimental: [false]
+        include:
+          - python-version: "3.13"
+            experimental: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: pyproject.toml
       # Two-step so a broken *base* dependency set can't hide behind the extras,
       # and so an unresolvable extra fails on a line that names the extra.
       - name: Install (base + dev)
@@ -26,5 +49,44 @@ jobs:
         run: pip install -e ".[dev,all]"
       - name: Lint
         run: ruff check src/ tests/
+      # Non-blocking until the baseline overrides in pyproject.toml are burned down.
+      - name: Type check (mypy, non-blocking)
+        continue-on-error: true
+        run: mypy src
+      # Coverage is reported, not gated: there is no measured baseline to gate on yet.
       - name: Test
-        run: pytest -p no:warnings --tb=short
+        run: pytest -p no:warnings --tb=short --cov=ai_log_analyzer --cov-report=term-missing:skip-covered
+      # Advisory: known-vulnerable dependencies. Non-blocking so an upstream advisory
+      # does not turn unrelated PRs red; dependabot/security alerts drive the fix.
+      - name: Dependency audit (pip-audit, non-blocking)
+        if: matrix.python-version == '3.12'
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable
+
+  build:
+    # PR-time proof that the sdist+wheel build, pass metadata checks and actually ship
+    # the demo data/UI. Previously this was only discovered after a release tag.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Build sdist + wheel
+        run: |
+          pip install build twine
+          python -m build
+      - name: Check distribution metadata
+        run: twine check dist/*
+      - name: Install the wheel into a clean venv and verify
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install dist/*.whl
+          /tmp/wheel-venv/bin/pip check
+          # Run from outside the checkout so src/ cannot shadow the installed wheel.
+          cd /tmp && /tmp/wheel-venv/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_wheel.py"

@@ -203,7 +203,7 @@ def test_mcp_generate_remediation_plan():
     assert data.get("ok") is True
     assert data.get("device") == "leaf1"
     assert "plan" in data
-    assert "commit timer 5" in "\n".join(data["plan"]["commit_with_timer_commands"])
+    assert "commit timer 00:05:00" in "\n".join(data["plan"]["commit_with_timer_commands"])
 
 
 @pytest.mark.unit

@@ -75,7 +75,7 @@ def test_disabled_when_env_unset(monkeypatch):
     def boom(*_a, **_k):
         raise AssertionError("NetBox must not open a socket when unset")
 
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    monkeypatch.setattr("ai_log_analyzer.sources.outbound.safe_urlopen", boom)
     assert is_enabled() is False
     assert enrich_hosts(["leaf1"]) == {}
     assert enrich_host("leaf1") == {"configured": False, "hostname": "leaf1"}
@@ -142,11 +142,11 @@ def test_http_error_does_not_leak_token(netbox_env):
 def test_enrich_hosts_uses_mock_and_skips_duplicates(netbox_env, monkeypatch):
     seen = {"n": 0}
 
-    def opener(request, timeout=None):
+    def opener(request, timeout=None, **_kw):
         seen["n"] += 1
         return _FakeResponse(_device_payload("leaf1"))
 
-    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    monkeypatch.setattr("ai_log_analyzer.sources.outbound.safe_urlopen", opener)
     out = enrich_hosts(["leaf1", "leaf1", ""])
     assert set(out) == {"leaf1"}
     assert out["leaf1"]["site"] == "AMS1"
@@ -161,7 +161,7 @@ def test_analyze_stays_offline_when_netbox_unset(monkeypatch):
     def boom(*_a, **_k):
         raise AssertionError("analyze() must not call NetBox when unset")
 
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    monkeypatch.setattr("ai_log_analyzer.sources.outbound.safe_urlopen", boom)
     result = analyze([
         LogEvent("Oct 13 10:00:01", "leaf1", "rpd", "err", "bgp peer 10.0.0.1 down"),
     ], use_llm=False)
@@ -238,7 +238,7 @@ def test_build_site_manifest_noop_when_unset(monkeypatch):
     def boom(*_a, **_k):
         raise AssertionError("must not call NetBox when unset")
 
-    monkeypatch.setattr("urllib.request.urlopen", boom)
+    monkeypatch.setattr("ai_log_analyzer.sources.outbound.safe_urlopen", boom)
     manifest = build_site_manifest("AMS1")
     assert manifest["configured"] is False
     assert manifest["devices"] == []
@@ -247,10 +247,10 @@ def test_build_site_manifest_noop_when_unset(monkeypatch):
 
 @pytest.mark.unit
 def test_analyze_attaches_netbox_when_enabled(netbox_env, monkeypatch):
-    def opener(request, timeout=None):
+    def opener(request, timeout=None, **_kw):
         return _FakeResponse(_device_payload("leaf1"))
 
-    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    monkeypatch.setattr("ai_log_analyzer.sources.outbound.safe_urlopen", opener)
     result = analyze([
         LogEvent("Oct 13 10:00:01", "leaf1", "rpd", "err", "bgp peer 10.0.0.1 down"),
     ], use_llm=False)

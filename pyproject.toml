@@ -20,6 +20,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
     "Topic :: System :: Networking",
     "Topic :: System :: Networking :: Monitoring",
 ]
@@ -37,7 +39,10 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "ruff>=0.5",
+    # Upper-bounded: new ruff majors change default rules/formatting, so a bump is deliberate.
+    "ruff>=0.5,<1",
+    "mypy>=1.10",
+    "hypothesis>=6.100",
     # tests/test_remediation_export.py parses the generated Ansible playbooks.
     "pyyaml>=6.0",
     # tests/test_packaging.py reads this file. Python 3.10 has no stdlib tomllib, and
@@ -69,11 +74,13 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 # Demo bundles ship in the wheel so pip/Docker installs boot with data
-ai_log_analyzer = ["data/samples/*", "data/sites/**/*", "data/eval/*", "web/static/**/*"]
+ai_log_analyzer = ["py.typed", "data/samples/*", "data/sites/**/*", "data/eval/*", "web/static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# --strict-markers: a typo'd or unregistered marker fails collection instead of silently
+# selecting nothing. Register any new marker below before using it.
+addopts = "-q --strict-markers"
 markers = [
     "unit: fast unit tests with no external dependencies",
     "integration: tests that hit docker / network / LLM",
@@ -89,3 +96,39 @@ target-version = "py310"
 select = ["E4", "E7", "E9", "F", "FURB167", "I", "UP", "RET501", "PLR1711"]
 # E701/E702: compact one-line guards (`if x: return y`) are the established style here
 ignore = ["E701", "E702"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_configs = true
+files = ["src"]
+
+# baseline: burn down. These modules fail `mypy src` today; each override should be
+# removed (and the module fixed) over time. Modules NOT listed here are fully checked,
+# so new modules start clean.
+[[tool.mypy.overrides]]
+module = [
+    "ai_log_analyzer.adapters.frr",
+    "ai_log_analyzer.adapters.network_tool",
+    "ai_log_analyzer.analytics",
+    "ai_log_analyzer.analyzer",
+    "ai_log_analyzer.causal",
+    "ai_log_analyzer.cli",
+    "ai_log_analyzer.compliance",
+    "ai_log_analyzer.correlate",
+    "ai_log_analyzer.deep_report",
+    "ai_log_analyzer.entity_state",
+    "ai_log_analyzer.judge",
+    "ai_log_analyzer.llm",
+    "ai_log_analyzer.mcp_server.server",
+    "ai_log_analyzer.memory",
+    "ai_log_analyzer.rag",
+    "ai_log_analyzer.reports",
+    "ai_log_analyzer.servicenow_sync",
+    "ai_log_analyzer.site_diagram",
+    "ai_log_analyzer.sources.syslog",
+    "ai_log_analyzer.stability",
+    "ai_log_analyzer.topology_infer",
+    "ai_log_analyzer.work_shift",
+]
+ignore_errors = true

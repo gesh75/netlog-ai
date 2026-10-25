@@ -30,6 +30,7 @@ except ModuleNotFoundError:  # Python 3.10 — pytest pulls tomli in as a transi
         tomllib = None  # type: ignore[assignment]
 
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+SRC = Path(__file__).resolve().parent.parent / "src"
 
 pytestmark = [
     pytest.mark.unit,
@@ -140,13 +141,68 @@ def test_all_extra_is_superset_of_named_extras():
         assert not missing, f"extra `{name}` has requirements missing from `all`: {missing}"
 
 
-def test_package_version_is_2_1_0():
-    """Verify package version is 2.1.0 across pyproject.toml and __init__.__version__."""
+def test_package_version_matches_pyproject():
+    """`ai_log_analyzer.__version__` must equal pyproject's version.
+
+    Compared dynamically: no release should ever need to edit this test. (An installed
+    dist's metadata and the editable checkout both derive from pyproject.toml; the
+    `__init__` fallback literal is only used for non-installed checkouts and is
+    checked separately below.)
+    """
     import ai_log_analyzer
 
     ver = _project().get("version")
-    assert ver == "2.1.0", f"pyproject.toml version must be 2.1.0, found {ver}"
-    assert ai_log_analyzer.__version__ in ("2.1.0", ver), (
-        f"__version__ must match 2.1.0, found {ai_log_analyzer.__version__}"
+    assert ver, "pyproject.toml has no [project] version"
+    assert ai_log_analyzer.__version__ == ver, (
+        f"ai_log_analyzer.__version__ ({ai_log_analyzer.__version__}) != pyproject "
+        f"version ({ver}); reinstall (`pip install -e .`) or bump the __init__ fallback"
     )
 
+
+def test_init_fallback_version_matches_pyproject():
+    """The hard-coded fallback in __init__.py (used when the dist is not installed)
+    must track pyproject.toml, or non-installed checkouts report a stale version."""
+    init = (SRC / "ai_log_analyzer" / "__init__.py").read_text(encoding="utf-8")
+    m = re.search(r'__version__\s*=\s*"([^"]+)"\s*#\s*fallback', init)
+    assert m, 'could not find the `__version__ = "x.y.z"  # fallback` line in __init__.py'
+    assert m.group(1) == _project()["version"]
+
+
+def test_version_literal_not_scattered_through_src():
+    """The current version must live in pyproject.toml (plus the single __init__
+    fallback), not be hard-coded into User-Agent strings, HTML, etc. Every such copy
+    goes stale at the next release."""
+    ver = _project()["version"]
+    pattern = re.compile(r"(?<![\d.])" + re.escape(ver) + r"(?![\d])")
+    offenders: list[str] = []
+    for path in sorted((SRC / "ai_log_analyzer").rglob("*")):
+        if not path.is_file() or path.suffix in {".pyc", ".png", ".ico", ".woff", ".woff2"}:
+            continue
+        if "vendor" in path.parts or "__pycache__" in path.parts:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        is_init = path.name == "__init__.py" and path.parent.name == "ai_log_analyzer"
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if not pattern.search(line):
+                continue
+            if is_init and "# fallback" in line:
+                continue
+            offenders.append(f"{path.relative_to(SRC.parent)}:{lineno}")
+    assert not offenders, (
+        f"version {ver} is hard-coded outside pyproject.toml; use ai_log_analyzer.__version__: "
+        f"{offenders}"
+    )
+
+
+
+def test_py_typed_marker_ships_in_wheel():
+    """PEP 561: the package advertises inline types only if py.typed exists AND is
+    declared as package data (otherwise setuptools leaves it out of the wheel)."""
+    assert (SRC / "ai_log_analyzer" / "py.typed").is_file()
+    with PYPROJECT.open("rb") as handle:
+        data = tomllib.load(handle)
+    pkg_data = data["tool"]["setuptools"]["package-data"]["ai_log_analyzer"]
+    assert "py.typed" in pkg_data

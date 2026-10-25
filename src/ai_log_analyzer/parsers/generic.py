@@ -18,7 +18,7 @@ from ai_log_analyzer.parsers.timeutil import normalize_ts
 # SecureCRT terminal session recordings: "HH:MM:SS.ss §<output line>".
 SCRT_RE = re.compile(r"^(?P<ts>\d{1,2}:\d{2}:\d{2}\.\d{2})\s*§\s*(?P<msg>.*)$")
 
-_SYSLOG_FORMATS = frozenset({"rfc5424", "rfc3164", "junos"})
+_SYSLOG_FORMATS = frozenset({"rfc5424", "rfc3164", "junos", "loose"})
 
 
 def base_event(env: Envelope, default_host: str) -> LogEvent:
@@ -26,8 +26,8 @@ def base_event(env: Envelope, default_host: str) -> LogEvent:
     return LogEvent(
         timestamp=clean_timestamp(env.timestamp),
         hostname=env.hostname or default_host,
-        appname=env.appname,
-        severity_raw=pri_to_severity(env.pri) if env.pri is not None else "info",
+        appname=env.appname or "syslog",
+        severity_raw=pri_to_severity(env.pri) if env.pri is not None else (env.severity or "info"),
         message=env.body.strip(),
     )
 

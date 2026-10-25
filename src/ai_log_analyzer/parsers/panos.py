@@ -147,6 +147,8 @@ class PanOSParser:
         else:
             app, sev, msg = f"panos-{typ.lower()}", "info", ",".join(fields[4:15])
             out, attrs, device = {"vendor": "paloalto"}, {}, ""
+            if typ == "CONFIG":
+                out["event_type"] = "config_change"
         attrs.update({"log_type": typ, "serial_present": "1" if _g(fields, 2) else ""})
         attrs = {k: v for k, v in attrs.items() if v}
         gen = _g(fields, 6) or fields[1]

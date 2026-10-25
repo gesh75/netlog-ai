@@ -15,9 +15,9 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog from data-center, security and SD-WAN gear (Cisco IOS-XE / NX-OS / Catalyst SD-WAN, Juniper Junos, Arista EOS, Fortinet FortiOS, Palo Alto PAN-OS, plus FRR, SR Linux, SONiC, Cumulus), correlates it across vendors into root-cause incidents, and writes evidence-cited playbooks with guarded CLI and Ansible fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-901%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-2100%2B%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb)
 
-> 📓 Release **v2.0.0** — the V2 platform: a sanitize-first LLM gateway, multi-vendor security and SD-WAN parsing with cross-vendor correlation, durable multi-worker ingest with topology-aware suppression, evidence-cited RCA with streaming ticket triage, RBAC with an audit trail, and a dashboard for all of it. Details in [`CHANGELOG.md`](CHANGELOG.md); upgrade notes in [What's new in v2.0.0](#whats-new-in-v200).
+> 📓 Release **v2.1.0** — the V2 platform: a sanitize-first LLM gateway, multi-vendor security and SD-WAN parsing with cross-vendor correlation, durable multi-worker ingest with topology-aware suppression, evidence-cited RCA with streaming ticket triage, RBAC with an audit trail, and a dashboard for all of it. Details in [`CHANGELOG.md`](CHANGELOG.md); upgrade notes in [What's new in v2.0.0](#whats-new-in-v200). The unreleased security and reliability hardening pass (with some **breaking defaults**) is described in [Upgrade notes: hardening pass](#upgrade-notes-hardening-pass). Every environment variable is listed in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md); report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
 
 ## V2 at a glance
 
@@ -84,6 +84,22 @@ Most "AI for ops" tools either ship your data to a SaaS or hide what the model a
 - Built for **multi-vendor reality** — not a Cisco-only tool retrofitted with a chatbot.
 
 If you have ever watched an AI dashboard hallucinate a "root cause" with no actionable next step, this is the antidote.
+
+## Upgrade notes: hardening pass
+
+These changes are unreleased (see `CHANGELOG.md` → *Unreleased*). Some defaults are now safer and can break existing deployments:
+
+| Area | Change | If you depended on the old behavior |
+|---|---|---|
+| Auth | Docker image and compose refuse to start without a token; tokens shorter than 16 characters are refused; `python -m` refuses a non-loopback bind without a token | Set a token, or `AI_LOG_ANALYZER_ALLOW_NOAUTH=1` for an isolated lab |
+| File analysis | Default roots are `/var/log` plus `AI_LOG_ANALYZER_DATA_DIR`; `$HOME` and the repo are no longer readable; dotfiles and credential files are always denied | Set `AI_LOG_ANALYZER_FILE_ROOTS` |
+| API | Previously open GET routes (`/api/sources`, `/api/samples`, `/api/rules`, `/api/topology`, `/api/sitedoc`, …) need a viewer token when auth is on | Send a token |
+| Outbound | Connectors resolve and check hostnames and refuse private, loopback and unresolvable hosts; ITSM clients need `https://`, never follow redirects, and never send server-held credentials to a different URL | Configure operator-owned sources through `NETLOG_SOURCE_<id>_URL`, or set `NETLOG_ALLOW_PRIVATE_OUTBOUND=1` |
+| MCP | Write tools (`add_source`, live ITSM/ServiceNow, SolarWinds notes) are off; HTTP transports need a bearer token | `NETLOG_MCP_ALLOW_WRITE=1`, `NETLOG_MCP_TOKEN` |
+| Remediation | Exports without an assertable post-check stop for an operator `yes` and roll back if unanswered; invalid device/interface/IP values raise; `netlog-ai` CLI usage errors exit 2 | Answer the prompt, or pass valid values |
+| Docker exec | `DOCKER_EXEC_FALLBACK` now defaults to `false` | Set it to `true` |
+| Ingest | A listener bind error other than "address in use" now fails loudly instead of silently becoming a reader | Fix the bind address or port |
+| Privacy | PUB-/user- pseudonyms use a per-process HMAC key and differ across workers and restarts | Set `AI_LOG_ANALYZER_PSEUDONYM_KEY` |
 
 ## What's new in v2.0.0
 
@@ -174,14 +190,14 @@ plus healthcheck + connector inventory. See
 | 🤖 **MCP server mode** | Claude Code / Cursor / Continue can call the analyzer directly via 21 agent tools |
 | 📉 **Deep analytics** | RFC 2439 flap dampening, Tarjan SPOF blast radius, and config-to-log drift, drawn on the topology map |
 | 🌐 **EVPN Causal Engine** | 5-layer bipartite graph (L1 Physical → L2 Link → L3 Underlay → L4 Overlay → L5 Services) with 2-hop topological symptom suppression and root-cause isolation |
-| 🔒 **Safe Remediation** | Vendor-safe change plan generation (`remediation.py`) with auto-revert timers (`commit confirmed`, `commit timer`, `checkpoint`, `revert timer`), destructive command blocklist, and post-check assertions |
+| 🔒 **Safe Remediation** | Vendor-safe change plan generation (`remediation.py`) with an automatic revert timer on the platforms that have one (Junos `commit confirmed`, IOS-XE `configure replace … time`, EOS `commit timer`; the others say plainly that there is none), a normalising destructive-command guardrail, and post-check assertions that gate the confirm step |
 | 🎫 **Two-Way ITSM** | Bi-directional Jira Service Management and ServiceNow incident enrichment with deterministic `NETLOG-<SHA256>` deduplication keys |
 | 📊 **Telemetry Fusion** | Optical DOM (Rx dBm) vs. QoS queue discard correlation (`telemetry.py`) to separate dirty fiber from microburst drops |
 | 🗜️ **Drain-style Dedup** | Fixed-depth parse tree log clustering (`dedup.py`) with RFC 5424 PRI strip, yielding 90%+ prompt token savings during storms |
 | 🗄️ **Sanitize Vault** | Stateful reversible token vault (`sanitize_vault.py`) for IPv4, IPv6, MAC, and ASN addresses across EVPN Type-2 routes |
 | 🔗 **Cross-source correlation** | **Device tab** → *Correlate Sources*: scans every registered source and tags each host `confirmed` (flagged by ≥ 2 sources) or `suspected` (1) in a sortable, severity-coded table |
 | 🔬 **Per-device triage** | **Device tab** → *Triage Device*: one host's verdict + 0–100 health score, severity histogram, top processes, and deduped error patterns in a single panel |
-| 🔎 **Classify** | 80 regex patterns across Junos, EOS, FRR, **Cisco IOS-XE, NX-OS, Nokia SR Linux, SONiC, Cumulus**, RFC-3164/5424 — each event carries a confidence score; add your own rules via `AI_LOG_ANALYZER_CUSTOM_RULES` / `POST /api/rules` or the UI editor |
+| 🔎 **Classify** | 130+ regex patterns across Junos, EOS, FRR, **Cisco IOS-XE, NX-OS, Nokia SR Linux, SONiC, Cumulus**, RFC-3164/5424 — each event carries a confidence score; add your own rules via `AI_LOG_ANALYZER_CUSTOM_RULES` / `POST /api/rules` or the UI editor |
 | ⏱ **Causal console** | Timeline of the incident with cause links, blast-radius estimator, change-window correlator — in `/api/analyze` and its own UI panels |
 | 🛡 **Sanitize diff** | See exactly what the LLM is allowed to see (`POST /api/sanitize-diff` + UI): per-rule redaction counts, secrets gone before any outbound call |
 | 🔴 **Live tail** | Real-time SSE stream of classified events from any syslog listener source — zero polling, zero build step, server-side severity filter, its own UI panel |
@@ -214,6 +230,16 @@ cp .env.example .env
 ai-log-analyzer serve
 # → http://localhost:6060
 ```
+
+### Docker
+
+```bash
+echo "AI_LOG_ANALYZER_API_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
+docker compose up -d                       # published on 127.0.0.1 only; refuses to start without a token
+docker compose --profile lab up -d app-lab # lab variant that mounts the Docker socket (do not run alongside `app`)
+```
+
+The image runs as a non-root user and sets `AI_LOG_ANALYZER_REQUIRE_AUTH=1`, so the container will not start without an API token or RBAC tokens (16 characters minimum). Pin the base image with `--build-arg PYTHON_IMAGE=python:3.12-slim@sha256:<digest>`.
 
 Open the UI, pick a bundled site (`lab-alpha` or `lab-bravo`) under the **🌐 Site** tab, and hit **Analyze Whole Site**. Without an LLM key the rule-based knowledge base produces the analysis; with `ANTHROPIC_API_KEY` set, Claude writes a richer narrative.
 
@@ -549,7 +575,7 @@ src/ai_log_analyzer/
 
 ## Tested & accessible
 
-- **632 unit + integration tests** (pytest)
+- **2,100+ unit + integration tests** (pytest)
 - Frontend audited across 8 review rounds:
   - WCAG-AA: `:focus-visible` rings, `aria-live` regions, `role=tablist/tab/tabpanel`, skip-to-main link, `prefers-reduced-motion` fallback
   - Responsive ≤ 1100px, PWA-ready (`theme-color`, `mobile-web-app-capable`, SVG favicon)

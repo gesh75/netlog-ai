@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import socket
-import time
 from typing import Any
 
 import pytest
@@ -23,6 +22,7 @@ from ai_log_analyzer.sources import (
 )
 from ai_log_analyzer.sources.base import build_auth
 from ai_log_analyzer.sources.manager import SourceManager
+from tests._helpers import listen_on_free_port, wait_for
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Protocol + registry
@@ -297,23 +297,16 @@ def test_librenms_requires_api_token():
 # Syslog UDP listener — actual loopback round-trip
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _free_udp_port() -> int:
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
 @pytest.mark.unit
 def test_syslog_udp_listener_receives_messages():
     from ai_log_analyzer.sources.syslog import SyslogListenerSource
 
-    port = _free_udp_port()
-    cfg = SourceConfig(id="sl1", type="syslog", url="udp://127.0.0.1",
-                       extra={"port": str(port), "proto": "udp",
-                              "bind": "127.0.0.1", "buffer_size": "100"})
-    src = SyslogListenerSource(cfg)
+    def _make(p: int) -> SyslogListenerSource:
+        return SyslogListenerSource(SourceConfig(
+            id="sl1", type="syslog", url="udp://127.0.0.1",
+            extra={"port": str(p), "proto": "udp", "bind": "127.0.0.1", "buffer_size": "100"}))
+
+    port, src = listen_on_free_port(_make)
     try:
         assert src.healthcheck() is True
         sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -324,8 +317,9 @@ def test_syslog_udp_listener_receives_messages():
                           ("127.0.0.1", port))
         finally:
             sender.close()
-        # Give the listener thread a moment to drain
-        time.sleep(0.3)
+        # Wait for the listener thread to drain both datagrams
+        assert wait_for(lambda: len(list(src.fetch(since_seconds=60, limit=100))) >= 2), \
+            "listener never received both datagrams"
         events = list(src.fetch(since_seconds=60, limit=100))
         assert len(events) >= 2
         # parser splits "app: message" — check both fields

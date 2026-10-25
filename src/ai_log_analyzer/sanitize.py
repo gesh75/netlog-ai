@@ -8,7 +8,9 @@ Two layers:
     - BGP/OSPF/IS-IS authentication keys
     - RADIUS/TACACS shared secrets
     - SSH host keys
-    - Certificate / private-key blobs
+    - Certificate / private-key blobs (PEM, PGP armor, truncated blocks)
+    - Generic credentials: ``password=``/``token=``/``api_key=`` pairs, HTTP
+      ``Authorization`` headers, URL userinfo, cloud/API token prefixes
 
   PII (opt-in via mask_pii=True):
     - Usernames (Junos `user NAME { ... }` / EOS `username NAME ...`)
@@ -22,10 +24,38 @@ sending to a cloud LLM the first time.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
+import os
 import re
+import secrets
 import threading
 from collections import OrderedDict
+
+# A secret token: the whole non-space run, never an existing <REDACTED> (and
+# never a token that is only followed by one), so re-sanitizing is a no-op.
+# Every quantifier is bounded or single-level — no nested unbounded groups.
+_TYPE = r"(?:[0-9]|sha512|sha256)"
+_TOK = r'(?!"?<REDACTED)[^\s;]+(?![^\s;])(?![ \t]+(?:[^\s<]+[ \t]+){0,3}<REDACTED)'
+_QTOK = r'(?:"(?!<REDACTED>")[^"\n]*"|' + _TOK + ")"
+_R = r"\1 <REDACTED>"
+_CRED_NAMES = (r"api[_-]?key|secret[_-]?(?:access[_-]?)?key|client[_-]?secret|token|passwd|password"
+               r"|passphrase|private[_-]?key|secret")
+
+
+def _kw(prefix: str, *, typed: bool = False, eol: bool = False, quoted: bool = False) -> re.Pattern[str]:
+    """`<prefix> [type] <secret>` on one line: group 1 is everything but the secret.
+
+    ``typed`` allows an encryption-type digit/word (``0``, ``7``, ``sha512``) after the
+    prefix, which is kept; ``eol`` requires the secret to end the line (keeps prose such as
+    "enable password for ..." intact); ``quoted`` also accepts a ``"quoted value"``.
+    """
+    group = prefix + (rf"(?:[ \t]+{_TYPE})?" if typed else "")
+    tail = r"(?=[ \t\r]*$)" if eol else ""
+    flags = re.IGNORECASE | (re.MULTILINE if eol else 0)
+    return re.compile(rf"({group})[ \t]+{_QTOK if quoted else _TOK}{tail}", flags)
+
 
 # Each rule: (description, pattern, replacement). $1 preserves the key/keyword.
 _RULES: list[tuple[str, re.Pattern[str], str]] = [
@@ -42,7 +72,7 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     # SNMP-style in EOS:       `snmp-server community NAME ro`
     # BGP community (skip):     `community NAME members 1:1234;`  ← these are just labels
     ("junos-snmp-community",
-     re.compile(r'\b(community)\s+(\S+)\s*\{(\s*(?:authorization|clients))',
+     re.compile(r'\b(community)\s+(?!"?<REDACTED)(\S+)\s*\{(\s*(?:authorization|clients))',
                 re.IGNORECASE),
      r'\1 <REDACTED>{\3'),
     ("junos-snmp-community-quoted",
@@ -50,12 +80,12 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
                 re.IGNORECASE),
      r'\1 "<REDACTED>"{\3'),
     ("junos-authentication-key",
-     re.compile(r'(authentication-key|hello-authentication-key)\s+"[^"]+"',
+     re.compile(r'(authentication-key|hello-authentication-key)\s+"(?!<REDACTED>")[^"]+"',
                 re.IGNORECASE),
      r'\1 "<REDACTED>"'),
     # ── Arista EOS / IOS style ───────────────────────────────────────────
     ("eos-secret-7",
-     re.compile(r'\b(secret|password|key)\s+7\s+\S+',
+     re.compile(r'\b(secret|password|key)\s+7\s+(?!<REDACTED)\S+',
                 re.IGNORECASE),
      r'\1 7 <REDACTED>'),
     ("eos-secret-5",
@@ -63,21 +93,18 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
                 re.IGNORECASE),
      r'\1 5 <REDACTED>'),
     ("eos-snmp-community",
-     re.compile(r'\b(snmp-server\s+community)\s+(\S+)',
+     re.compile(r'\b(snmp-server\s+community)\s+(?!<REDACTED)(\S+)',
                 re.IGNORECASE),
      r'\1 <REDACTED>'),
+    # `key 0 X` / `password 0 X`: the digit is the encryption TYPE, not the secret,
+    # so it stays and the token after it is redacted.
     ("eos-radius-key",
-     re.compile(r'\b(radius-server\s+host\s+\S+\s+key)\s+(?:7\s+)?\S+',
-                re.IGNORECASE),
-     r'\1 <REDACTED>'),
+     _kw(r"\b(?:radius-server[ \t]+key|radius-server[ \t]+host[ \t]+\S{1,64}[ \t]+(?:[^\n]{0,100}?[ \t])?key)"
+         r"(?:[ \t]+[0-9])?"), _R),
     ("eos-tacacs-key",
-     re.compile(r'\b(tacacs-server\s+host\s+\S+\s+key)\s+(?:7\s+)?\S+',
-                re.IGNORECASE),
-     r'\1 <REDACTED>'),
-    ("eos-bgp-password",
-     re.compile(r'\b(neighbor\s+\S+\s+password)\s+(?:7\s+)?\S+',
-                re.IGNORECASE),
-     r'\1 <REDACTED>'),
+     _kw(r"\b(?:tacacs-server[ \t]+key|tacacs-server[ \t]+host[ \t]+\S{1,64}[ \t]+(?:[^\n]{0,100}?[ \t])?key)"
+         r"(?:[ \t]+[0-9])?"), _R),
+    ("eos-bgp-password", _kw(r"\bneighbor[ \t]+\S{1,64}[ \t]+password(?:[ \t]+[0-9])?"), _R),
     # SNMPv3 USM keys — EOS/IOS `snmp-server user U G v3 auth sha KEY priv aes KEY`
     # and Junos `authentication-password "..."` / `privacy-password "..."`.
     ("snmpv3-auth-priv-key",
@@ -85,7 +112,7 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
                 re.IGNORECASE),
      r'\1 <REDACTED>'),
     ("junos-snmpv3-password",
-     re.compile(r'\b(authentication-password|privacy-password)\s+(?:"[^"]*"|\S+)',
+     re.compile(r'\b(authentication-password|privacy-password)\s+(?!"?<REDACTED)(?:"[^"]*"|\S+)',
                 re.IGNORECASE),
      r'\1 "<REDACTED>"'),
     # ── Generic encrypted blobs ──────────────────────────────────────────
@@ -93,22 +120,113 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
      re.compile(r'(?:ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp\d+)\s+[A-Za-z0-9+/=]{40,}',
                 re.IGNORECASE),
      '<REDACTED-SSH-KEY>'),
+    # Bodies scan with `[\s\S]*?` + a swallow-to-end fallback (a truncated block still
+    # hides everything after its header) so a pile of BEGIN lines stays linear.
     ("private-key-block",
-     re.compile(r'-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]+?-----END [A-Z ]+PRIVATE KEY-----',
-                re.MULTILINE),
+     re.compile(r'-----BEGIN (?:[A-Z0-9]+ ){0,4}PRIVATE KEY(?: BLOCK)?-----(?!\s*<REDACTED-PRIVATE-KEY>)'
+                r'(?:[\s\S]*?-----END (?:[A-Z0-9]+ ){0,4}PRIVATE KEY(?: BLOCK)?-----|[\s\S]*\Z)'),
      '-----BEGIN PRIVATE KEY-----\n<REDACTED-PRIVATE-KEY>\n-----END PRIVATE KEY-----'),
     ("certificate-block",
-     re.compile(r'-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----',
-                re.MULTILINE),
+     re.compile(r'-----BEGIN CERTIFICATE-----(?!\s*<REDACTED-CERTIFICATE>)[^-]*-----END CERTIFICATE-----'),
      '-----BEGIN CERTIFICATE-----\n<REDACTED-CERTIFICATE>\n-----END CERTIFICATE-----'),
+    # ── Credentials in other formats ─────────────────────────────────────
+    # Typed Cisco-style secrets: the digit/word after the keyword is the
+    # encryption TYPE and stays; the token after it is the secret.
+    ("enable-password",
+     _kw(r"\benable[ \t]+(?:password|secret)(?:[ \t]+level[ \t]+\d{1,2})?",
+         typed=True, eol=True), _R),
+    ("username-secret",
+     _kw(r"\busername[ \t]+\S{1,64}[^\n]{0,120}?[ \t](?:secret|password)", typed=True), _R),
+    ("typed-password-secret",
+     re.compile(rf"\b((?:password|secret)[ \t]+[05-9])[ \t]+{_TOK}", re.IGNORECASE), _R),
+    ("line-password",
+     re.compile(rf"(?m)^([ \t]*(?:password|secret)(?:[ \t]+{_TYPE})?)[ \t]+{_TOK}(?=[ \t\r]*$)",
+                re.IGNORECASE), _R),
+    ("ospf-isis-keys",
+     _kw(r"(?<!ntp[ ])\bauthentication-key(?:[ \t]+[0-9])?|\bmessage-digest-key[ \t]+\d{1,3}[ \t]+md5"
+         r"(?:[ \t]+[0-9])?", quoted=True), _R),
+    ("ntp-authentication-key",
+     _kw(r"\bntp[ \t]+authentication-key[ \t]+\d{1,5}[ \t]+(?:md5|sha1|sha256|cmac-aes-128)"), _R),
+    ("crypto-isakmp-key", _kw(r"\bcrypto[ \t]+isakmp[ \t]+key(?:[ \t]+[0-9])?"), _R),
+    ("ikev2-pre-shared-key",
+     _kw(r"\bpre-shared-key[ \t]+(?:(?:local|remote)(?:[ \t]+[0-9])?"
+         r"|address[ \t]+\S{1,64}[ \t]+key(?:[ \t]+[0-9])?)"), _R),
+    ("key-string", _kw(r"\bkey-string(?:[ \t]+[0-9])?"), _R),
+    ("snmp-server-host-community",
+     re.compile(r"\b(snmp-server[ \t]+host[ \t]+\S{1,64}(?:[ \t]+vrf[ \t]+\S{1,32})?(?:[ \t]+(?:traps|informs))?"
+                r"(?:[ \t]+version[ \t]+(?:1|2c|3(?:[ \t]+(?:auth|noauth|priv))?))?)"
+                rf"[ \t]+(?!(?:vrf|traps|informs|version)[ \t]){_TOK}", re.IGNORECASE), _R),
+    # Junos: quoted or bare values; output is always quoted.
+    ("junos-secret-values",
+     re.compile(rf"\b(pre-shared-key[ \t]+(?:ascii-text|hexadecimal)|encrypted-password"
+                rf"|plain-text-password(?:-value)?|simple-password|md5[ \t]+\d{{1,3}}[ \t]+key)[ \t]+{_QTOK}",
+                re.IGNORECASE), r'\1 "<REDACTED>"'),
+    # ── Tokens, headers, URLs, key=value pairs ───────────────────────────
+    ("http-authorization",
+     re.compile(r"""\b(authorization["']?[ \t]*[:=][ \t]*["']?(?:(?:bearer|basic|token|negotiate)[ \t]+)?)"""
+                r"""(?!"?<REDACTED)[^\s"',;]+(?![^\s"',;])(?![ \t]+(?:[^\s<]+[ \t]+){0,3}<REDACTED)""",
+                re.IGNORECASE), r"\1<REDACTED>"),
+    ("bearer-token",
+     re.compile(r"\b(bearer)[ \t]+[A-Za-z0-9._~+/=-]{16,}", re.IGNORECASE), r"\1 <REDACTED>"),
+    ("url-userinfo",
+     re.compile(r"""\b([a-z][a-z0-9+.-]{1,20}://[^\s/:@"'<>]{0,128}:)[^\s/"'<>]{1,256}@""", re.IGNORECASE),
+     r"\1<REDACTED>@"),
+    ("url-token-userinfo",
+     re.compile(r"\b(https?://)[A-Za-z0-9_-]{20,256}@", re.IGNORECASE), r"\1<REDACTED>@"),
+    ("credential-pair",
+     re.compile(rf"""(?<![A-Za-z0-9])((?:{_CRED_NAMES})["']?[ \t]*=[ \t]*)(?!["']?<REDACTED)"""
+                r"""(?:"[^"\n]*"|'[^'\n]*'|[^\s"'&;,]+)""", re.IGNORECASE),
+     r"\1<REDACTED>"),
+    ("credential-json",
+     re.compile(r'(?<![A-Za-z0-9])("(?:' + _CRED_NAMES + r')"[ \t]*:[ \t]*)"(?!<REDACTED>")[^"\n]*"',
+                re.IGNORECASE),
+     r'\1"<REDACTED>"'),
+    ("cloud-api-token",
+     re.compile(r"\b(?:(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|AIPA)[A-Z0-9]{16}"
+                r"|gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{22,255}"
+                r"|xox[abposr]-[A-Za-z0-9-]{10,200}|AIza[0-9A-Za-z_-]{35}"
+                r"|sk-(?:ant-|proj-)[A-Za-z0-9_-]{20,200}|sk-[A-Za-z0-9]{32,200}"
+                r"|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})(?![A-Za-z0-9_-])"),
+     "<REDACTED-TOKEN>"),
+    # Modular-crypt hashes ($1$ md5, $5$/$6$ sha, $8$/$9$ Cisco, $y$ yescrypt, ...) anywhere.
+    ("crypt-hash",
+     re.compile(r"(?<![\w$])\$(?:1|5|6|7|8|9|y|2[abxy])\$[A-Za-z0-9./$=,+-]{6,}"),
+     "<REDACTED-HASH>"),
 ]
 
 
+# Pseudonym tokens (PUB-xxxxxxxx, user-xxxxxxxx) leave the host in LLM prompts,
+# webhooks and Slack, so they must not be reversible by hashing guesses: they are
+# HMAC-SHA256 under a secret key. AI_LOG_ANALYZER_PSEUDONYM_KEY pins the key
+# (stable across restarts and gunicorn workers); otherwise a random per-process
+# key is generated once, so tokens are stable inside one process only.
+_PSEUDONYM_KEY_ENV = "AI_LOG_ANALYZER_PSEUDONYM_KEY"
+_random_key: bytes | None = None
+_random_key_lock = threading.Lock()
+
+
+def _pseudonym_key() -> bytes:
+    global _random_key
+    configured = os.environ.get(_PSEUDONYM_KEY_ENV, "").strip()
+    if configured:
+        return configured.encode()
+    with _random_key_lock:
+        if _random_key is None:
+            _random_key = secrets.token_bytes(32)
+        return _random_key
+
+
+def _reset_pseudonym_key() -> None:
+    """Forget the generated per-process key (tests)."""
+    global _random_key
+    with _random_key_lock:
+        _random_key = None
+
+
 def _hash_token(text: str, salt: str = "ai-log-analyzer") -> str:
-    """Stable short token for replacing identifiers — same input → same token."""
-    import hashlib
-    h = hashlib.sha256(f"{salt}:{text}".encode()).hexdigest()[:8]
-    return h
+    """Stable short keyed token for replacing identifiers — same input → same token
+    (within one key), but not derivable without the key."""
+    return hmac.new(_pseudonym_key(), f"{salt}:{text}".encode(), hashlib.sha256).hexdigest()[:8]
 
 
 def _redact_user(match: re.Match) -> str:
@@ -123,12 +241,12 @@ def _redact_user(match: re.Match) -> str:
 _PII_RULES: list = [
     # Junos user blocks:   user username.lastname { ... uid 2001; class super-user; }
     ("junos-user-block",
-     re.compile(r'\b(user)\s+([a-z][\w.\-]{1,40})(\s*\{)',
+     re.compile(r'\b(user)\s+(?!user-[0-9a-f]{8}\b)([a-z][\w.\-]{1,40})(\s*\{)',
                 re.IGNORECASE),
      _redact_user),
     # EOS / IOS: username name privilege 15 ...   |  username name secret ...
     ("eos-username",
-     re.compile(r'\b(username)\s+([a-z][\w.\-]{1,40})(\b)',
+     re.compile(r'\b(username)\s+(?!user-[0-9a-f]{8}\b)([a-z][\w.\-]{1,40})(\b)',
                 re.IGNORECASE),
      _redact_user),
     # SSH key comments — typically contain emails or employee IDs at end of pubkey.
@@ -139,7 +257,7 @@ _PII_RULES: list = [
      r'\1'),
     # `full-name "First Last"` (Junos)
     ("junos-full-name",
-     re.compile(r'\b(full-name)\s+"[^"]+"',
+     re.compile(r'\b(full-name)\s+"(?!<REDACTED-NAME>")[^"]+"',
                 re.IGNORECASE),
      r'\1 "<REDACTED-NAME>"'),
     # Interface / neighbor descriptions carry circuit IDs, customer names and
@@ -147,11 +265,11 @@ _PII_RULES: list = [
     # optional Junos `set ...` prefix) and lowercase so prose like
     # "Description: ..." in a prompt header is left alone.
     ("config-description",
-     re.compile(r'(?m)((?:^|[{;])[ \t]*(?:set [^\n]*?\s)?description)[ \t]+(?:"[^"\n]*"|[^;{}\n]+)'),
+     re.compile(r'(?m)((?:^|[{;])[ \t]*(?:set [^\n]{0,200}?\s)?description)[ \t]+(?!"<REDACTED-DESC>")(?:"[^"\n]*"|[^;{}\n]+)'),
      r'\1 "<REDACTED-DESC>"'),
     # SNMP sysLocation / sysContact — street addresses, rack IDs, people.
     ("snmp-location-contact",
-     re.compile(r'(?m)((?:^|[{;])[ \t]*(?:snmp-server\s+|set\s+snmp\s+)?(?:location|contact))[ \t]+(?:"[^"\n]*"|[^;{}\n]+)'),
+     re.compile(r'(?m)((?:^|[{;])[ \t]*(?:snmp-server\s+|set\s+snmp\s+)?(?:location|contact))[ \t]+(?!"<REDACTED>")(?:"[^"\n]*"|[^;{}\n]+)'),
      r'\1 "<REDACTED>"'),
     # Chassis / module serial numbers (asset identifiers). The value must
     # contain a digit so `serial console` / `interface Serial0/0` survive.
@@ -213,6 +331,28 @@ def _mask_public_ipv4(text: str, mapping: dict[str, str] | None = None) -> tuple
     return out, replacements
 
 
+# Redacting one value can expose another (a redacted keyword stops hiding the
+# next one), so rules run until the text stops changing. Typical text takes
+# one pass (+ one no-op pass when something was redacted); the cap bounds worst-case cost.
+_MAX_PASSES = 4
+
+
+def _apply_rules(text: str, rules: list, breakdown: dict[str, int] | None = None) -> tuple[str, int]:
+    """Run ``rules`` to a fixed point, so ``sanitize(sanitize(x)) == sanitize(x)``."""
+    total = 0
+    for _ in range(_MAX_PASSES):
+        before = text
+        for name, pat, repl in rules:
+            text, n = pat.subn(repl, text)
+            if n:
+                total += n
+                if breakdown is not None:
+                    breakdown[name] = breakdown.get(name, 0) + n
+        if text == before:
+            break
+    return text, total
+
+
 def sanitize(text: str, mask_pii: bool = False,
              mask_public_ip: bool | None = None) -> tuple[str, int]:
     """Redact secrets (and optionally PII) from a config blob.
@@ -222,15 +362,7 @@ def sanitize(text: str, mask_pii: bool = False,
 
     Returns (sanitized_text, total_redactions).
     """
-    out = text
-    total = 0
-    for _name, pat, repl in _RULES:
-        out, n = pat.subn(repl, out)
-        total += n
-    if mask_pii:
-        for _name, pat, repl in _PII_RULES:
-            out, n = pat.subn(repl, out)
-            total += n
+    out, total = _apply_rules(text, _RULES + _PII_RULES if mask_pii else _RULES)
     if mask_pii if mask_public_ip is None else mask_public_ip:
         out, n = _mask_public_ipv4(out)
         total += n
@@ -239,17 +371,9 @@ def sanitize(text: str, mask_pii: bool = False,
 
 def sanitize_report(text: str, mask_pii: bool = False) -> dict:
     """Per-rule breakdown — useful for debugging false positives."""
-    out = text
     breakdown: dict[str, int] = {}
-    for name, pat, repl in _RULES:
-        out, n = pat.subn(repl, out)
-        if n:
-            breakdown[name] = n
+    out, _ = _apply_rules(text, _RULES + _PII_RULES if mask_pii else _RULES, breakdown)
     if mask_pii:
-        for name, pat, repl in _PII_RULES:
-            out, n = pat.subn(repl, out)
-            if n:
-                breakdown[name] = n
         # IPs (shared mapping so multiple files map the same IP to the same token)
         out, n = _mask_public_ipv4(out)
         if n:
@@ -270,17 +394,9 @@ def sanitize_many(files: dict[str, str], mask_pii: bool = True) -> dict[str, dic
     ip_mapping: dict[str, str] = {}
     results: dict[str, dict] = {}
     for fname, raw in files.items():
-        out = raw
         breakdown: dict[str, int] = {}
-        for name, pat, repl in _RULES:
-            out, n = pat.subn(repl, out)
-            if n:
-                breakdown[name] = n
+        out, _ = _apply_rules(raw, _RULES + _PII_RULES if mask_pii else _RULES, breakdown)
         if mask_pii:
-            for name, pat, repl in _PII_RULES:
-                out, n = pat.subn(repl, out)
-                if n:
-                    breakdown[name] = n
             out, n_ip = _mask_public_ipv4(out, mapping=ip_mapping)
             if n_ip:
                 breakdown["public-ipv4"] = n_ip

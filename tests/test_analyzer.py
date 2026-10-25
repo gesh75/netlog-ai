@@ -277,7 +277,8 @@ def test_executive_summary_caps_hostname_anchors(monkeypatch):
         items=items, use_llm=True,
     )
 
-    hostname_line = captured["user"].splitlines()[0]
+    # The anchor list lives in the untrusted-data fence (hostnames come from syslog headers).
+    hostname_line = captured["user"].split('source="hostnames">', 1)[1].split("</", 1)[0]
     assert "host000" in hostname_line and "host004" in hostname_line
     assert "host005" not in hostname_line and "host099" not in hostname_line
     assert "Additional hostname references omitted: 95" in captured["user"]

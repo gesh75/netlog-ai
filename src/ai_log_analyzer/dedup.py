@@ -13,7 +13,7 @@ import hashlib
 import os
 import re
 from collections import Counter, OrderedDict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 
@@ -75,8 +75,27 @@ _TOKEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("NUM", _NUM_RE),
 )
 
+_NEWLINE_RE = re.compile(r"\r\n|\r|\n")
+
+
+def _iter_text_lines(text: str) -> Iterator[str]:
+    pos, n = 0, len(text)
+    while pos < n:
+        m = _NEWLINE_RE.search(text, pos)
+        if m is None:
+            yield text[pos:]
+            return
+        yield text[pos:m.start()]
+        pos = m.end()
+
+
 _VAR_DISPLAY_ORDER: tuple[str, ...] = ("INTF", "IPV4", "IPV6", "ASN", "MAC")
 _COUNTED_KINDS: frozenset[str] = frozenset(_VAR_DISPLAY_ORDER)
+
+# Bounds so one hostile or just huge input cannot grow the miner without limit.
+_MAX_HOSTS_PER_CLUSTER = 1000
+_MAX_VALUES_PER_KIND = 500
+_DEFAULT_MAX_CLUSTERS = 20_000
 
 _DEDUP_CTX: ContextVar[bool | None] = ContextVar("ai_log_analyzer_dedup", default=None)
 
@@ -114,6 +133,7 @@ class LogCluster:
     hosts: set[str] = field(default_factory=set)
     sample_raw: str = ""
     variable_counts: dict[str, Counter[str]] = field(default_factory=dict)
+    hosts_truncated: bool = False   # more hosts than _MAX_HOSTS_PER_CLUSTER were seen
 
     def to_compact_line(self, max_vars: int = 4) -> str:
         """One LLM-ready line. Singletons pass through unchanged."""
@@ -135,8 +155,8 @@ class LogCluster:
         shown = ordered[:3]
         extra = len(ordered) - 3
         text = ",".join(shown)
-        if extra > 0:
-            text += f"(+{extra}_more)"
+        if extra > 0 or self.hosts_truncated:
+            text += f"(+{max(extra, 0)}{'+' if self.hosts_truncated else ''}_more)"
         return text
 
     def _format_vars(self, max_vars: int) -> str:
@@ -180,8 +200,14 @@ class DedupResult:
 class NetworkLogDeduplicator:
     """Cluster syslog lines that share a masked template."""
 
-    def __init__(self, preserve_singletons: bool = True) -> None:
+    def __init__(self, preserve_singletons: bool = True, max_clusters: int | None = None) -> None:
         self.preserve_singletons = preserve_singletons
+        if max_clusters is None:
+            try:
+                max_clusters = int(os.environ.get("AI_LOG_ANALYZER_DEDUP_MAX_CLUSTERS", "") or _DEFAULT_MAX_CLUSTERS)
+            except ValueError:
+                max_clusters = _DEFAULT_MAX_CLUSTERS
+        self.max_clusters = max(1, max_clusters)
 
     def _parse_header(self, line: str) -> tuple[str, str, str]:
         stripped = _PRI_PREFIX_RE.sub("", line, count=1)
@@ -221,7 +247,7 @@ class NetworkLogDeduplicator:
     def deduplicate(self, logs: str | Iterable[str]) -> DedupResult:
         lines: Iterable[str]
         if isinstance(logs, str):
-            lines = logs.splitlines()
+            lines = _iter_text_lines(logs)   # lazy: no second copy of a large text as a list of lines
         else:
             lines = logs
 
@@ -243,6 +269,15 @@ class NetworkLogDeduplicator:
             cluster_id = hashlib.sha1(template.encode("utf-8")).hexdigest()[:10]
 
             cluster = clusters.get(cluster_id)
+            if cluster is None and len(clusters) >= self.max_clusters:
+                # Too many distinct templates: fold the rest into one overflow cluster.
+                cluster_id = "overflow"
+                cluster = clusters.get(cluster_id)
+                if cluster is None:
+                    cluster = clusters[cluster_id] = LogCluster(
+                        cluster_id=cluster_id, template="<more distinct templates than the cluster limit>",
+                        first_seen=ts, last_seen=ts, sample_raw=line,
+                        variable_counts={kind: Counter() for kind in _COUNTED_KINDS})
             if cluster is None:
                 cluster = LogCluster(
                     cluster_id=cluster_id,
@@ -261,11 +296,16 @@ class NetworkLogDeduplicator:
                     cluster.first_seen = ts
                 cluster.last_seen = ts
             if host:
-                cluster.hosts.add(host)
+                if host in cluster.hosts or len(cluster.hosts) < _MAX_HOSTS_PER_CLUSTER:
+                    cluster.hosts.add(host)
+                else:
+                    cluster.hosts_truncated = True
             for kind, values in variables.items():
                 bucket = cluster.variable_counts.get(kind)
                 if bucket is not None:
-                    bucket.update(values)
+                    for value in values:
+                        if value in bucket or len(bucket) < _MAX_VALUES_PER_KIND:
+                            bucket[value] += 1
 
         kept = [
             c for c in clusters.values()

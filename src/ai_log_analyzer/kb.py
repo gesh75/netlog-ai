@@ -2234,6 +2234,8 @@ KB: dict[str, dict[str, dict[str, Any]]] = {
         "evpn_cascade": _EVPN_UNDERLAY_CASCADE,
         "control_plane_congestion": _CONTROL_PLANE_CONGESTION,
         "mac_mobility": _EVPN_MAC_MOBILITY,
+        # The classifier's "EVPN route update" is an overlay event, not a BGP-session one.
+        "evpn_route": {**_EVPN_UNDERLAY_CASCADE, "match": r"evpn route update"},
         "_default": _BGP_DOWN,
     },
     "interface": {
@@ -2252,6 +2254,12 @@ KB: dict[str, dict[str, dict[str, Any]]] = {
         "_default": _ASIC_PARITY,
     },
     "qos": {
+        "microburst": _CONTROL_PLANE_CONGESTION,
+        "_default": _CONTROL_PLANE_CONGESTION,
+    },
+    # The classifier files packet drops / policer discards / pause frames under "performance"; "qos"
+    # is kept for custom rules and older saved results that use it.
+    "performance": {
         "microburst": _CONTROL_PLANE_CONGESTION,
         "_default": _CONTROL_PLANE_CONGESTION,
     },

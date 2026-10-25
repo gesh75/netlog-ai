@@ -177,7 +177,7 @@ def test_playbook_has_dry_run_then_guarded_apply_with_rollback(vendor, intf, mod
 def test_junos_playbook_uses_native_commit_confirmed_and_rollback():
     play = _play(GEN.build_graceful_link_drain("mx1", VendorOS.JUNIPER_JUNOS, "xe-0/0/1", rollback_minutes=7))
     block = next(t for t in play["tasks"] if "block" in t)
-    apply, _post, confirm = block["block"]
+    apply, confirm = block["block"][0], block["block"][-1]   # the verification gate sits in between
     assert apply["junipernetworks.junos.junos_config"]["confirm"] == 7
     assert confirm["junipernetworks.junos.junos_config"] == {"confirm_commit": True}
     assert block["rescue"][0]["junipernetworks.junos.junos_config"] == {"rollback": 1}

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any
 
 from ai_log_analyzer.classifier import SEV_ORDER, ClassifiedEvent
@@ -92,12 +93,14 @@ def _parse_epoch(stamp: str) -> datetime | None:
         return None
 
 
+@lru_cache(maxsize=8192)
 def _parse_event_ts(ts: str) -> datetime | None:
     """Parse ISO/RFC5424, FRR, epoch, and RFC3164/Junos stamps. None if unknown.
 
     RFC3164 has no year — ``_RFC3164_YEARLESS`` is a sentinel so callers
     can re-stamp from a sibling event that does carry a year (ISO / Loki
-    epoch). The sentinel is a leap year so 29 Feb still parses.
+    epoch). The sentinel is a leap year so 29 Feb still parses. Pure, so
+    memoized: it runs once per event and syslog bursts repeat the same stamp.
     """
     if not ts:
         return None
@@ -107,17 +110,11 @@ def _parse_event_ts(ts: str) -> datetime | None:
         return _as_naive(datetime.fromisoformat(iso))
     except ValueError:
         pass
-    epoch = _parse_epoch(stamp)
-    if epoch is not None:
-        return epoch
     collapsed = " ".join(stamp.split())
-    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.strptime(collapsed, fmt)
-        except ValueError:
-            continue
     parts = collapsed.split()
     if len(parts) == 3 and parts[0] in _RFC3164_MONTHS:
+        # Checked before the strptime formats: two failing strptime calls cost
+        # ~10x this on every classic syslog stamp.
         try:
             day = int(parts[1])
             hour, minute, sec = (int(p) for p in parts[2].split(":"))
@@ -126,6 +123,14 @@ def _parse_event_ts(ts: str) -> datetime | None:
             )
         except ValueError:
             return None
+    epoch = _parse_epoch(stamp)
+    if epoch is not None:
+        return epoch
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(collapsed, fmt)
+        except ValueError:
+            continue
     return None
 
 
@@ -585,9 +590,9 @@ def build_timeline(events: Iterable[ClassifiedEvent], limit: int = 24) -> list[d
     when a simple heuristic says the previous event likely precipitated it
     (link-down → BGP/OSPF/LAG, BGP → EVPN, OSPF → drops).
     """
-    rows = _select_timeline_rows(events, limit)
+    rows = _select_timeline_rows(events, limit)[:limit]
     nodes: list[dict[str, Any]] = []
-    for e in rows[:limit]:
+    for e in rows:
         sample = (e.sample_message or "").strip().replace("\n", " ")
         nodes.append({
             "t": e.timestamp or "—",
@@ -601,27 +606,50 @@ def build_timeline(events: Iterable[ClassifiedEvent], limit: int = 24) -> list[d
         prev, cur = nodes[i - 1], nodes[i]
         prev_title = prev["title"].lower()
         cur_title = cur["title"]
+        # A link-down on one device does not cause a hold-timer expiry on another
+        # unless they share an entity (an address, a tunnel, the same interface).
+        related = _same_device_or_entity(rows[i - 1], rows[i])
         if "link down" in prev_title and any(k in cur_title.upper() for k in _DOWNSTREAM):
-            cur["cause_of"] = prev["title"]
+            if related:
+                cur["cause_of"] = prev["title"]
         elif "bgp" in prev_title and "evpn" in cur_title.lower():
-            cur["cause_of"] = prev["title"]
+            if related:
+                cur["cause_of"] = prev["title"]
         elif "ospf" in prev_title and any(
             k in cur_title.lower() for k in ("drop", "blackhole", "unreachable", "discard")
         ):
-            cur["cause_of"] = prev["title"]
+            if related:
+                cur["cause_of"] = prev["title"]
         elif prev["category"] == "config" and SEV_ORDER.get(cur["severity"], 9) <= 1:
             cur["cause_of"] = prev["title"]
     return nodes
 
 
+def _same_device_or_entity(a: ClassifiedEvent, b: ClassifiedEvent) -> bool:
+    """True when two events are on one device or share a join entity."""
+    from ai_log_analyzer.correlate import _STRONG_EVIDENCE, _join_keys
+    from ai_log_analyzer.hostnames import short_host
+
+    if short_host(a.hostname) == short_host(b.hostname):
+        return True
+    keys_a = {k for kind, k in _join_keys(a) if kind in _STRONG_EVIDENCE}
+    return any(kind in _STRONG_EVIDENCE and k in keys_a for kind, k in _join_keys(b))
+
+
 def blast_radius(
     action_items: Iterable[Any],
     stability: dict[str, Any] | None = None,
+    root: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Estimate which devices / categories sit in the blast radius.
 
     ``action_items`` is the ranked list from ``analyze()``. Optional
-    ``stability`` is the fabric-stability report (flap detector).
+    ``stability`` is the fabric-stability report (flap detector). ``root`` is
+    the incident root ({"hostname", "description"}) from correlation or
+    suppression; without it the epicenter is only the first device of the
+    top-ranked item, a guess. ``device_count`` is the true number of affected
+    devices (action items list at most 10 each; the count is a lower bound
+    across items), ``devices`` the capped display list.
     """
     items = list(action_items)
     devices: list[str] = []
@@ -637,6 +665,7 @@ def blast_radius(
         if cat and cat not in cat_seen:
             cat_seen.add(cat)
             categories.append(cat)
+    total = max([len(devices), *(getattr(a, "device_count", 0) or 0 for a in items)])
     devices = devices[:12]
     top = items[0] if items else None
     flap_note = "no flap signature"
@@ -653,19 +682,20 @@ def blast_radius(
         estimated = "Quiet fabric — no ranked actions."
         epicenter = "—"
     else:
-        epicenter = (getattr(top, "devices", None) or ["unknown"])[0]
-        n = len(devices)
+        rooted = bool(root and root.get("hostname"))
+        epicenter = root["hostname"] if rooted else (getattr(top, "devices", None) or ["unknown"])[0]
+        what = (root.get("description") if rooted else "") or getattr(top, "description", "")
+        count = "" if rooted else f" ×{getattr(top, 'count', 1)}"
         estimated = (
-            f"{n} device{'s' if n != 1 else ''} in {', '.join(categories[:3]) or 'uncategorized'}. "
-            f"Epicenter {epicenter} ({getattr(top, 'description', '').lower()} "
-            f"×{getattr(top, 'count', 1)}). {flap_note}."
+            f"{total} device{'s' if total != 1 else ''} in {', '.join(categories[:3]) or 'uncategorized'}. "
+            f"Epicenter {epicenter} ({what.lower()}{count}). {flap_note}."
         )
     return {
         "epicenter": epicenter,
         "devices": devices,
         "categories": categories,
         "estimated_impact": estimated,
-        "device_count": len(devices),
+        "device_count": total,
     }
 
 

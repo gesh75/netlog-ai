@@ -24,6 +24,7 @@ from ai_log_analyzer.analytics import (
 )
 from ai_log_analyzer.itsm import build_servicenow_payload
 from ai_log_analyzer.sanitize import sanitize
+from ai_log_analyzer.sources import outbound as _outbound
 from ai_log_analyzer.sources.base import (
     SourceAuthError,
     SourceError,
@@ -157,10 +158,25 @@ class ServiceNowClient:
         self.username = username
         self.password = password
         self.bearer_token = bearer_token
-        self.allow_private = allow_private
         self.timeout = timeout
+        # The operator's own SERVICENOW_URL is a trusted (possibly on-prem) target.
+        self.allow_private = allow_private or any(
+            _outbound.endpoints_match(self.instance_url, u) for u in _env_urls())
         if self.instance_url:
-            validate_outbound_url(self.instance_url, allow_private=allow_private)
+            validate_outbound_url(self.instance_url, allow_private=self.allow_private,
+                                  require_https=True, resolve=False)
+
+    def _check_credential_binding(self) -> None:
+        """Server-environment credentials only go to the environment's own URL."""
+        _outbound.require_env_bound_target(
+            "ServiceNow", self.instance_url,
+            supplied={"username": self.username, "password": self.password,
+                      "bearer_token": self.bearer_token},
+            env_creds={"username": _outbound.env_values("SERVICENOW_USER", "SNOW_USER"),
+                       "password": _outbound.env_values("SERVICENOW_PASSWORD", "SNOW_PASSWORD"),
+                       "bearer_token": _outbound.env_values("SERVICENOW_TOKEN")},
+            env_urls=_env_urls(),
+        )
 
     def fetch_recent_changes(
         self,
@@ -171,8 +187,12 @@ class ServiceNowClient:
             "sysparm_limit": str(max(1, int(limit))),
             "sysparm_display_value": "true",
         }
-        if ci_names:
-            params["sysparm_query"] = "cmdb_ciIN" + ",".join(ci_names)
+        # cmdb_ci is a reference field: match it by CI name (dot-walk), escape the
+        # query operator (``^`` -> ``^^``), and order newest first so the limit
+        # keeps the most recent changes instead of arbitrary rows.
+        names = [n.strip() for n in ci_names or [] if _safe_ci_name(n)]
+        clauses = ["cmdb_ci.nameIN" + ",".join(n.replace("^", "^^") for n in names)] if names else []
+        params["sysparm_query"] = "^".join([*clauses, "ORDERBYDESCsys_updated_on"])
         payload = self._request("GET", "/api/now/table/change_request", params=params)
         rows = payload.get("result")
         if not isinstance(rows, list):
@@ -220,7 +240,7 @@ class ServiceNowClient:
             "GET",
             "/api/now/table/incident",
             params={
-                "sysparm_query": f"correlation_id={correlation_id}",
+                "sysparm_query": f"correlation_id={correlation_id}^active=true",
                 "sysparm_limit": "1",
             },
         )
@@ -266,18 +286,18 @@ class ServiceNowClient:
         url = self.instance_url + path
         if params:
             url = url + "?" + urllib.parse.urlencode(params)
-        validate_outbound_url(url, allow_private=self.allow_private)
+        self._check_credential_binding()
         data = None if body is None else json.dumps(body).encode("utf-8")
         headers = {
             "Accept": "application/json",
             "Authorization": _auth_header(self.username, self.password, self.bearer_token),
-            "User-Agent": "netlog-ai/2.1.0",
+            "User-Agent": _user_agent(),
         }
         if data is not None:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with _outbound.safe_urlopen(req, timeout=self.timeout, allow_private=self.allow_private) as resp:
                 raw = resp.read().decode("utf-8")
         except TimeoutError as exc:
             raise SourceError("ServiceNow request timed out") from exc
@@ -292,6 +312,21 @@ class ServiceNowClient:
         if not isinstance(payload, dict):
             raise SourceError("ServiceNow payload must be a JSON object")
         return payload
+
+
+def _user_agent() -> str:
+    # lazy import: avoids a cycle at package load
+    from ai_log_analyzer import __version__
+    return f"netlog-ai/{__version__}"
+
+
+def _env_urls() -> tuple[str, ...]:
+    return _outbound.env_values("SERVICENOW_URL", "SNOW_URL")
+
+
+def _safe_ci_name(name: object) -> bool:
+    text = str(name or "")
+    return bool(text.strip()) and "," not in text and text.isprintable()
 
 
 def as_change(item: ServiceNowChangeRecord | Mapping[str, Any]) -> ServiceNowChangeRecord:

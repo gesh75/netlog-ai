@@ -14,8 +14,11 @@ Root kinds, strongest first:
   dead device logged nothing, which is the classic core-router storm.
   Declared topology children of a failing device are grouped too.
 * ``transport``: SD-WAN SLA / BFD / control-connection, IPsec / IKE, or link
-  down. Children are the same device's later higher-layer events and the
-  remote ends of sessions that ride on it.
+  down. Children are the same device's later events that share an entity
+  with it (interface, tunnel, address) or follow promptly at a higher layer,
+  and the remote ends of sessions that ride on it. Roots are tried lowest
+  layer first, then earliest (``correlate.root_sort_key``, shared with the
+  entity correlator).
 
 Device address ownership comes from the optional dependency map
 (``AI_LOG_ANALYZER_DEPENDENCIES`` JSON file or ``site_manifest``) and is
@@ -35,12 +38,20 @@ import ipaddress
 import json
 import logging
 import os
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from ai_log_analyzer.correlate import _LAYER_BY_EVENT_TYPE, _short_host
+from ai_log_analyzer.correlate import (
+    _LAYER_BY_EVENT_TYPE,
+    _STRONG_EVIDENCE,
+    _content_key,
+    _join_keys,
+    _short_host,
+    root_sort_key,
+)
 from ai_log_analyzer.entity_state import entity_key
 from ai_log_analyzer.parsers.entities import valid_ip
 
@@ -53,6 +64,8 @@ _TRANSPORT_TYPES = frozenset({"sdwan_sla", "ipsec_tunnel", "ike_phase1", "ike_ph
 _PLATFORM_TYPES = frozenset({"ha_state", "conserve_mode", "session_table"})
 _KIND_PRIORITY = {"platform": 0, "device_unreachable": 1, "transport": 2}
 _CLOCK_SKEW_S = 30.0
+_PHYSICAL_LAYER = _LAYER_BY_EVENT_TYPE["interface_link"][0]
+_ROUTING_LAYER = _LAYER_BY_EVENT_TYPE["bgp_session"][0]
 
 
 @dataclass
@@ -139,18 +152,63 @@ def _brief(ev: Any) -> dict[str, Any]:
             "entity": ev.peer_ip or ev.tunnel_id or ev.interface or ""}
 
 
+def _infer_ha_peers(ha_events: list[Any], host_of: dict[int, str], secs: dict[int, float | None]) -> dict[int, str]:
+    """id(event) → the other same-vendor host with an HA event within 60 s.
+
+    One sort + two linear passes (nearest earlier / later event of a different
+    host) instead of a scan of every HA event per event. An untimed event pairs
+    with the first other host of its vendor.
+    """
+    peer: dict[int, str] = {}
+    by_vendor: dict[str, list[Any]] = {}
+    for e in ha_events:
+        by_vendor.setdefault(e.vendor, []).append(e)
+    for evs in by_vendor.values():
+        timed = sorted((e for e in evs if secs[id(e)] is not None), key=lambda e: secs[id(e)])
+        for seq in (timed, timed[::-1]):
+            last: Any = None
+            other_last: Any = None
+            for e in seq:
+                h = host_of[id(e)]
+                cand = last if last is not None and host_of[id(last)] != h else other_last
+                if cand is not None and abs(secs[id(e)] - secs[id(cand)]) <= 60.0:
+                    peer.setdefault(id(e), host_of[id(cand)])
+                if last is None or host_of[id(last)] != h:
+                    other_last = last
+                last = e
+        all_hosts = list(dict.fromkeys(host_of[id(e)] for e in evs))
+        untimed_hosts = list(dict.fromkeys(host_of[id(e)] for e in evs if secs[id(e)] is None))
+        for e in evs:  # untimed stamps match anything
+            if id(e) not in peer:
+                other = next((x for x in (all_hosts if secs[id(e)] is None else untimed_hosts)
+                              if x != host_of[id(e)]), "")
+                if other:
+                    peer[id(e)] = other
+    return peer
+
+
 def suppress_alerts(
     events: Iterable[Any],
     topology: Topology | None = None,
     *,
     window_s: float = 300.0,
     hold_window_s: float = 240.0,
+    same_device_window_s: float = 60.0,
     min_children: int = 2,
 ) -> dict[str, Any]:
     """Group dependent failure events under their upstream root.
 
     Returns ``{"groups": [...], "suppressed_entities": [entity keys],
     "suppressed_events": n, "roots": n}``. Pure; never mutates events.
+
+    A transport / physical event (SD-WAN SLA, IPsec, BFD, link down, LAG
+    member) claims a later event on the SAME device only when it shares an
+    entity with it (interface, tunnel, peer / local address, p2p subnet; within
+    ``hold_window_s``) or is a higher-layer follow-on within
+    ``same_device_window_s``. A link root never claims same-layer events, and
+    same-device children must not predate their root (cross-device children
+    get ``_CLOCK_SKEW_S`` of tolerance). Roots are tried lowest layer first,
+    then earliest: the same rule as ``correlate.root_sort_key``.
     """
     from ai_log_analyzer.causal import _reference_dt, event_time
 
@@ -162,33 +220,75 @@ def suppress_alerts(
         return {"groups": [], "suppressed_entities": [], "suppressed_events": 0, "roots": 0}
     ref = _reference_dt(pool)
     times: dict[int, datetime | None] = {id(e): event_time(e, ref) for e in pool}
+    secs: dict[int, float | None] = {k: (v - datetime.min).total_seconds() if v is not None else None
+                                     for k, v in times.items()}
     owned = _learn_ownership(pool, topo)
     host_of = {id(e): _short_host(e.hostname) for e in pool}
     layer = {id(e): _LAYER_BY_EVENT_TYPE[e.event_type][0] for e in pool}
+    order = {id(e): i for i, e in enumerate(pool)}
+
+    def delta(e: Any, t0: datetime | None) -> float | None:
+        a, b = secs[id(e)], (t0 - datetime.min).total_seconds() if t0 is not None else None
+        return None if a is None or b is None else a - b
 
     def within(e: Any, t0: datetime | None, after: float, before: float = _CLOCK_SKEW_S) -> bool:
-        t = times[id(e)]
-        if t is None or t0 is None:
-            return True
-        delta = (t - t0).total_seconds()
-        return -before <= delta <= after
+        d = delta(e, t0)
+        return True if d is None else -before <= d <= after
 
-    host_events: dict[str, list[Any]] = {}
+    # Per-host, per-layer events by time (bisect) plus the untimed ones, so a
+    # root looks only at the events inside its window and layer range instead
+    # of every event on the host.
+    by_host: dict[str, list[Any]] = {}
     for e in pool:
-        host_events.setdefault(host_of[id(e)], []).append(e)
+        by_host.setdefault(host_of[id(e)], []).append(e)
+    host_timed: dict[tuple[str, int], tuple[list[float], list[Any]]] = {}
+    host_untimed: dict[tuple[str, int], list[Any]] = {}
+    host_layers: dict[str, set[int]] = {}
+    for h, evs in by_host.items():
+        for lyr in {layer[id(e)] for e in evs}:
+            host_layers.setdefault(h, set()).add(lyr)
+            lyr_evs = [e for e in evs if layer[id(e)] == lyr]
+            timed = sorted((e for e in lyr_evs if secs[id(e)] is not None),
+                           key=lambda e: (secs[id(e)], order[id(e)]))
+            host_timed[(h, lyr)] = ([secs[id(e)] for e in timed], timed)
+            host_untimed[(h, lyr)] = [e for e in lyr_evs if secs[id(e)] is None]
+
+    def host_window(h: str, t0: datetime | None, before: float, after: float, min_layer: int = 0) -> list[Any]:
+        out: list[Any] = []
+        base = (t0 - datetime.min).total_seconds() if t0 is not None else 0.0
+        for lyr in host_layers.get(h, ()):
+            if lyr < min_layer:
+                continue
+            stamps, timed = host_timed[(h, lyr)]
+            if t0 is None:
+                out.extend(timed)
+            else:
+                out.extend(timed[bisect_left(stamps, base - before):bisect_right(stamps, base + after)])
+            out.extend(host_untimed[(h, lyr)])
+        return out
+
+    by_peer: dict[str, list[Any]] = {}
+    for e in pool:
+        if e.peer_ip:
+            by_peer.setdefault(valid_ip(e.peer_ip) or e.peer_ip, []).append(e)
+    host_events = by_host
+    strong_keys: dict[int, list[str]] = {}
+    by_entity: dict[str, list[Any]] = {}   # shared-entity key → events carrying it
+    for e in pool:
+        ks = strong_keys[id(e)] = [k for kind, k in _join_keys(e) if kind in _STRONG_EVIDENCE]
+        for k in ks:
+            by_entity.setdefault(k, []).append(e)
 
     candidates: list[dict[str, Any]] = []
     ha_events = [o for o in pool if o.event_type == "ha_state"]
+    ha_peer = _infer_ha_peers(ha_events, host_of, secs) if ha_events else {}
     # Platform roots (HA pair folded together).
     for e in pool:
         if e.event_type in _PLATFORM_TYPES:
             members = {host_of[id(e)]}
             peer = topo.ha_peer.get(host_of[id(e)])
             if e.event_type == "ha_state":
-                if not peer:  # infer the peer: another same-vendor HA event close in time
-                    peer = next((host_of[id(o)] for o in ha_events if o is not e
-                                 and o.vendor == e.vendor and host_of[id(o)] != host_of[id(e)]
-                                 and within(o, times[id(e)], 60.0, 60.0)), "")
+                peer = peer or ha_peer.get(id(e), "")  # infer: another same-vendor HA event close in time
                 if peer:
                     members.add(peer)
             candidates.append({"kind": "platform", "event": e, "hosts": members,
@@ -224,15 +324,13 @@ def suppress_alerts(
             candidates.append({"kind": "transport", "event": e, "hosts": {host_of[id(e)]},
                                "t0": times[id(e)], "label": e.description})
 
-    candidates.sort(key=lambda c: (_KIND_PRIORITY[c["kind"]], c["t0"] is None, c["t0"] or datetime.min))
+    def cand_key(c: dict[str, Any]) -> tuple:
+        ev = c["event"]
+        lyr = layer[id(ev)] if c["kind"] == "transport" else 0
+        return (_KIND_PRIORITY[c["kind"]],
+                root_sort_key(lyr, c["t0"], _content_key(ev) if ev is not None else (c["label"],)))
 
-    order = {id(e): i for i, e in enumerate(pool)}
-    by_host: dict[str, list[Any]] = {}
-    by_peer: dict[str, list[Any]] = {}
-    for e in pool:
-        by_host.setdefault(host_of[id(e)], []).append(e)
-        if e.peer_ip:
-            by_peer.setdefault(valid_ip(e.peer_ip) or e.peer_ip, []).append(e)
+    candidates.sort(key=cand_key)
 
     claimed: dict[int, str] = {}
     root_events: set[int] = set()
@@ -246,28 +344,59 @@ def suppress_alerts(
         owned_ips = {ip for ip, (h, _how) in owned.items() if h in hosts}
         root_layer = layer[id(root_ev)] if root_ev is not None else 0
         t0 = cand["t0"]
+        # A link / tunnel / SLA root explains same-device events only through a
+        # shared entity or a prompt higher-layer follow-on; platform and
+        # device-unreachable roots take the whole device.
+        narrow = cand["kind"] == "transport"
+        root_keys = set(strong_keys[id(root_ev)]) if narrow else set()
+        root_host = host_of[id(root_ev)] if root_ev is not None else ""
         # Indexed candidate set (same / dependent hosts + sessions to owned IPs),
-        # then filtered in pool order — O(candidates) per root, not O(pool).
-        seen: set[int] = set()
+        # then filtered — O(window) per root, not O(pool). A narrow root takes
+        # same-device events only above its own layer (the prompt follow-on)
+        # or through a shared entity.
         maybe: list[Any] = []
+        reach = max(window_s, hold_window_s)
         for h in hosts | dependents:
-            maybe.extend(by_host.get(h, ()))
+            own = h in hosts
+            maybe.extend(host_window(h, t0, _CLOCK_SKEW_S if h != root_host else 0.0,
+                                     (hold_window_s if root_layer != _PHYSICAL_LAYER else same_device_window_s) if own and narrow else reach,
+                                     root_layer + 1 if own and narrow else root_layer if own else 0))
+        if narrow:
+            for k in root_keys:
+                maybe.extend(x for x in by_entity.get(k, ()) if host_of[id(x)] in hosts)
         for ip in owned_ips:
             maybe.extend(by_peer.get(ip, ()))
+        seen: set[int] = set()
         children = []
-        for e in sorted(maybe, key=lambda ev: order[id(ev)]):
+        for e in maybe:
             if id(e) in seen or e is root_ev or id(e) in claimed:
                 continue
             seen.add(id(e))
             h = host_of[id(e)]
             if h in hosts:
-                ok = layer[id(e)] >= root_layer and within(e, t0, hold_window_s)
+                before = 0.0 if h == root_host else _CLOCK_SKEW_S
+                higher = layer[id(e)] > root_layer
+                if layer[id(e)] < root_layer:
+                    ok = False
+                elif not narrow:
+                    ok = within(e, t0, hold_window_s, before)
+                elif root_keys.intersection(strong_keys[id(e)]):
+                    # same interface / tunnel / address; a link never explains another link
+                    ok = (higher or root_layer != _PHYSICAL_LAYER) and within(e, t0, hold_window_s, before)
+                elif higher:
+                    # prompt higher-layer follow-on; a tunnel / SLA root also gets the BGP hold timer
+                    limit = hold_window_s if root_layer != _PHYSICAL_LAYER and layer[id(e)] == _ROUTING_LAYER \
+                        else same_device_window_s
+                    ok = within(e, t0, limit, before)
+                else:
+                    ok = False
             elif h in dependents:
                 ok = within(e, t0, window_s)
             else:
                 ok = within(e, t0, window_s)  # reached via a session to an owned address
             if ok:
                 children.append(e)
+        children.sort(key=lambda ev: order[id(ev)])
         if not children:
             continue
         rid = _root_id(cand["kind"], ",".join(sorted(hosts)), str(t0))
@@ -292,11 +421,11 @@ def suppress_alerts(
                         + (f" across {len(child_hosts)} other device(s)" if child_hosts else "")),
         })
 
-    root_keys = {entity_key(e) for e in pool if id(e) in root_events}
+    root_keys_ent = {entity_key(e) for e in pool if id(e) in root_events}
     entity_root: dict[tuple[str, str, str], str] = {}
     for e in pool:
         key = entity_key(e)
-        if key is not None and id(e) in claimed and id(e) not in root_events and key not in root_keys:
+        if key is not None and id(e) in claimed and id(e) not in root_events and key not in root_keys_ent:
             entity_root.setdefault(key, claimed[id(e)])
     return {
         "groups": groups,

@@ -22,20 +22,28 @@ no caller can forget them:
   5. Retry with backoff on HTTP 429 / 5xx (Retry-After honoured).
   6. A prompt-injection guard appended to the system prompt; callers wrap raw
      log/config text with ``wrap_untrusted()``.
+  7. Resilience: ``query()`` never raises (malformed replies and provider bugs
+     fall through to the next provider), an overall deadline (LLM_TOTAL_TIMEOUT_S)
+     bounds the worst case, and a per-provider circuit breaker
+     (LLM_BREAKER_THRESHOLD / LLM_BREAKER_COOLDOWN_S) skips a backend that keeps failing.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
+import math
 import os
 import random
 import re
 import socket
 import time
+import weakref
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import requests
 
@@ -129,6 +137,8 @@ _DEFAULT_PROMPT_BUDGET: dict[str, int] = {
     "grok":   400_000,
 }
 _RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504, 529})
+# Response-shape errors from a provider that answered with something unexpected.
+_MALFORMED = (ValueError, KeyError, IndexError, TypeError, AttributeError)
 
 # Unix sockets for Docker Model Runner (auto-discovered)
 _DOCKER_SOCKETS: list[str] = [
@@ -212,12 +222,34 @@ def get_state() -> dict[str, object]:
     }
 
 
+_LOCAL_HOST_SUFFIXES = (".local", ".localdomain", ".internal", ".lan", ".home.arpa", ".docker")
+
+
+def _host_is_local(url: str) -> bool:
+    """True when ``url`` stays on this host / private network. Literal IPs are judged by
+    address; names are local when single-label (compose service), ``localhost``, a
+    well-known private suffix, or listed in LLM_LOCAL_HOSTS. Other FQDNs are reported as
+    remote because that cannot be verified without resolving them."""
+    host = (urlparse(url if "://" in url else f"//{url}").hostname or "").lower().rstrip(".")
+    if not host:
+        return True
+    try:
+        return not ipaddress.ip_address(host.split("%")[0]).is_global
+    except ValueError:
+        pass
+    trusted = {h.strip().lower() for h in os.environ.get("LLM_LOCAL_HOSTS", "").split(",") if h.strip()}
+    return (host in trusted or host == "localhost" or "." not in host
+            or host.endswith(_LOCAL_HOST_SUFFIXES))
+
+
 def egress_policy() -> dict[str, object]:
     """Where prompts may go, for the dashboard. Cheap: no provider probing.
 
     ``mode`` is ``local-only`` (local runtime, no cloud fallback),
-    ``cloud-fallback`` (local first, cloud allowed when it fails) or
-    ``cloud`` (a cloud provider is selected).
+    ``cloud-fallback`` (local first, cloud allowed when it fails),
+    ``cloud`` (a cloud provider is selected) or ``remote-host`` (no cloud API,
+    but a "local" provider URL points at a public / off-host address; see
+    ``remote_hosts``).
     """
     _sync_shared_state()
     provider = str(_state["provider"])
@@ -228,10 +260,16 @@ def egress_policy() -> dict[str, object]:
         mode = "cloud-fallback"
     else:
         mode = "local-only"
+    # A "local" runtime on a public / off-host address still sends prompts out.
+    remote_hosts = [name for name in order if name in _LOCAL_PROVIDERS
+                    and not _host_is_local(str(_state["ollama_url" if name == "ollama" else "local_url"]))]
+    if mode == "local-only" and remote_hosts:
+        mode = "remote-host"
     return {
         "provider": provider,
         "enabled": bool(_state["enabled"]),
         "mode": mode,
+        "remote_hosts": remote_hosts,
         "order": order,
         "allow_cloud_fallback": bool(_state.get("allow_cloud_fallback")),
         "tokenize_hostnames": _state.get("tokenize_hostnames", "auto"),
@@ -410,6 +448,81 @@ def _tokenize_hosts_for(provider: str) -> bool:
     return provider in _CLOUD_PROVIDERS
 
 
+# ── Deadline + circuit breaker ───────────────────────────────────────────────
+
+_clock: Callable[[], float] = time.monotonic  # seam for tests
+_DEADLINE: ContextVar[float | None] = ContextVar("netlog_llm_deadline", default=None)
+
+
+def _total_timeout() -> float:
+    """Overall seconds one ``query()`` may spend across providers and retries (0 = unlimited)."""
+    return _env_float("LLM_TOTAL_TIMEOUT_S", 180.0)
+
+
+def _remaining() -> float | None:
+    deadline = _DEADLINE.get()
+    return None if deadline is None else deadline - _clock()
+
+
+def _out_of_time() -> bool:
+    left = _remaining()
+    return left is not None and left <= 0
+
+
+def _http_timeout() -> int:
+    """Per-request timeout: the configured one, capped by what is left of the query budget."""
+    base = int(_state["timeout"])
+    left = _remaining()
+    return base if left is None else max(1, min(base, math.ceil(left)))
+
+
+@dataclass
+class _Breaker:
+    fails: int = 0
+    open_until: float = 0.0
+    cause: str = ""
+
+
+# Keyed by the provider callable (not its name), so swapping an implementation starts healthy.
+_breakers: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _breaker_for(fn: Callable) -> _Breaker:
+    try:
+        return _breakers.setdefault(fn, _Breaker())
+    except TypeError:  # not weak-referenceable: no breaker
+        return _Breaker()
+
+
+def reset_circuit_breakers() -> None:
+    """Close every circuit (operators / tests)."""
+    _breakers.clear()
+
+
+def _breaker_wait(fn: Callable) -> tuple[float, _Breaker]:
+    """Seconds until ``fn`` may be tried again (0 = closed or half-open)."""
+    b = _breaker_for(fn)
+    return max(0.0, b.open_until - _clock()), b
+
+
+def _breaker_record(fn: Callable, name: str, ok: bool) -> None:
+    threshold = _env_int("LLM_BREAKER_THRESHOLD", 3)
+    b = _breaker_for(fn)
+    if ok or not threshold:
+        b.fails, b.open_until = 0, 0.0
+        return
+    b.fails += 1
+    errors = _state.get("last_errors")
+    last = errors.get(name, "") if isinstance(errors, dict) else ""
+    if last and not last.startswith("circuit open"):
+        b.cause = last
+    if b.fails >= threshold:  # also re-opens at once when a half-open trial fails
+        cooldown = _env_float("LLM_BREAKER_COOLDOWN_S", 60.0)
+        b.open_until = _clock() + cooldown
+        logger.warning("LLM provider %s failed %d times in a row; skipping it for %.0fs",
+                       name, b.fails, cooldown)
+
+
 def _provider_fn(name: str, configured: str) -> Callable[[str, str, int], str | None]:
     # claude-only resolves the module attribute so it stays patchable.
     if configured == "claude-only":
@@ -420,6 +533,9 @@ def _provider_fn(name: str, configured: str) -> Callable[[str, str, int], str | 
 def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | None:
     """The LLM gateway. Returns cleaned, detokenized text or None on full failure.
 
+    Never raises: a malformed provider reply or a provider bug counts as that
+    provider failing and the chain moves on.
+
     Fallback chain (cloud entries only when ALLOW_CLOUD_FALLBACK=true, or
     when that cloud provider is the explicitly selected one):
       ollama   → docker-runner → [claude] → [grok]
@@ -428,6 +544,18 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | 
       grok     → ollama        → docker-runner → [claude]
       claude-only → claude only (no fallback)
     """
+    total = _total_timeout()
+    token = _DEADLINE.set(_clock() + total if total > 0 else None)
+    try:
+        return _query(system_prompt, user_prompt, max_tokens)
+    except Exception as exc:  # the gateway contract is "text or None", never an exception
+        logger.warning("LLM gateway error: %s: %s", type(exc).__name__, exc)
+        return None
+    finally:
+        _DEADLINE.reset(token)
+
+
+def _query(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
     _sync_shared_state()
     if not _state["enabled"]:
         return None
@@ -441,6 +569,16 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | 
     system = (system_prompt or "") + _INJECTION_GUARD
 
     for name in provider_order(configured):
+        if _out_of_time():
+            _record_error(name, "skipped: LLM_TOTAL_TIMEOUT_S deadline exceeded")
+            logger.warning("LLM query deadline exceeded before provider %s", name)
+            break
+        fn = _provider_fn(name, configured)
+        wait, breaker = _breaker_wait(fn)
+        if wait > 0:
+            _record_error(name, f"circuit open: skipped for another {wait:.0f}s after "
+                                f"{breaker.fails} consecutive failures (last: {breaker.cause or 'no response'})")
+            continue
         # Gate 2: reversible tokenization (shared vault → stable numbering).
         prompt = vault.tokenize(safe_user, hosts=hints.hosts if _tokenize_hosts_for(name) else ())
         # Gate 3: per-provider budget.
@@ -456,8 +594,17 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | 
             "truncated": truncated,
             "ok": False,
         }
-        text = _provider_fn(name, configured)(system, prompt, max_tokens)
-        _audit_call(name, prompt, max_tokens, redactions, len(vault), bool(text))
+        try:
+            text = fn(system, prompt, max_tokens)
+        except Exception as exc:  # a buggy provider must not take the chain down
+            logger.warning("LLM provider %s raised %s", name, type(exc).__name__)
+            _record_error(name, f"Unexpected {type(exc).__name__}: {str(exc)[:150]}")
+            text = None
+        _breaker_record(fn, name, bool(text))
+        try:
+            _audit_call(name, prompt, max_tokens, redactions, len(vault), bool(text))
+        except Exception as exc:  # auditing is best-effort here; never lose the answer
+            logger.warning("LLM audit failed: %s", type(exc).__name__)
         if text:
             _state["last_call"]["ok"] = True
             return vault.detokenize(text)
@@ -507,6 +654,9 @@ def _post_with_retry(provider: str, url: str, **kwargs):
         if r.status_code not in _RETRYABLE_STATUS or attempt >= retries:
             return r
         delay = _retry_delay(r, attempt)
+        left = _remaining()
+        if left is not None and delay >= left:  # the backoff would outlive the query budget
+            return r
         _record_error(provider, f"HTTP {r.status_code} — retry {attempt + 1}/{retries} in {delay:.1f}s")
         _sleep(delay)
         attempt += 1
@@ -533,12 +683,14 @@ def _query_ollama(system_prompt: str, user_prompt: str, max_tokens: int) -> str 
     if num_ctx:
         payload["options"]["num_ctx"] = num_ctx
     try:
-        r = _post_with_retry("ollama", url, json=payload, timeout=int(_state["timeout"]))
+        r = _post_with_retry("ollama", url, json=payload, timeout=_http_timeout())
         if r.status_code != 200:
             _record_error("ollama", f"HTTP {r.status_code}: {r.text[:200]}")
             return None
-        msg = r.json().get("message", {})
-        text = (msg.get("content") or "").strip()
+        data = r.json()
+        msg = data.get("message") if isinstance(data, dict) else None
+        content = msg.get("content") if isinstance(msg, dict) else None
+        text = content.strip() if isinstance(content, str) else ""
         if text:
             _clear_error("ollama")
             return _clean(text)
@@ -549,6 +701,9 @@ def _query_ollama(system_prompt: str, user_prompt: str, max_tokens: int) -> str 
         return None
     except requests.RequestException as e:
         _record_error("ollama", f"Connection error: {e}")
+        return None
+    except _MALFORMED as e:
+        _record_error("ollama", f"Malformed response from Ollama: {type(e).__name__}")
         return None
 
 
@@ -582,12 +737,12 @@ def _query_claude(system_prompt: str, user_prompt: str, max_tokens: int) -> str 
                 }],
                 "messages": [{"role": "user", "content": user_prompt}],
             },
-            timeout=int(_state["timeout"]),
+            timeout=_http_timeout(),
         )
         if r.status_code != 200:
             _record_error("claude", f"HTTP {r.status_code}: {r.text[:200]}")
             return None
-        text = r.json()["content"][0].get("text", "").strip()
+        text = _extract_claude_text(r.json())
         if text:
             _clear_error("claude")
             return _clean(text)
@@ -599,6 +754,20 @@ def _query_claude(system_prompt: str, user_prompt: str, max_tokens: int) -> str 
     except requests.RequestException as e:
         _record_error("claude", f"Connection error: {e}")
         return None
+    except _MALFORMED as e:
+        _record_error("claude", f"Malformed response from Claude: {type(e).__name__}")
+        return None
+
+
+def _extract_claude_text(data: object) -> str:
+    """Text of a Messages API reply: all ``text`` blocks (thinking / tool blocks skipped).
+    Anything unexpected yields "" rather than an exception."""
+    blocks = data.get("content") if isinstance(data, dict) else None
+    if not isinstance(blocks, list):
+        return ""
+    parts = [b["text"] for b in blocks
+             if isinstance(b, dict) and b.get("type", "text") == "text" and isinstance(b.get("text"), str)]
+    return "".join(parts).strip()
 
 
 # ── xAI Grok (OpenAI-compatible) ─────────────────────────────────────────────
@@ -629,7 +798,7 @@ def _query_grok(system_prompt: str, user_prompt: str, max_tokens: int) -> str | 
                 "content-type": "application/json",
             },
             json=payload,
-            timeout=int(_state["timeout"]),
+            timeout=_http_timeout(),
         )
         if r.status_code != 200:
             _record_error("grok", f"HTTP {r.status_code}: {r.text[:200]}")
@@ -645,6 +814,9 @@ def _query_grok(system_prompt: str, user_prompt: str, max_tokens: int) -> str | 
         return None
     except requests.RequestException as e:
         _record_error("grok", f"Connection error: {e}")
+        return None
+    except _MALFORMED as e:
+        _record_error("grok", f"Malformed response from Grok: {type(e).__name__}")
         return None
 
 
@@ -668,18 +840,22 @@ def _query_docker_runner(system_prompt: str, user_prompt: str, max_tokens: int) 
     if base:
         for path in api_paths:
             try:
-                r = _SESSION.post(f"{base}{path}", json=payload, timeout=int(_state["timeout"]))
+                r = _SESSION.post(f"{base}{path}", json=payload, timeout=_http_timeout())
                 if r.status_code == 200:
                     text = _extract_openai_text(r.json())
                     if text:
                         return text
-            except requests.RequestException:
-                continue
+            except (requests.RequestException, *_MALFORMED):
+                pass
+            if _out_of_time():
+                return None
 
     for sock_path in _DOCKER_SOCKETS:
         if not os.path.exists(sock_path):
             continue
         for path in api_paths:
+            if _out_of_time():
+                return None
             text = _query_unix_socket(sock_path, path, payload)
             if text:
                 return text
@@ -697,7 +873,7 @@ def _query_unix_socket(sock_path: str, api_path: str, payload: dict) -> str | No
     ).encode() + body
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(int(_state["timeout"]))
+        s.settimeout(_http_timeout())
         s.connect(sock_path)
         s.sendall(req)
         chunks: list[bytes] = []
@@ -718,16 +894,19 @@ def _query_unix_socket(sock_path: str, api_path: str, payload: dict) -> str | No
             )
         data = json.loads(body_bytes.strip())
         return _extract_openai_text(data)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, *_MALFORMED):  # JSONDecodeError is a ValueError
         return None
 
 
-def _extract_openai_text(data: dict) -> str | None:
-    choices = data.get("choices")
-    if not choices or not isinstance(choices, list):
+def _extract_openai_text(data: object) -> str | None:
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if not choices or not isinstance(choices, list) or not isinstance(choices[0], dict):
         return None
-    msg = choices[0].get("message", {})
-    raw = (msg.get("content") or msg.get("reasoning_content") or "").strip()
+    msg = choices[0].get("message")
+    if not isinstance(msg, dict):
+        return None
+    raw = msg.get("content") or msg.get("reasoning_content") or ""
+    raw = raw.strip() if isinstance(raw, str) else ""
     return _clean(raw) if raw else None
 
 

@@ -20,7 +20,10 @@ from ai_log_analyzer.sources.base import (
     SourceError,
     SourceTimeoutError,
     build_auth,
+    guarded_session,
     registry,
+    source_allow_private,
+    validate_host_filter,
 )
 
 log = logging.getLogger(__name__)
@@ -43,8 +46,8 @@ class KibanaSource:
         self.config = config
         self.name = config.id
         self.index_pattern = config.extra.get("index_pattern", "*")
-        self.session = requests.Session()
-        self.session.verify = config.verify_tls
+        self.session = guarded_session(
+            verify=config.verify_tls, allow_private=source_allow_private(config))
         headers, cookies, basic = build_auth(
             config,
             token_header="Authorization",
@@ -84,6 +87,7 @@ class KibanaSource:
               host_filter: str = "") -> Iterable[LogEvent]:
         # Cap limit defensively — single page max, callers chunk if they need more.
         page_size = min(int(limit), 10_000)
+        host_filter = validate_host_filter(host_filter)
         query = self._build_query(since_seconds, host_filter, page_size)
         url = f"{self.config.url.rstrip('/')}/{self.index_pattern}/_search"
         try:
@@ -156,5 +160,5 @@ def _doc_to_event(src: dict) -> LogEvent | None:
 
 
 # Self-register on import.
-registry.register("kibana", KibanaSource.from_config)
-registry.register("elasticsearch", KibanaSource.from_config)  # alias
+registry.register("kibana", KibanaSource.from_config, outbound=True)
+registry.register("elasticsearch", KibanaSource.from_config, outbound=True)  # alias

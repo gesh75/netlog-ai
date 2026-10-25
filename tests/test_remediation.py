@@ -47,7 +47,7 @@ def test_arista_eos_uses_configure_session_commit_timer() -> None:
     )
 
     assert any(cmd.startswith("configure session REM_") for cmd in plan.config_commands)
-    assert "commit timer 4" in plan.commit_with_timer_commands
+    assert "commit timer 00:04:00" in plan.commit_with_timer_commands
     assert "abort" in plan.manual_rollback_commands
 
 

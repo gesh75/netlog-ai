@@ -124,6 +124,7 @@ class TemplateMiner:
         self._clusters: OrderedDict[int, TemplateCluster] = OrderedDict()
         self._groups: dict[tuple[int, str], list[int]] = {}
         self._next_id = 1
+        self._total = 0   # every line fed in, surviving LRU eviction of its cluster
 
     def add(self, message: str, hostname: str = "") -> TemplateCluster:
         """Feed one raw message; returns the cluster it joined or created."""
@@ -165,6 +166,7 @@ class TemplateMiner:
             self._evict_if_needed()
 
         cluster.count += 1
+        self._total += 1
         if hostname:
             cluster.hosts.add(hostname)
         if cluster.severity_hint == "info" and _ERRORISH_RE.search(masked):
@@ -198,7 +200,7 @@ class TemplateMiner:
         """JSON-ready summary for AnalysisResult / API / MCP."""
         top = self.top(top_n)
         return {
-            "total_unclassified": sum(c.count for c in self._clusters.values()),
+            "total_unclassified": self._total,
             "template_count": self.cluster_count,
             "new_template_count": sum(1 for c in self._clusters.values() if c.is_new),
             "top_templates": [c.to_dict() for c in top],

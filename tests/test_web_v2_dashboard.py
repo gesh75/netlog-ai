@@ -82,9 +82,9 @@ def test_overview_includes_a_running_worker(client, state):
 
 
 def test_overview_requires_a_token_when_rbac_is_on(client, monkeypatch):
-    monkeypatch.setenv("AI_LOG_ANALYZER_VIEWER_TOKENS", "vera:v-tok")
+    monkeypatch.setenv("AI_LOG_ANALYZER_VIEWER_TOKENS", "vera:v-tok-0123456789abcdef")
     assert client.get("/api/status/overview").status_code == 401
-    body = client.get("/api/status/overview", headers={"Authorization": "Bearer v-tok"}).get_json()
+    body = client.get("/api/status/overview", headers={"Authorization": "Bearer v-tok-0123456789abcdef"}).get_json()
     assert body["identity"] == {"name": "vera", "role": "viewer", "auth": "rbac"}
 
 

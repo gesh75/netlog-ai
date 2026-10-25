@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import re
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -55,6 +56,8 @@ def _tokens(text: str) -> set[str]:
 def _parse_stamp(stamp: str) -> datetime | None:
     if not stamp:
         return None
+    if stamp[-1:] in ("Z", "z"):   # fromisoformat only accepts a trailing Z from Python 3.11
+        stamp = stamp[:-1] + "+00:00"
     try:
         parsed = datetime.fromisoformat(stamp)
     except ValueError:
@@ -281,29 +284,62 @@ class IncidentStore:
 
 
 class SqliteIncidentStore(IncidentStore):
-    """Incident memory on the shared SQLite WAL database (multi-worker safe)."""
+    """Incident memory on the shared SQLite WAL database (multi-worker safe).
+
+    The loaded journal is cached and revalidated against a cheap change marker on every read, so
+    other workers' appends and resolutions show up without re-reading up to 5000 rows each time.
+    """
 
     def __init__(self, db: Any) -> None:  # db: state_store.StateDB
         self.db = db
         self.path = db.path
-        self._records = []
+        self._recs: list[dict] = []
+        self._version: tuple[int, int, int] | None = None
         self._load()
 
+    @property
+    def _records(self) -> list[dict]:  # type: ignore[override]
+        self._refresh()
+        return self._recs
+
+    @_records.setter
+    def _records(self, value: list[dict]) -> None:
+        self._recs = value
+
     def _load(self) -> None:
-        self._records = self.db.incidents_all(_MAX_RECORDS)
+        version = self.db.incidents_version()   # before the rows: a write in between is caught next read
+        self._recs = self.db.incidents_all(_MAX_RECORDS)
+        self._version = version
+
+    def _refresh(self) -> None:
+        try:
+            if self.db.incidents_version() != self._version:
+                self._load()
+        except Exception:   # a locked or unreadable DB serves the cached journal
+            logger.debug("incident store refresh failed for %s", self.path, exc_info=True)
 
     def __len__(self) -> int:
         return self.db.incidents_count()
 
     def _persist(self, new: list[dict]) -> int:
         """Write through to SQLite. Insert errors are not swallowed — that
-        is how concurrent workers lost rows. ``_load`` is best-effort: the
+        is how concurrent workers lost rows. The reload is best-effort: the
         append already committed, so a failed SELECT must not look like a
-        lost write.
+        lost write. When nothing else changed since the last load, only the
+        new rows (with their ids, used as citation ids) are read back.
         """
+        try:
+            fresh = self.db.incidents_version() == self._version
+        except Exception:
+            fresh = False
         self.db.incidents_append(new, cap=_MAX_RECORDS)
         try:
-            self._load()  # pick up row ids (citation ids) and other workers' rows
+            last_id = int(self._recs[-1].get("id") or 0) if self._recs else 0
+            if fresh and (last_id or not self._recs):
+                self._recs = (self._recs + self.db.incidents_since(last_id))[-_MAX_RECORDS:]
+                self._version = self.db.incidents_version()
+            else:
+                self._load()  # pick up row ids (citation ids) and other workers' rows
         except Exception:
             logger.exception("could not reload incident store from %s after persist", self.path)
         return len(new)
@@ -322,6 +358,20 @@ class SqliteIncidentStore(IncidentStore):
 _SQLITE_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 
 
+_STORE_CACHE: dict[str, tuple[Any, SqliteIncidentStore]] = {}
+_STORE_LOCK = threading.Lock()
+
+
+def _sqlite_store(db: Any) -> SqliteIncidentStore:
+    """One store per database: building one reads the whole journal (~100 ms at the 5000 cap)."""
+    key = str(db.path)
+    with _STORE_LOCK:
+        hit = _STORE_CACHE.get(key)
+        if hit is None or hit[0] is not db:
+            hit = _STORE_CACHE[key] = (db, SqliteIncidentStore(db))
+        return hit[1]
+
+
 def get_store() -> IncidentStore | None:
     """Opt-in via AI_LOG_ANALYZER_INCIDENT_STORE (JSONL or *.db) or the shared
     AI_LOG_ANALYZER_STATE_DB; None when neither is set."""
@@ -330,10 +380,10 @@ def get_store() -> IncidentStore | None:
     path = os.environ.get("AI_LOG_ANALYZER_INCIDENT_STORE", "").strip()
     if path:
         if path.lower().endswith(_SQLITE_SUFFIXES):
-            return SqliteIncidentStore(open_db(path))
+            return _sqlite_store(open_db(path))
         return IncidentStore(path)
     db = get_state_db()
-    return SqliteIncidentStore(db) if db is not None else None
+    return _sqlite_store(db) if db is not None else None
 
 
 def annotate_and_record(result_dict_items: list[dict], generated_at: str) -> None:

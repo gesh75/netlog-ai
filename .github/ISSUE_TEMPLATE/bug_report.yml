@@ -1,0 +1,48 @@
+name: Bug report
+description: Something is broken or produces wrong analysis output
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security issue?** Do not file it here. Use the private process in
+        [SECURITY.md](https://github.com/gesh75/netlog-ai/security/policy).
+        Also never paste real configs, credentials or customer logs; use synthetic data.
+  - type: input
+    id: version
+    attributes:
+      label: netlog-ai version
+      description: "Output of `pip show netlog-ai`"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version and OS
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How are you running it?
+      options: ["pip install", "Docker / docker-compose", "From source (editable)", "Other"]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal synthetic input and the exact command or request.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output or traceback (sanitized)
+      render: text

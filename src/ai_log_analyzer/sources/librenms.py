@@ -8,6 +8,7 @@ Reference: https://docs.librenms.org/API/Logs/
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
@@ -18,7 +19,10 @@ from ai_log_analyzer.sources.base import (
     SourceConfig,
     SourceError,
     SourceTimeoutError,
+    guarded_session,
     registry,
+    source_allow_private,
+    validate_host_filter,
 )
 
 log = logging.getLogger(__name__)
@@ -31,8 +35,8 @@ class LibreNMSSource:
     def __init__(self, config: SourceConfig) -> None:
         self.config = config
         self.name = config.id
-        self.session = requests.Session()
-        self.session.verify = config.verify_tls
+        self.session = guarded_session(
+            verify=config.verify_tls, allow_private=source_allow_private(config))
         if not config.api_token:
             raise SourceError("LibreNMS requires api_token")
         self.session.headers["X-Auth-Token"] = config.api_token
@@ -61,8 +65,9 @@ class LibreNMSSource:
             "%Y-%m-%d %H:%M:%S"
         )
         path = "/api/v0/logs/eventlog"
+        host_filter = validate_host_filter(host_filter)
         if host_filter:
-            path += f"/{host_filter}"
+            path += "/" + urllib.parse.quote(host_filter, safe="")
         params = {"start": "0", "limit": str(min(int(limit), 1_000)), "from": start_iso}
         url = f"{self.config.url.rstrip('/')}{path}"
         try:
@@ -90,4 +95,4 @@ class LibreNMSSource:
         self.session.close()
 
 
-registry.register("librenms", LibreNMSSource.from_config)
+registry.register("librenms", LibreNMSSource.from_config, outbound=True)

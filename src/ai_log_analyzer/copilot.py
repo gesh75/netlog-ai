@@ -30,6 +30,12 @@ Style:
   `<hostname> L12-L20`; cite numbered EVIDENCE sources as [S1]. Never invent line numbers."""
 
 
+def _label(value: object, default: str) -> str:
+    """Hostname/platform for the prompt header (outside the untrusted fence): one line, no
+    control characters or angle brackets, bounded length."""
+    return re.sub(r"[\x00-\x1f\x7f<>]+", " ", str(value or default)).strip()[:80] or default
+
+
 def _numbered(text: str) -> str:
     return "\n".join(f"L{i}| {line}" for i, line in enumerate(text.splitlines(), 1))
 
@@ -70,8 +76,8 @@ def ask(question: str, context_blocks: list[dict], max_chars_per_device: int = 8
     total_redactions = 0
     line_counts: dict[str, int] = {}
     for cb in context_blocks:
-        host = cb.get("hostname", "device")
-        plat = cb.get("platform", "unknown")
+        host = _label(cb.get("hostname"), "device")
+        plat = _label(cb.get("platform"), "unknown")
         raw_cfg = cb.get("config_text") or ""
         safe_cfg, n = sanitize(raw_cfg, mask_pii=True)
         total_redactions += n

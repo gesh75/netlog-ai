@@ -87,7 +87,7 @@ def test_servicenow_rejects_ssrf_targets(url: str) -> None:
 def test_fetch_normalizes_string_and_display_value(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 
-    def fake_open(req, timeout=5, context=None):  # noqa: ANN001
+    def fake_open(req, timeout=5, context=None, **_kw):  # noqa: ANN001
         seen.append(req.full_url)
         if "em_alert" in req.full_url:
             return _Body({"result": [{
@@ -103,7 +103,7 @@ def test_fetch_normalizes_string_and_display_value(monkeypatch: pytest.MonkeyPat
             "sys_created_on": "2026-10-16 14:05:00",
         }]})
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_open)
+    monkeypatch.setattr("ai_log_analyzer.sources.outbound.safe_urlopen", fake_open)
     alert = ServiceNowSource(_cfg(table="em_alert"))
     events = list(alert.fetch(since_seconds=3600, limit=10))
     assert len(events) == 1
@@ -166,7 +166,7 @@ def test_sync_dry_run_and_idempotent_upsert(monkeypatch: pytest.MonkeyPatch) -> 
     calls: list[tuple[str, str]] = []
     state = {"exists": False}
 
-    def fake_open(req, timeout=15, context=None):  # noqa: ANN001
+    def fake_open(req, timeout=15, context=None, **_kw):  # noqa: ANN001
         calls.append((req.method, req.full_url))
         if req.method == "GET":
             if state["exists"]:
@@ -176,7 +176,7 @@ def test_sync_dry_run_and_idempotent_upsert(monkeypatch: pytest.MonkeyPatch) -> 
             return _Body({"result": {"sys_id": "sid-2", "number": "INC0010002"}})
         return _Body({"result": {"sys_id": "sid-1", "number": "INC0010001"}})
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_open)
+    monkeypatch.setattr("ai_log_analyzer.sources.outbound.safe_urlopen", fake_open)
     created = preview.sync_incident({"summary": "bgp down", "devices": ["leaf01"]}, dry_run=False)
     assert created.action == "created"
     assert created.incident_number == "INC0010002"

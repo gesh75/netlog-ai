@@ -207,7 +207,7 @@ def to_html_site(result: dict, mermaid_diagram: str | None = None) -> str:
         diagram_html = f"""
 <h2>Topology Diagram</h2>
 <div class="mermaid">{html.escape(mermaid_diagram)}</div>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js" crossorigin="anonymous"></script>
 <script>mermaid.initialize({{startOnLoad:true,theme:'dark'}});</script>
 """
 

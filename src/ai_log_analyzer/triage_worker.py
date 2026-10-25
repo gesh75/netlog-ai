@@ -30,7 +30,22 @@ Ticket-storm controls:
 * **Self-healed:** a group whose entities already recovered never opens a
   ticket.
 * **Global rate limit** (``max_tickets_per_hour``): excess sends are deferred
-  to a later tick, not dropped.
+  to a later tick, not dropped. Send attempts (failed ones too) are kept in the
+  state DB, so a restart does not reset the limiter; critical incidents are
+  sent first.
+
+Reliability:
+
+* A tick drains the spool until it is empty or ``tick_budget_s`` elapses (then
+  it re-polls immediately), so throughput is not capped at ``batch / poll_s``.
+  Rows the spool pruned before this worker read them are counted (``gap_rows``).
+* Cursors are committed after the tick's deliveries, and an undelivered
+  incident (sink down, rate-limited) is persisted as a pending delivery, so a
+  crash or lease takeover neither skips nor forgets it. A new active worker
+  rebuilds its sliding window from the spool.
+* Each sink has its own retry state (exponential backoff with jitter and a
+  circuit breaker); a partial failure retries only the sinks that failed. The
+  lease is checked between candidates and the tick aborts if it was lost.
 
 Only one worker processes the spool at a time: a lease in the state DB
 elects the active worker, so every Gunicorn worker can run the loop and the
@@ -43,6 +58,7 @@ import dataclasses
 import hashlib
 import logging
 import os
+import random
 import socket
 import threading
 import time
@@ -51,11 +67,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ai_log_analyzer import audit
+from ai_log_analyzer import _shutdown, audit
 from ai_log_analyzer.classifier import ClassifiedEvent, iter_classify
 from ai_log_analyzer.itsm import IncidentEnrichmentPayload
 from ai_log_analyzer.parsers import registry as parser_registry
 from ai_log_analyzer.sanitize import sanitize
+from ai_log_analyzer.state_store import LeaseLost
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +107,12 @@ class TriageConfig:
     use_llm: bool = False
     sources: tuple[str, ...] = ()
     lease_ttl_s: float = 60.0
+    tick_budget_s: float = 10.0          # max time one tick spends draining the spool before re-polling
+    sink_backoff_s: float = 30.0         # first retry delay of a failing sink (doubles, with jitter)
+    sink_backoff_max_s: float = 900.0
+    sink_breaker_threshold: int = 5      # consecutive failures that open a sink's circuit breaker
+    pending_ttl_s: float = 86_400.0      # give up on an undeliverable incident after this long
+    retention_days: float = 30.0         # prune resolved ticket rows older than this (0 = keep)
 
     @classmethod
     def from_env(cls) -> TriageConfig:
@@ -105,6 +128,8 @@ class TriageConfig:
             use_llm=(e("AI_LOG_ANALYZER_TRIAGE_USE_LLM", "") or "").strip().lower() in ("1", "true", "yes"),
             sources=tuple(s.strip() for s in (e("AI_LOG_ANALYZER_TRIAGE_SOURCES", "") or "").split(",")
                           if s.strip()),
+            tick_budget_s=_env_float("AI_LOG_ANALYZER_TRIAGE_TICK_BUDGET_S", 10.0),
+            retention_days=_env_float("AI_LOG_ANALYZER_TRIAGE_RETENTION_DAYS", 30.0),
         )
 
 
@@ -172,8 +197,10 @@ class WebhookSink:
             data: dict[str, Any] = {"text": safe}
         else:
             data = {"event": "netlog.incident", "fingerprint": payload.fingerprint, "title": title,
-                    "site": payload.site, "devices": list(payload.affected_devices), "markdown": body}
-        r = requests.post(self.url, json=data, timeout=self.timeout_s)
+                    "site": payload.site, "devices": list(payload.affected_devices), "markdown": body,
+                    "idempotency_key": payload.fingerprint}
+        r = requests.post(self.url, json=data, timeout=self.timeout_s,
+                          headers={"Idempotency-Key": payload.fingerprint})
         if r.status_code >= 300:
             raise RuntimeError(f"webhook answered HTTP {r.status_code}")
         return {"action": "posted", "ref": payload.fingerprint}
@@ -185,7 +212,13 @@ class _ItsmSink:
         self.client = client
 
     def upsert_incident(self, payload: IncidentEnrichmentPayload) -> dict[str, Any]:
-        res = self.client.upsert_incident(payload)
+        # Same redaction the webhook sink applies: tickets leave the host. The fingerprint
+        # (site, device, layer) is unchanged, so the clients keep correlating on it.
+        clean = dataclasses.replace(
+            payload, summary_title=sanitize(payload.summary_title, mask_pii=True)[0],
+            rca_rationale=sanitize(payload.rca_rationale, mask_pii=True)[0],
+            attachments={k: sanitize(v, mask_pii=True)[0] for k, v in payload.attachments.items()})
+        res = self.client.upsert_incident(clean)
         return {**res, "ref": res.get("issue_key") or res.get("number") or payload.fingerprint}
 
 
@@ -231,6 +264,29 @@ def sinks_from_env() -> list[Any]:
 class _Windowed:
     received_at: float
     event: ClassifiedEvent
+    dups: int = 0   # exact repeats the dedup folded into this entry
+
+
+@dataclass
+class _Seen:
+    """Dedup marker for one (host, message): when it was first kept and the window entry it became."""
+    first_at: float
+    windowed: _Windowed | None = None
+    extra: int = 0
+    last_at: float = 0.0
+
+    def bump(self, at: float) -> None:
+        """A duplicate was dropped: keep the incident's window entry fresh and counted."""
+        if self.windowed is not None:
+            self.windowed.dups += 1
+            self.windowed.received_at = max(self.windowed.received_at, at)
+        else:
+            self.extra += 1
+            self.last_at = max(self.last_at, at)
+
+
+class _LeaseGone(Exception):
+    """The triage lease was taken over mid-tick."""
 
 
 class StreamingTriageWorker:
@@ -250,9 +306,17 @@ class StreamingTriageWorker:
         self.clock = clock
         self.owner = owner or f"{socket.gethostname()}:{os.getpid()}:{id(self):x}"
         self._window: deque[_Windowed] = deque()
-        self._recent: dict[tuple[str, str], float] = {}
-        self._send_times: deque[float] = deque()
-        self._retry = False   # a deferred or failed send re-evaluates next tick without new events
+        self._recent: dict[tuple[str, str], _Seen] = {}
+        self._send_times: deque[float] = deque()      # persisted in kv so a restart keeps the limiter
+        self._cursor_pending: dict[str, int] = {}     # read this tick, committed after its deliveries
+        self._gap_pending: dict[str, int] = {}
+        self._warmed: set[str] = set()
+        self._state_loaded = False
+        self._sink_state: dict[str, dict[str, float]] = {}
+        self._last_prune = 0.0
+        self._last_renew = 0.0
+        self._explicit_now: float | None = None
+        self._rand = random.random
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -268,43 +332,118 @@ class StreamingTriageWorker:
     def _sources(self) -> list[str]:
         return list(self.config.sources) or self.db.spool_sources()
 
+    def _reset_active_state(self) -> None:
+        """Forget what only a lease holder knows; the next active tick reloads it from the DB."""
+        self._window.clear()
+        self._recent.clear()
+        self._cursor_pending.clear()
+        self._gap_pending.clear()
+        self._warmed.clear()
+        self._state_loaded = False
+
+    def _load_state(self) -> None:
+        if self._state_loaded:
+            return
+        times = self.db.kv_get_all("triage").get("send_times") or []
+        self._send_times = deque(sorted(float(t) for t in times))
+        self._state_loaded = True
+
+    def _commit(self) -> None:
+        """Persist read positions, only after the tick's deliveries were decided."""
+        for source, cursor in self._cursor_pending.items():
+            self.db.kv_set("triage", f"cursor:{source}", cursor)
+        for source, gap in self._gap_pending.items():
+            self.db.kv_set("triage", f"gapseen:{source}", gap)
+        self._cursor_pending.clear()
+        self._gap_pending.clear()
+
     # ── ingest ──────────────────────────────────────────────────────────────
-    def _ingest(self, now: float) -> int:
-        cursors = self._cursors()
-        horizon = now - self.config.window_s
-        fresh = 0
-        for source in self._sources():
-            rows = self.db.spool_read(source, cursors.get(source, 0), self.config.batch)
-            if not rows:
+    def _process(self, rows: list[tuple[int, float, str, str]], source: str, horizon: float) -> int:
+        """Parse, dedup and classify spool rows into the window; returns entries added."""
+        events, stamps, seens = [], [], []
+        dedup_s = self.config.dedup_s
+        for _id, received_at, sender, line in rows:
+            if received_at < horizon:
+                continue  # backlog older than the window: nothing left to triage
+            ev = parser_registry.parse(line, default_host=sender or source)
+            if ev is None:
                 continue
-            events, stamps = [], []
-            for _id, received_at, sender, line in rows:
-                if received_at < horizon:
-                    continue  # backlog older than the window: nothing left to triage
-                ev = parser_registry.parse(line, default_host=sender or source)
-                if ev is None:
-                    continue
-                if sender:
-                    ev = dataclasses.replace(ev, attrs={**ev.attrs, "sender_ip": sender})
-                key = (ev.hostname, ev.message)
-                last = self._recent.get(key)
-                self._recent[key] = received_at
-                if last is not None and received_at - last <= self.config.dedup_s:
-                    self.totals["duplicates_dropped"] += 1
-                    continue
-                events.append(ev)
-                stamps.append(received_at)
-            for received_at, ce in zip(stamps, iter_classify(events)):
-                if ce.severity in ("critical", "high", "medium") or ce.event_type:
-                    self._window.append(_Windowed(received_at, ce))
-                    fresh += 1
-            self.db.kv_set("triage", f"cursor:{source}", int(rows[-1][0]))
-            self.totals["lines_read"] += len(rows)
+            if sender:
+                ev = dataclasses.replace(ev, attrs={**ev.attrs, "sender_ip": sender})
+            key = (ev.hostname, ev.message)
+            seen = self._recent.get(key)
+            # The interval is fixed from the first kept copy: a steady repeat is re-admitted every
+            # dedup_s instead of being swallowed for as long as it keeps repeating.
+            if seen is not None and received_at - seen.first_at <= dedup_s:
+                self.totals["duplicates_dropped"] += 1
+                seen.bump(received_at)
+                continue
+            seen = self._recent[key] = _Seen(received_at)
+            events.append(ev)
+            stamps.append(received_at)
+            seens.append(seen)
+        added = 0
+        for received_at, ce, seen in zip(stamps, iter_classify(events), seens):
+            if ce.severity in ("critical", "high", "medium") or ce.event_type:
+                w = _Windowed(received_at, ce, dups=seen.extra)
+                if seen.extra:
+                    w.received_at = max(w.received_at, seen.last_at)
+                seen.windowed = w
+                self._window.append(w)
+                added += 1
+        return added
+
+    def _warm(self, source: str, cursor: int, horizon: float) -> None:
+        """Rebuild the sliding window after a takeover or restart from rows already committed."""
+        rows = [r for r in self.db.spool_before(source, cursor, self.config.max_window_events)
+                if r[1] >= horizon]
+        if rows:
+            self.totals["window_rebuilt"] += self._process(rows, source, horizon)
+
+    def _ingest(self, now: float, deadline: float) -> tuple[int, bool, int]:
+        """Read the spool until it is drained or ``deadline`` (monotonic) passes.
+
+        Returns (fresh window entries, backlog remains, rows pruned unread since last tick).
+        """
+        state = self.db.kv_get_all("triage")
+        horizon = now - self.config.window_s
+        fresh = gap_rows = 0
+        backlog = False
+        batch = max(1, int(self.config.batch))
+        for source in self._sources():
+            cursor = self._cursor_pending.get(source, int(state.get(f"cursor:{source}", 0)))
+            lost = self.db.spool_gap(source)["lost_unread"]
+            seen_lost = self._gap_pending.get(source, int(state.get(f"gapseen:{source}", 0)))
+            if lost > seen_lost:
+                gap_rows += lost - seen_lost
+                self.totals["gap_rows"] += lost - seen_lost
+                log.warning("triage: %d spool row(s) of %s were pruned before they were read "
+                            "(spool cap too small for the ingest rate, or triage fell behind)",
+                            lost - seen_lost, source)
+                self._gap_pending[source] = lost
+            if source not in self._warmed:
+                self._warmed.add(source)
+                if cursor > 0:
+                    self._warm(source, cursor, horizon)
+            while True:
+                rows = self.db.spool_read(source, cursor, batch)
+                if not rows:
+                    break
+                fresh += self._process(rows, source, horizon)
+                cursor = int(rows[-1][0])
+                self._cursor_pending[source] = cursor
+                self.totals["lines_read"] += len(rows)
+                if len(rows) < batch:
+                    break
+                if time.monotonic() >= deadline:
+                    backlog = True
+                    break
         while self._window and (self._window[0].received_at < horizon
                                 or len(self._window) > self.config.max_window_events):
             self._window.popleft()
-        self._recent = {k: t for k, t in self._recent.items() if t >= now - max(self.config.dedup_s, 1.0)}
-        return fresh
+        keep = now - max(self.config.dedup_s, 1.0)
+        self._recent = {k: v for k, v in self._recent.items() if v.first_at >= keep}
+        return fresh, backlog, gap_rows
 
     # ── evaluation ──────────────────────────────────────────────────────────
     def _candidates(self) -> list[dict[str, Any]]:
@@ -315,12 +454,17 @@ class StreamingTriageWorker:
         events = [w.event for w in self._window]
         latest_group: dict[tuple[str, str], float] = {}
         latest_pair: dict[tuple[str, str], float] = {}
+        dups_group: dict[tuple[str, str], int] = {}    # repeats the dedup folded into window entries
+        dups_pair: dict[tuple[str, str], int] = {}
         for w in self._window:
             e = w.event
             k = (e.severity, e.description)
             latest_group[k] = max(latest_group.get(k, 0.0), w.received_at)
             pk = (e.description, (e.hostname or "").lower())
             latest_pair[pk] = max(latest_pair.get(pk, 0.0), w.received_at)
+            if w.dups:
+                dups_group[k] = dups_group.get(k, 0) + w.dups
+                dups_pair[pk] = dups_pair.get(pk, 0) + w.dups
         vendor_of: dict[str, str] = {}
         display: dict[str, str] = {}       # lowercased host → name as logged
         category_of: dict[str, str] = {}   # description → classifier category
@@ -365,7 +509,8 @@ class StreamingTriageWorker:
                 # The root entity is a port only when it names a logged interface.
                 "interface": iface_display.get((g["root"].get("entity") or "").lower()),
                 "devices": sorted({display.get(h.lower(), h) for h in [*g["root_hosts"], *g["child_devices"]]}),
-                "suppressed": g["suppressed_count"], "count": 1 + g["suppressed_count"],
+                "suppressed": g["suppressed_count"],
+                "count": 1 + g["suppressed_count"] + sum(dups_pair.get(pk, 0) for pk in pairs),
                 "messages": [f"{m.get('hostname', '')}: {m.get('description', '')}" for m in members[:5]],
                 "state": "active", "vendor": g["root"].get("vendor") or vendor_of.get(root_host.lower(), ""),
                 "root_id": g["id"], "confidence": 0.75 if g.get("inferred") else 0.9,
@@ -385,12 +530,13 @@ class StreamingTriageWorker:
                 continue
             devices = devices or ["unknown"]
             ifaces = sorted({iface_display.get(e[2], e[2]) for e in ents if e[1] in ("intf", "lag")})
+            n_events = b["count"] + dups_group.get((b["severity"], b["description"]), 0)
             out.append({
                 "kind": "group", "severity": b["severity"], "category": b["category"],
-                "description": b["description"], "summary": f"{b['description']} ({b['count']} event(s))",
+                "description": b["description"], "summary": f"{b['description']} ({n_events} event(s))",
                 "root_device": devices[0], "layer": b["category"],
                 "interface": ifaces[0] if len(ifaces) == 1 else None, "devices": devices,
-                "suppressed": 0, "count": b["count"],
+                "suppressed": 0, "count": n_events,
                 "messages": [m for _, _, m in sorted(b["msg_heap"], reverse=True)],
                 "state": state or "active", "vendor": vendor_of.get(devices[0].lower(), ""), "confidence": 0.7,
                 "latest": latest_group.get((b["severity"], b["description"]), 0.0),
@@ -470,6 +616,11 @@ class StreamingTriageWorker:
             self._send_times.popleft()
         return len(self._send_times) < self.config.max_tickets_per_hour
 
+    def _note_attempt(self, now: float) -> None:
+        """Count one delivery attempt (failed ones too) toward the hourly limit, durably."""
+        self._send_times.append(now)
+        self.db.kv_set("triage", "send_times", list(self._send_times))
+
     def _decide(self, rec: dict[str, Any] | None, c: dict[str, Any], now: float) -> str:
         if rec is None:
             return "skip_recovered" if c["state"] in ("recovered", "up") else "open"
@@ -483,34 +634,90 @@ class StreamingTriageWorker:
         # window count is no signal (it shrinks as old events slide out).
         return "update" if c["latest"] > float(rec.get("last_event_at") or 0.0) else "hold"
 
-    def _send(self, payload: IncidentEnrichmentPayload) -> tuple[list[dict[str, Any]], list[str]]:
-        results, errors = [], []
-        for sink in self.sinks:
+    # ── sinks: per-sink retry state ─────────────────────────────────────────
+    def _sink_ready(self, name: str, now: float) -> bool:
+        return now >= self._sink_state.get(name, {}).get("next_try", 0.0)
+
+    def _sink_failed(self, name: str, now: float) -> None:
+        cfg = self.config
+        st = self._sink_state.setdefault(name, {"fails": 0, "next_try": 0.0})
+        st["fails"] += 1
+        delay = min(cfg.sink_backoff_s * 2 ** min(int(st["fails"]) - 1, 20), cfg.sink_backoff_max_s)
+        if st["fails"] >= cfg.sink_breaker_threshold:
+            delay = cfg.sink_backoff_max_s      # breaker open: one probe per maximum interval
+        st["next_try"] = now + delay * (0.8 + 0.4 * self._rand())
+
+    def _now(self) -> float:
+        return self.clock() if self._explicit_now is None else self._explicit_now
+
+    def _still_leader(self) -> bool:
+        """Check (and renew when due) the lease; False once another worker took it over."""
+        t = self._now()
+        if not self.db.lease_valid(_LEASE, self.owner, t):
+            return False
+        if t - self._last_renew >= self.config.lease_ttl_s / 4:
+            if not self.db.lease_acquire(_LEASE, self.owner, self.config.lease_ttl_s, now=t):
+                return False
+            self._last_renew = t
+        return True
+
+    def _send(self, payload: IncidentEnrichmentPayload, sinks: list[Any],
+              now: float) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+        """Deliver to each sink; returns (results, error texts, names that failed)."""
+        results, errors, failed = [], [], []
+        for sink in sinks:
+            if not self._still_leader():
+                raise _LeaseGone()
             try:
                 res = sink.upsert_incident(payload)
-                results.append({"sink": sink.name, "action": res.get("action", ""), "ref": str(res.get("ref", ""))})
             except Exception as exc:  # network / HTTP / auth errors must not stop the loop
                 errors.append(f"{sink.name}: {str(exc)[:200]}")
-        return results, errors
+                failed.append(sink.name)
+                self._sink_failed(sink.name, now)
+                st = self._sink_state[sink.name]
+                log.warning("triage sink %s failed (%d in a row, next try in %.0f s): %s", sink.name,
+                            st["fails"], st["next_try"] - now, str(exc)[:200])
+                continue
+            self._sink_state.pop(sink.name, None)
+            results.append({"sink": sink.name, "action": res.get("action", ""), "ref": str(res.get("ref", ""))})
+        return results, errors, failed
+
+    # ── pending deliveries (durable) ────────────────────────────────────────
+    def _park(self, c: dict[str, Any], action: str, sinks: list[str], pend: dict[str, Any] | None,
+              now: float, nowhere: bool = False) -> None:
+        """Remember an undelivered incident so a crash or takeover still delivers it."""
+        self.db.kv_set("triage_pending", c["fingerprint"], {
+            "c": c, "action": action, "sinks": sorted(sinks), "since": (pend or {}).get("since", now),
+            "attempts": int((pend or {}).get("attempts", 0)) + 1, "nowhere": nowhere})
+
+    def _put(self, rec: dict[str, Any]) -> None:
+        self.db.triage_put(rec, fence=(_LEASE, self.owner), now=self._now())
 
     def run_once(self, now: float | None = None) -> dict[str, Any]:
         """One tick. Returns a report; safe to call from tests or a scheduler."""
         with self._lock:
+            self._explicit_now = now
             now = self.clock() if now is None else now
             if not self.db.lease_acquire(_LEASE, self.owner, self.config.lease_ttl_s, now=now):
                 self.role = "standby"
+                self._reset_active_state()   # a successor owns the cursor now: re-read it when we are back
                 self.last_tick = {"role": "standby", "at": now}
                 return self.last_tick
             self.role = "active"
-            fresh = self._ingest(now)
-            tick: dict[str, Any] = {"role": "active", "at": now, "new_events": fresh,
-                                    "window_events": len(self._window), "opened": [], "updated": [],
-                                    "held": 0, "deferred": 0, "skipped_recovered": 0, "errors": []}
-            if fresh or self._retry:
-                self._retry = False
-                for c in self._merge(self._candidates()):
-                    self._handle(c, now, tick)
-                self._retry = bool(tick["deferred"]) or bool(tick["errors"])
+            self._last_renew = now
+            self._load_state()
+            tick: dict[str, Any] = {"role": "active", "at": now, "new_events": 0, "window_events": 0,
+                                    "opened": [], "updated": [], "held": 0, "deferred": 0, "backoff": 0,
+                                    "skipped_recovered": 0, "errors": [], "gap_rows": 0, "backlog": False,
+                                    "aborted": False}
+            try:
+                self._run_active(now, tick)
+            except (_LeaseGone, LeaseLost):
+                tick["aborted"] = True
+                self.role = "standby"
+                self._reset_active_state()   # nothing is committed: the successor replays from its cursor
+                log.warning("triage lease lost mid-tick; aborting without committing cursors")
+            tick["window_events"] = len(self._window)
             tick["candidates"] = len(tick["opened"]) + len(tick["updated"]) + tick["held"] + tick["deferred"]
             for k in ("held", "deferred", "skipped_recovered"):
                 self.totals[k] += tick[k]
@@ -520,36 +727,93 @@ class StreamingTriageWorker:
             self.last_tick = tick
             return tick
 
-    def _handle(self, c: dict[str, Any], now: float, tick: dict[str, Any]) -> None:
+    def _run_active(self, now: float, tick: dict[str, Any]) -> None:
+        cfg = self.config
+        fresh, backlog, gap = self._ingest(now, time.monotonic() + cfg.tick_budget_s)
+        tick.update(new_events=fresh, backlog=backlog, gap_rows=gap, window_events=len(self._window))
+        names = {s.name for s in self.sinks}
+        pending: dict[str, dict[str, Any]] = {}
+        for fp, p in self.db.kv_get_all("triage_pending").items():
+            p["sinks"] = [n for n in p.get("sinks", []) if n in names]   # a removed sink is no longer owed
+            if not p["sinks"] and p.get("nowhere"):
+                p["sinks"] = sorted(names)   # sinks were reconfigured and nobody has this incident yet
+            if not p["sinks"] or not isinstance(p.get("c"), dict):
+                self.db.kv_delete("triage_pending", fp)
+            elif now - float(p.get("since", now)) > cfg.pending_ttl_s:
+                log.warning("triage: giving up on undelivered incident %s after %.0f h", fp, cfg.pending_ttl_s / 3600)
+                self.db.kv_delete("triage_pending", fp)
+            else:
+                pending[fp] = p
+        fresh_cands = {c["fingerprint"]: c for c in self._merge(self._candidates())} if fresh else {}
+        items = [(c, pending.get(fp), False) for fp, c in fresh_cands.items()]
+        items += [(p["c"], p, True) for fp, p in pending.items() if fp not in fresh_cands]
+        # Critical first, so the hourly limit never spends its budget on lower severities.
+        items.sort(key=lambda it: (SEV_RANK.get(it[0]["severity"], 5), it[0]["fingerprint"]))
+        for c, pend, orphan in items:
+            if not self._still_leader():
+                raise _LeaseGone()
+            self._handle(c, pend, orphan, now, tick)
+        self._commit()
+        if cfg.retention_days > 0 and now - self._last_prune >= 3600:
+            self._last_prune = now
+            pruned = self.db.triage_prune(cfg.retention_days * 86400.0, now=now)
+            if pruned:
+                log.info("triage: pruned %d resolved ticket row(s) older than %g day(s)", pruned, cfg.retention_days)
+
+    def _handle(self, c: dict[str, Any], pend: dict[str, Any] | None, orphan: bool, now: float,
+                tick: dict[str, Any]) -> None:
         fp = c["fingerprint"]
         rec = self.db.triage_get(fp)
-        action = self._decide(rec, c, now)
-        if action == "skip_recovered":
-            tick["skipped_recovered"] += 1
-            return
+        owed: set[str] | None = None            # None: every sink; else only the sinks still owed this incident
+        if orphan:                              # nothing fresh in the window: deliver what is owed
+            action = "update" if rec is not None else "open"
+            owed = set(pend["sinks"])           # type: ignore[index]
+        else:
+            action = self._decide(rec, c, now)
+            if action == "skip_recovered":
+                if pend is not None:
+                    self.db.kv_delete("triage_pending", fp)
+                tick["skipped_recovered"] += 1
+                return
+            if action == "hold" and pend is not None:
+                action = "update" if rec is not None else "open"
+                owed = set(pend["sinks"])
         base = rec or {"fingerprint": fp, "first_seen": now, "last_sent": 0.0, "sends": 0, "held": 0,
                        "event_count": 0, "last_event_at": 0.0, "refs": [], "severity": c["severity"],
                        "state": c["state"]}
         if action == "hold":
-            self.db.triage_put({**base, "last_seen": now, "held": int(base["held"]) + 1})
+            self._put({**base, "last_seen": now, "held": int(base["held"]) + 1})
             tick["held"] += 1
             return
+        targets = [s for s in self.sinks if owed is None or s.name in owed]
         if not self._rate_ok(now):
             tick["deferred"] += 1
+            self._park(c, action, [s.name for s in targets], pend, now, nowhere=rec is None)
+            return
+        ready = [s for s in targets if self._sink_ready(s.name, now)]
+        if not ready:                           # every owed sink is backing off: wait, do not spend the limit
+            tick["backoff"] += 1
+            self._park(c, action, [s.name for s in targets], pend, now, nowhere=rec is None)
             return
         payload = self._payload(c)   # RCA, evidence and remediation only for incidents being sent
         if action == "update" and c["state"] in ("recovered", "up"):
             payload.attachments["Status"] = "All affected entities have recovered; verify and close."
-        results, errors = self._send(payload)
+        results, errors, failed = self._send(payload, ready, now)
+        self._note_attempt(now)
         tick["errors"].extend(errors)
+        undelivered = failed + [s.name for s in targets if s not in ready]
         if not results:
-            return  # every sink failed: keep the old state so the next tick retries
-        self._send_times.append(now)
+            self._park(c, action, undelivered, pend, now, nowhere=rec is None)   # all failed: retry later
+            return
         refs = list(dict.fromkeys([*base.get("refs", []), *(f"{r['sink']}:{r['ref']}" for r in results)]))
-        self.db.triage_put({**base, "last_seen": now, "last_sent": now, "severity": c["severity"],
-                            "event_count": c["count"], "last_event_at": c["latest"],
-                            "sends": int(base["sends"]) + 1, "state": c["state"],
-                            "title": payload.summary_title[:300], "refs": refs})
+        self._put({**base, "last_seen": now, "last_sent": now, "severity": c["severity"],
+                   "event_count": c["count"], "last_event_at": c["latest"],
+                   "sends": int(base["sends"]) + 1, "state": c["state"],
+                   "title": payload.summary_title[:300], "refs": refs})
+        if undelivered:                         # a sink that took it does not hide one that did not
+            self._park(c, action, undelivered, pend, now)
+        elif pend is not None:
+            self.db.kv_delete("triage_pending", fp)
         entry = {"fingerprint": fp, "title": payload.summary_title, "severity": c["severity"],
                  "devices": payload.affected_devices, "sinks": results}
         tick["opened" if action == "open" else "updated"].append(entry)
@@ -564,7 +828,12 @@ class StreamingTriageWorker:
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="netlog-triage", daemon=True)
         self._thread.start()
+        _shutdown.register(self, "stop")   # release the lease on SIGTERM / exit instead of holding it for the TTL
         return True
+
+    def _next_wait(self) -> float:
+        """Sleep between ticks; none (a short yield) while the spool still has a backlog."""
+        return 0.05 if self.last_tick.get("backlog") else self.config.poll_s
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -573,7 +842,7 @@ class StreamingTriageWorker:
                     self.run_once()
             except Exception:  # keep the loop alive; the next tick retries
                 log.exception("triage tick failed")
-            self._stop.wait(self.config.poll_s)
+            self._stop.wait(self._next_wait())
 
     def stop(self, timeout: float = 10.0) -> None:
         self._stop.set()
@@ -594,7 +863,14 @@ class StreamingTriageWorker:
         return {"running": self.running, "role": self.role, "owner": self.owner,
                 "config": dataclasses.asdict(self.config), "sinks": [s.name for s in self.sinks],
                 "window_events": len(self._window), "cursors": self._cursors(),
-                "last_tick": self.last_tick, "totals": dict(self.totals)}
+                "last_tick": self.last_tick, "totals": dict(self.totals),
+                "spool_gap_rows": {src: n for src in self._sources()
+                                   if (n := self.db.spool_gap(src)["lost_unread"])},
+                "pending_deliveries": len(self.db.kv_get_all("triage_pending")),
+                "sink_state": {name: {"fails": int(st["fails"]),
+                                      "open": st["fails"] >= self.config.sink_breaker_threshold,
+                                      "retry_in_s": max(0.0, round(st["next_try"] - self.clock(), 1))}
+                               for name, st in self._sink_state.items()}}
 
 
 _WORKER: StreamingTriageWorker | None = None

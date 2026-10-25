@@ -5,6 +5,7 @@ import argparse
 import base64
 import json
 import logging
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,16 @@ from ai_log_analyzer.sources.solarwinds import (
 from ai_log_analyzer.sources.telemetry import InterfaceTelemetrySnapshot
 from ai_log_analyzer.web.app import create_app
 from ai_log_analyzer.web.app import source_manager as web_manager
+
+
+@pytest.fixture(autouse=True)
+def _fake_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sources resolve + check hostnames at registration (fail closed); the
+    example hosts used here must resolve to a public address, offline."""
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda host, port, *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 0))],
+    )
 
 
 class _MockResponse:
@@ -642,8 +653,9 @@ def test_mcp_solarwinds_tools_registered() -> None:
 
 
 @pytest.mark.unit
-def test_mcp_fetch_and_explicit_push_note() -> None:
+def test_mcp_fetch_and_explicit_push_note(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("mcp")
+    monkeypatch.setenv("NETLOG_MCP_ALLOW_WRITE", "1")   # the writeback tool is gated off by default
     import asyncio
 
     from ai_log_analyzer.mcp_server.server import _build_server

@@ -25,33 +25,19 @@ from ai_log_analyzer.sources import SourceConfig
 from ai_log_analyzer.sources.base import SourceError
 from ai_log_analyzer.sources.syslog import SyslogListenerSource
 from ai_log_analyzer.state_store import StateDB, open_db
+from tests._helpers import free_port as _free_port
+from tests._helpers import listen_on_free_port
+from tests._helpers import wait_for as _wait_for
 
 pytestmark = pytest.mark.unit
 
 _CTX = multiprocessing.get_context("fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn")
 
 
-def _free_port(kind: int = socket.SOCK_DGRAM) -> int:
-    s = socket.socket(socket.AF_INET, kind)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
 def _source(port: int, proto: str = "udp", source_id: str = "t", **extra) -> SyslogListenerSource:
     return SyslogListenerSource(SourceConfig(
         id=source_id, type="syslog", url="",
         extra={"port": str(port), "proto": proto, "bind": "127.0.0.1", **{k: str(v) for k, v in extra.items()}}))
-
-
-def _wait_for(predicate, timeout: float = 3.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.02)
-    return False
 
 
 def _udp(port: int, payload: bytes) -> None:
@@ -210,8 +196,7 @@ def test_llm_runtime_toggles_are_shared_across_workers(tmp_path, monkeypatch):
 # ── Syslog: sender attribution, allow-list, rcvbuf ──────────────────────────
 
 def test_udp_sender_ip_attribution():
-    port = _free_port()
-    src = _source(port)
+    port, src = listen_on_free_port(lambda p: _source(p))
     try:
         _udp(port, b"BGP peer 10.0.0.1 down (hold timer expired)\n")
         _udp(port, b"<22>Jan  1 12:00:00 fra4-fw-01 rpd: bgp peer 10.0.0.2 down\n")
@@ -226,8 +211,7 @@ def test_udp_sender_ip_attribution():
 
 
 def test_udp_datagram_with_several_lines_and_rcvbuf_stat():
-    port = _free_port()
-    src = _source(port, rcvbuf=1 << 20)
+    port, src = listen_on_free_port(lambda p: _source(p, rcvbuf=1 << 20))
     try:
         _udp(port, b"<13>Oct 20 10:00:00 r1 a: one\n<13>Oct 20 10:00:01 r1 a: two\n")
         assert _wait_for(lambda: src.stats().get("received") == 2)
@@ -237,8 +221,7 @@ def test_udp_datagram_with_several_lines_and_rcvbuf_stat():
 
 
 def test_allow_list_drops_other_senders():
-    port = _free_port()
-    src = _source(port, allow="10.99.0.0/16, 192.0.2.10")
+    port, src = listen_on_free_port(lambda p: _source(p, allow="10.99.0.0/16, 192.0.2.10"))
     try:
         _udp(port, b"<13>Oct 20 10:00:00 r1 a: from localhost\n")
         assert _wait_for(lambda: src.stats().get("rejected_sender") == 1)
@@ -250,8 +233,7 @@ def test_allow_list_drops_other_senders():
 
 
 def test_udp_port_cannot_be_split_between_workers_without_a_spool():
-    port = _free_port()
-    first = _source(port)
+    port, first = listen_on_free_port(lambda p: _source(p))
     try:
         with pytest.raises(SourceError, match="Could not bind"):
             _source(port, source_id="second")  # no SO_REUSEADDR on UDP
@@ -266,8 +248,7 @@ def _octet(msg: bytes) -> bytes:
 
 
 def test_tcp_octet_counting_split_across_writes_and_lf_framing():
-    port = _free_port(socket.SOCK_STREAM)
-    src = _source(port, "tcp", max_frame=256)
+    port, src = listen_on_free_port(lambda p: _source(p, "tcp", max_frame=256), socket.SOCK_STREAM)
     try:
         conn = socket.create_connection(("127.0.0.1", port))
         m1 = b"<13>Oct 20 10:00:00 sw1 app: first, with a newline\ninside"
@@ -277,7 +258,7 @@ def test_tcp_octet_counting_split_across_writes_and_lf_framing():
         time.sleep(0.05)
         conn.sendall(framed[9:] + _octet(m2))
         conn.sendall(b"<13>Oct 20 10:00:02 sw1 app: lf framed\n")
-        conn.sendall(b"300 " + b"x" * 300)                      # over max_frame → dropped
+        conn.sendall(b"300 <13>" + b"x" * 296)                  # over max_frame → dropped
         conn.sendall(b"<13>Oct 20 10:00:03 sw1 app: after oversize\n")
         conn.close()
         assert _wait_for(lambda: src.stats().get("received") == 4)
@@ -290,8 +271,7 @@ def test_tcp_octet_counting_split_across_writes_and_lf_framing():
 
 
 def test_tcp_idle_connection_does_not_block_other_senders():
-    port = _free_port(socket.SOCK_STREAM)
-    src = _source(port, "tcp")
+    port, src = listen_on_free_port(lambda p: _source(p, "tcp"), socket.SOCK_STREAM)
     try:
         idle = socket.create_connection(("127.0.0.1", port))
         idle.sendall(b"<13>Oct 20 10:00:00 slow app: half a line")    # never finished
@@ -311,8 +291,7 @@ def test_tcp_idle_connection_does_not_block_other_senders():
 
 
 def test_tcp_max_connections():
-    port = _free_port(socket.SOCK_STREAM)
-    src = _source(port, "tcp", max_connections=1)
+    port, src = listen_on_free_port(lambda p: _source(p, "tcp", max_connections=1), socket.SOCK_STREAM)
     try:
         a = socket.create_connection(("127.0.0.1", port))
         a.sendall(b"<13>Oct 20 10:00:00 a app: hi\n")
@@ -332,8 +311,7 @@ def test_tls_syslog_rfc5425(tmp_path):
                     "-subj", "/CN=netlog-test", "-addext", "subjectAltName=IP:127.0.0.1",
                     "-keyout", str(key), "-out", str(cert)],
                    check=True, capture_output=True)
-    port = _free_port(socket.SOCK_STREAM)
-    src = _source(port, "tls", tls_cert=cert, tls_key=key)
+    port, src = listen_on_free_port(lambda p: _source(p, "tls", tls_cert=cert, tls_key=key), socket.SOCK_STREAM)
     try:
         # Full verification: the test cert is the trust anchor and carries an IP SAN.
         ctx = ssl.create_default_context(cafile=str(cert))
@@ -352,8 +330,8 @@ def test_tls_syslog_rfc5425(tmp_path):
 
 def test_spool_survives_restart(tmp_path):
     spool = tmp_path / "spool.db"
-    port = _free_port()
-    src = _source(port, spool=spool)
+    port, src = listen_on_free_port(lambda p: _source(p, spool=spool),
+                                    accept=lambda s: s.role == "listener")
     try:
         _udp(port, b"<13>Oct 20 10:00:00 r1 rpd: before restart\n")
         assert _wait_for(lambda: src.stats().get("spooled") == 1)
@@ -369,8 +347,8 @@ def test_spool_survives_restart(tmp_path):
 
 def test_second_worker_reads_the_shared_spool_instead_of_splitting(tmp_path):
     spool = tmp_path / "spool.db"
-    port = _free_port()
-    owner = _source(port, spool=spool)
+    port, owner = listen_on_free_port(lambda p: _source(p, spool=spool),
+                                      accept=lambda s: s.role == "listener")
     reader = _source(port, spool=spool)  # same port: bind fails → reader role
     try:
         assert owner.role == "listener" and reader.role == "reader"

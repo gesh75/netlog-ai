@@ -6,6 +6,20 @@ like, automatically check every other device for the same fingerprint.
 from __future__ import annotations
 
 import re
+import time
+
+import regex
+
+# The pattern comes from an operator-supplied request: bound its size and run it
+# under the `regex` module's timeout so a catastrophic one (`(\s*\w*)*#Z`) cannot
+# pin a worker. Same defence as the classifier's custom rules.
+MAX_PATTERN_LENGTH = 512
+SEARCH_TIMEOUT_SECONDS = 1.0     # per device
+TOTAL_TIMEOUT_SECONDS = 10.0     # whole sweep
+
+
+def _error(msg: str) -> dict:
+    return {"error": msg, "matches": [], "total_matches": 0}
 
 
 def search_fleet(
@@ -19,21 +33,32 @@ def search_fleet(
         devices: list of {hostname, platform, config_text}
         pattern: regex (or literal substring — auto-escaped if no regex chars)
     """
-    flags = re.MULTILINE | (re.IGNORECASE if case_insensitive else 0)
+    if len(pattern) > MAX_PATTERN_LENGTH:
+        return _error(f"pattern exceeds {MAX_PATTERN_LENGTH} characters")
+    flags = regex.MULTILINE | (regex.IGNORECASE if case_insensitive else 0)
 
     # If pattern has no regex metacharacters, treat as literal
     if not re.search(r"[\\.*+?^$\[\](){}|]", pattern):
-        compiled = re.compile(re.escape(pattern), flags)
+        compiled = regex.compile(regex.escape(pattern), flags)
     else:
         try:
-            compiled = re.compile(pattern, flags)
-        except re.error as e:
-            return {"error": f"invalid regex: {e}", "matches": [], "total_matches": 0}
+            compiled = regex.compile(pattern, flags)
+        except regex.error as e:
+            # Report where the syntax error is, not the library's message text (kept out of API responses).
+            pos = getattr(e, "pos", None)
+            return _error("invalid regex" + (f" (syntax error at position {pos})" if isinstance(pos, int) else ""))
 
+    deadline = time.monotonic() + TOTAL_TIMEOUT_SECONDS
     hits: list[dict] = []
     for d in devices:
         text = d.get("config_text", "")
-        matches = list(compiled.finditer(text))
+        budget = min(SEARCH_TIMEOUT_SECONDS, deadline - time.monotonic())
+        if budget <= 0:
+            return _error("pattern search timed out; simplify the regular expression")
+        try:
+            matches = list(compiled.finditer(text, timeout=budget))
+        except TimeoutError:
+            return _error("pattern search timed out; simplify the regular expression")
         if not matches:
             continue
         snippets = []

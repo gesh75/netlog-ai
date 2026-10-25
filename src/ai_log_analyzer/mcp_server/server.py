@@ -26,28 +26,131 @@ Tools exposed:
   - netlog_servicenow_correlate_changes : score change records against findings
   - netlog_servicenow_sync_incident : dry-run or upsert one ServiceNow incident
 
+Safety defaults: tools that change external state (add_source, live ITSM
+enrichment/sync, SolarWinds notes) are refused unless NETLOG_MCP_ALLOW_WRITE=1;
+the HTTP transports bind 127.0.0.1 and refuse a non-loopback bind without
+NETLOG_MCP_TOKEN (bearer auth); log text is sanitized before it is returned.
+
 The MCP SDK is an optional dependency — install with
 `pip install netlog-ai[mcp]` or `pip install 'mcp>=2,<3'`.
 Requires MCP SDK 2.x (MCPServer). See issue #17.
 """
 from __future__ import annotations
 
+import functools
+import hashlib
+import hmac
+import ipaddress
 import json
 import logging
 import os
 import re
+import time
+import urllib.error
+import urllib.parse
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import regex
+import requests
+
+from ai_log_analyzer import audit
 from ai_log_analyzer.analyzer import analyze
 from ai_log_analyzer.deep_report import load_site_topology, run_deep_report
+from ai_log_analyzer.sanitize import sanitize
 from ai_log_analyzer.servicenow_sync import ServiceNowClient
 from ai_log_analyzer.sources import SourceConfig, SourceError, registry
 from ai_log_analyzer.sources.manager import manager as source_manager
 from ai_log_analyzer.sources.solarwinds import SolarWindsConnector
 
 log = logging.getLogger(__name__)
+
+# ── bounds (a tool argument must never let a client exhaust the server) ──────
+_MAX_WINDOW_S = 30 * 86_400
+_MAX_LIMIT = 10_000
+_MAX_RAW_LIMIT = 5_000        # events handed back verbatim to the client
+_MAX_MATCHES = 1_000
+_MAX_TOP_N = 100
+_MAX_PATTERN = 500
+_MAX_TEXT = 2_000_000         # log_text / changes_json
+_MAX_NOTE = 4_000
+_MAX_LIST = 500
+_REGEX_TIMEOUT_S = 0.05       # per line (regex module timeout, as in classifier custom rules)
+_SEARCH_BUDGET_S = 5.0        # whole search_logs scan
+_EXPECTED_ERRORS = (
+    SourceError, requests.exceptions.RequestException, urllib.error.URLError,
+    ValueError, OSError, TimeoutError,
+)
+
+
+def _clamp(value: Any, lo: int, hi: int, default: int | None = None) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        if default is None:
+            raise ValueError(f"expected an integer, got {value!r}") from None
+        number = default
+    return max(lo, min(hi, number))
+
+
+def _write_enabled() -> bool:
+    return os.environ.get("NETLOG_MCP_ALLOW_WRITE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _write_denied(action: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": f"{action} changes external state and is disabled. Set NETLOG_MCP_ALLOW_WRITE=1 "
+                 "in the MCP server environment to enable write tools (dry-run previews stay available).",
+    }
+
+
+def _clean(text: Any) -> str:
+    """Redact secrets from log text before it goes back to the client LLM."""
+    return sanitize(str(text if text is not None else ""), mask_pii=False)[0]
+
+
+def _clean_obj(value: Any) -> Any:
+    if isinstance(value, str):
+        return _clean(value)
+    if isinstance(value, dict):
+        return {k: _clean_obj(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clean_obj(v) for v in value]
+    return value
+
+
+def _redact_url(url: str) -> str:
+    """Drop ``user:password@`` from a URL shown to the client."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return ""
+    if parsed.username is None and parsed.password is None:
+        return url
+    host = parsed.hostname or ""
+    netloc = f"{host}:{parsed.port}" if parsed.port else host
+    return urllib.parse.urlunsplit(parsed._replace(netloc=netloc))
+
+
+def _audited(fn):
+    """Wrap a tool: contain expected failures as ``{"ok": False}`` and leave a
+    minimal audit row (tool name + outcome, never arguments or content)."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            result = fn(*args, **kwargs)
+        except _EXPECTED_ERRORS as exc:
+            result = {"ok": False, "error": str(exc)[:500] or type(exc).__name__}
+        except Exception:
+            log.exception("MCP tool %s failed", fn.__name__)
+            result = {"ok": False, "error": "internal error; see the server log"}
+        failed = isinstance(result, dict) and result.get("ok") is False
+        audit.record(f"mcp.{fn.__name__}", target=fn.__name__, outcome="error" if failed else "ok",
+                     actor=audit.Actor("mcp-client", "mcp"))
+        return result
+    return wrapper
 
 
 def _plan_export(plan: Any, export: str) -> dict[str, Any]:
@@ -148,20 +251,40 @@ def _build_server():
             f"found mcp {ver}. Upgrade with `pip install 'mcp>=2,<3'`."
         ) from exc
 
+    from mcp.types import ToolAnnotations
+
     mcp = MCPServer("netlog-ai")
 
+    def tool(*, read_only: bool = True, idempotent: bool = True, open_world: bool = False):
+        """``@mcp.tool`` with safety annotations, error containment and auditing."""
+        annotations = ToolAnnotations(
+            readOnlyHint=read_only,
+            destructiveHint=None if read_only else False,
+            idempotentHint=idempotent,
+            openWorldHint=open_world,
+        )
+
+        def register(fn):
+            return mcp.tool(annotations=annotations)(_audited(fn))
+        return register
+
     # ── inventory ────────────────────────────────────────────────────────────
-    @mcp.tool()
+    @tool()
     def list_connector_kinds() -> dict[str, Any]:
         """List all built-in connector types (kibana, splunk, loki, syslog, librenms, solarwinds)."""
         return {"kinds": registry.known()}
 
-    @mcp.tool()
+    @tool()
     def list_sources() -> dict[str, Any]:
         """List registered live log sources with their config (no secrets)."""
-        return {"sources": source_manager.describe()}
+        sources = source_manager.describe()
+        for row in sources:
+            row["url"] = _redact_url(str(row.get("url", "")))
+            # ``extra`` carries connector options such as API keys and TLS key paths: names only.
+            row["extra"] = {k: "***" for k in (row.get("extra") or {})}
+        return {"sources": sources}
 
-    @mcp.tool()
+    @tool(read_only=False, open_world=True)
     def add_source(
         source_id: str,
         source_type: str,
@@ -172,7 +295,10 @@ def _build_server():
         extra: dict[str, str] | None = None,
         verify_tls: bool = True,
     ) -> dict[str, Any]:
-        """Register a new log source. Returns {ok, id}.
+        """Register a new log source. Returns {ok, id}. Requires NETLOG_MCP_ALLOW_WRITE=1.
+
+        The URL passes the SSRF guard (private/loopback/metadata targets are
+        refused); `allow_private` cannot be set from here.
 
         Examples of `extra`:
           - kibana:  {"index_pattern": "network_devices-*"}
@@ -181,9 +307,14 @@ def _build_server():
           - syslog:  {"port": "5514", "proto": "udp"}
           - solarwinds: {"mode": "swis"}
         """
+        if not _write_enabled():
+            return _write_denied("add_source")
         if not registry.is_registered(source_type):
             return {"ok": False, "error": f"unknown source type {source_type!r}",
                     "known": registry.known()}
+        clean_extra = {str(k): str(v) for k, v in (extra or {}).items()
+                       if str(k).strip().lower() != "allow_private"}
+        ignored = ["allow_private"] if len(clean_extra) != len(extra or {}) else []
         cfg = SourceConfig(
             id=source_id,
             type=source_type,
@@ -191,50 +322,45 @@ def _build_server():
             api_token=api_token,
             username=username,
             password=password,
-            extra=dict(extra or {}),
+            extra=clean_extra,
             verify_tls=verify_tls,
         )
-        try:
-            source_manager.add(cfg)
-        except SourceError as exc:
-            return {"ok": False, "error": str(exc)}
-        return {"ok": True, "id": source_id}
+        source_manager.add(cfg)
+        return {"ok": True, "id": source_id, **({"ignored_options": ignored} if ignored else {})}
 
-    @mcp.tool()
+    @tool(open_world=True)
     def test_source(source_id: str) -> dict[str, Any]:
         """Run a healthcheck against a registered source."""
         return source_manager.healthcheck(source_id)
 
     # ── log retrieval ────────────────────────────────────────────────────────
-    @mcp.tool()
+    @tool(open_world=True)
     def fetch_logs(
         source_id: str,
         since_seconds: int = 3600,
         limit: int = 500,
         host_filter: str = "",
     ) -> dict[str, Any]:
-        """Pull raw events from a source. Default window: last hour, max 500 events."""
-        try:
-            events = source_manager.fetch(
-                source_id,
-                since_seconds=since_seconds,
-                limit=limit,
-                host_filter=host_filter,
-            )
-        except SourceError as exc:
-            return {"ok": False, "error": str(exc)}
+        """Pull raw events from a source (secrets redacted). Default window: last
+        hour, max 500 events (hard cap 5000)."""
+        events = source_manager.fetch(
+            source_id,
+            since_seconds=_clamp(since_seconds, 1, _MAX_WINDOW_S, 3600),
+            limit=_clamp(limit, 1, _MAX_RAW_LIMIT, 500),
+            host_filter=host_filter,
+        )
         return {
             "ok": True,
             "count": len(events),
             "events": [
                 {"timestamp": e.timestamp, "hostname": e.hostname,
                  "appname": e.appname, "severity_raw": e.severity_raw,
-                 "message": e.message}
+                 "message": _clean(e.message)}
                 for e in events
             ],
         }
 
-    @mcp.tool()
+    @tool(open_world=True)
     def search_logs(
         source_id: str,
         pattern: str,
@@ -242,30 +368,54 @@ def _build_server():
         limit: int = 1000,
         max_matches: int = 100,
     ) -> dict[str, Any]:
-        """Search a source for events whose message matches the regex `pattern`."""
+        """Search a source for events whose message matches the regex `pattern`.
+
+        The match runs on sanitized text (a regex cannot probe redacted secrets),
+        with a per-line timeout and a pattern length cap.
+        """
+        if len(pattern) > _MAX_PATTERN:
+            return {"ok": False, "error": f"pattern too long (max {_MAX_PATTERN} characters)"}
         try:
-            rx = re.compile(pattern, re.IGNORECASE)
-        except re.error as exc:
-            return {"ok": False, "error": f"bad regex: {exc}"}
-        try:
-            events = source_manager.fetch(
-                source_id, since_seconds=since_seconds, limit=limit, host_filter="",
-            )
-        except SourceError as exc:
-            return {"ok": False, "error": str(exc)}
-        matches = [e for e in events if rx.search(e.message)][:max_matches]
+            rx = regex.compile(pattern, regex.IGNORECASE)
+        except regex.error as exc:
+            pos = getattr(exc, "pos", None)
+            return {"ok": False, "error": "bad regex" + (f" (syntax error at position {pos})" if isinstance(pos, int) else "")}
+        wanted = _clamp(max_matches, 1, _MAX_MATCHES, 100)
+        events = source_manager.fetch(
+            source_id, since_seconds=_clamp(since_seconds, 1, _MAX_WINDOW_S, 3600),
+            limit=_clamp(limit, 1, _MAX_LIMIT, 1000), host_filter="",
+        )
+        matches: list[Any] = []
+        scanned = 0
+        deadline = time.monotonic() + _SEARCH_BUDGET_S
+        truncated = False
+        for e in events:
+            if len(matches) >= wanted:
+                break
+            if time.monotonic() > deadline:
+                truncated = True
+                break
+            scanned += 1
+            text = _clean(e.message)
+            try:
+                hit = rx.search(text, timeout=_REGEX_TIMEOUT_S)
+            except TimeoutError:
+                return {"ok": False, "error": "pattern is too expensive (regex timed out); simplify it"}
+            if hit:
+                matches.append((e, text))
         return {
             "ok": True,
-            "total_scanned": len(events),
+            "total_scanned": scanned,
             "match_count": len(matches),
+            **({"truncated": True} if truncated else {}),
             "matches": [
                 {"hostname": e.hostname, "appname": e.appname,
-                 "severity_raw": e.severity_raw, "message": e.message}
-                for e in matches
+                 "severity_raw": e.severity_raw, "message": text}
+                for e, text in matches
             ],
         }
 
-    @mcp.tool()
+    @tool(open_world=True)
     def analyze_logs(
         source_id: str,
         since_seconds: int = 3600,
@@ -274,19 +424,17 @@ def _build_server():
     ) -> dict[str, Any]:
         """Fetch + classify + dedup + (optional) LLM ranking. Returns the full
         analyzer payload — same shape as the web UI's /api/analyze."""
-        try:
-            events = source_manager.fetch(
-                source_id, since_seconds=since_seconds, limit=limit, host_filter="",
-            )
-        except SourceError as exc:
-            return {"ok": False, "error": str(exc)}
+        events = source_manager.fetch(
+            source_id, since_seconds=_clamp(since_seconds, 1, _MAX_WINDOW_S, 3600),
+            limit=_clamp(limit, 1, _MAX_LIMIT, 5000), host_filter="",
+        )
         if not events:
             return {"ok": True, "count": 0, "result": None,
                     "message": "no events in window"}
         result = analyze(events, use_llm=use_llm)
         return {"ok": True, "count": len(events), "result": result.to_dict()}
 
-    @mcp.tool()
+    @tool(open_world=True)
     def get_top_offenders(
         source_id: str,
         since_seconds: int = 3600,
@@ -294,18 +442,17 @@ def _build_server():
         top_n: int = 10,
     ) -> dict[str, Any]:
         """Return the N noisiest hostnames in the time window (event count)."""
-        try:
-            events = source_manager.fetch(
-                source_id, since_seconds=since_seconds, limit=limit, host_filter="",
-            )
-        except SourceError as exc:
-            return {"ok": False, "error": str(exc)}
+        events = source_manager.fetch(
+            source_id, since_seconds=_clamp(since_seconds, 1, _MAX_WINDOW_S, 3600),
+            limit=_clamp(limit, 1, _MAX_LIMIT, 5000), host_filter="",
+        )
         counter: Counter[str] = Counter(e.hostname or "unknown" for e in events)
-        offenders = [{"hostname": h, "count": n} for h, n in counter.most_common(top_n)]
+        offenders = [{"hostname": h, "count": n}
+                     for h, n in counter.most_common(_clamp(top_n, 1, _MAX_TOP_N, 10))]
         return {"ok": True, "total_events": len(events), "offenders": offenders}
 
     # ── cross-source correlation ─────────────────────────────────────────────
-    @mcp.tool()
+    @tool(open_world=True)
     def correlate_sources(
         source_ids: list[str] | None = None,
         since_seconds: int = 3600,
@@ -316,18 +463,15 @@ def _build_server():
         every device `confirmed` (appears with actionable events in >=2 sources)
         or `suspected` (1 source). Defaults to ALL registered sources."""
         from ai_log_analyzer.correlate import correlate_from_manager
-        try:
-            return correlate_from_manager(
-                source_ids,
-                since_seconds=since_seconds,
-                limit=limit,
-                min_severity=min_severity,
-            )
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        return correlate_from_manager(
+            (source_ids or None) and source_ids[:_MAX_LIST],
+            since_seconds=_clamp(since_seconds, 1, _MAX_WINDOW_S, 3600),
+            limit=_clamp(limit, 1, _MAX_LIMIT, 5000),
+            min_severity=min_severity,
+        )
 
     # ── per-device triage ────────────────────────────────────────────────────
-    @mcp.tool()
+    @tool(open_world=True)
     def analyze_device(
         hostname: str,
         source_ids: list[str] | None = None,
@@ -339,16 +483,14 @@ def _build_server():
         and a 0-100 health score. Pulls this host's events from the given
         sources (default: all registered)."""
         from ai_log_analyzer.device_triage import triage_from_manager
-        try:
-            return triage_from_manager(
-                hostname, source_ids,
-                since_seconds=since_seconds, limit=limit,
-            )
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        return triage_from_manager(
+            hostname, (source_ids or None) and source_ids[:_MAX_LIST],
+            since_seconds=_clamp(since_seconds, 1, _MAX_WINDOW_S, 86_400),
+            limit=_clamp(limit, 1, _MAX_LIMIT, 5000),
+        )
 
     # ── site bundle helpers ──────────────────────────────────────────────────
-    @mcp.tool()
+    @tool()
     def list_sites() -> dict[str, Any]:
         """Enumerate site bundles available in the local `sites/` directory."""
         if not _SITES_DIR.is_dir():
@@ -371,7 +513,7 @@ def _build_server():
             })
         return {"sites": out, "sites_dir": str(_SITES_DIR)}
 
-    @mcp.tool()
+    @tool()
     def analyze_site(site_id: str) -> dict[str, Any]:
         """Run full site-wide analysis on a local site bundle. Returns
         cross-device findings (BGP, OSPF, MTU, BFD, LLDP gaps + topology hints).
@@ -411,7 +553,7 @@ def _build_server():
         except Exception as exc:
             return {"ok": False, "error": f"analyze_site failed: {exc}"}
 
-    @mcp.tool()
+    @tool()
     def analyze_evpn_causality(site_name: str) -> dict[str, Any]:
         """Analyze bipartite EVPN causality across underlay and overlay for a site.
 
@@ -493,7 +635,7 @@ def _build_server():
         }
 
     # ── remediation & itsm ───────────────────────────────────────────────────
-    @mcp.tool()
+    @tool()
     def generate_remediation_plan(
         device: str,
         vendor: str,
@@ -580,7 +722,7 @@ def _build_server():
             **_plan_export(plan, export),
         }
 
-    @mcp.tool()
+    @tool(read_only=False, open_world=True)
     def enrich_itsm_incident(
         system: str,
         device: str,
@@ -621,7 +763,12 @@ def _build_server():
           affected_vnis: List of impacted VXLAN VNIs
           telemetry_summary: Optical/telemetry diagnostics text
           plan_id: Remediation plan identifier (e.g. REM-1234ABCD)
-          dry_run: When True (default), previews the payload without external API requests
+          dry_run: When True (default), previews the payload without external API requests.
+            Live dispatch needs NETLOG_MCP_ALLOW_WRITE=1 and goes only to the
+            server-configured JIRA_URL / SERVICENOW_URL.
+
+        Commands are screened by the remediation SafetyGuardrail; a plan that
+        contains a destructive command is refused.
         """
         from ai_log_analyzer.itsm import (
             IncidentEnrichmentPayload,
@@ -631,19 +778,42 @@ def _build_server():
         from ai_log_analyzer.remediation import (
             RemediationActionType,
             RemediationPlan,
+            SafetyGuardrail,
             VendorOS,
         )
 
         sys_name = system.lower().strip()
         if sys_name not in ("jira", "servicenow"):
             return {"ok": False, "error": f"Unsupported ITSM system: {system!r}. Must be 'jira' or 'servicenow'."}
+        if not dry_run and not _write_enabled():
+            return _write_denied("enrich_itsm_incident (live)")
+        if len(root_cause_summary) > _MAX_NOTE or len(telemetry_summary) > _MAX_NOTE:
+            return {"ok": False, "error": f"text fields are limited to {_MAX_NOTE} characters"}
+        for items in (pre_checks, config_commands, post_checks, affected_devices, affected_vnis):
+            if items and len(items) > _MAX_LIST:
+                return {"ok": False, "error": f"list arguments are limited to {_MAX_LIST} items"}
+        confidence = max(0.0, min(1.0, float(confidence)))
 
         plan = None
         if plan_id or config_commands:
             try:
                 vos = VendorOS(vendor.lower().strip())
             except ValueError:
-                vos = VendorOS.ARISTA_EOS
+                return {"ok": False, "error": f"Unsupported vendor OS: {vendor!r}",
+                        "valid_vendors": [v.value for v in VendorOS]}
+            lo = getattr(SafetyGuardrail, "MIN_ROLLBACK_MINUTES", 1)
+            hi = getattr(SafetyGuardrail, "MAX_ROLLBACK_MINUTES", 30)
+            if not lo <= int(rollback_minutes) <= hi:
+                return {"ok": False, "error": f"rollback_minutes must be between {lo} and {hi}"}
+            blocked = [
+                {"field": field, "command": cmd, "rule": rule}
+                for field, cmds in (("pre_checks", pre_checks), ("config_commands", config_commands),
+                                    ("post_checks", post_checks))
+                for cmd in cmds or [] if (rule := SafetyGuardrail.violation(cmd))
+            ]
+            if blocked:
+                return {"ok": False, "error": "Safety violation: refusing to attach commands that the "
+                        "remediation guardrail blocks", "violations": blocked}
             plan = RemediationPlan(
                 plan_id=plan_id or f"REM-{device.upper()}",
                 device=device,
@@ -685,66 +855,58 @@ def _build_server():
                 "servicenow_payload": payload.to_servicenow_record(),
             }
 
-        try:
-            if sys_name == "jira":
-                base_url = os.environ.get("JIRA_URL") or os.environ.get("JIRA_BASE_URL", "")
-                email = os.environ.get("JIRA_EMAIL", "")
-                token = os.environ.get("JIRA_API_TOKEN", "")
-                project = os.environ.get("JIRA_PROJECT_KEY", "NET")
-                if not (base_url and email and token):
-                    return {"ok": False, "error": "Missing Jira credentials in environment (JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN)"}
-                client = JiraITSMClient(base_url, email, token, project_key=project)
-                res = client.enrich_incident(payload)
-                return {"ok": True, "dry_run": False, "system": "jira", "result": res}
-            else:
-                instance_url = os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL", "")
-                user = os.environ.get("SERVICENOW_USER") or os.environ.get("SNOW_USER", "")
-                pwd = os.environ.get("SERVICENOW_PASSWORD") or os.environ.get("SNOW_PASSWORD", "")
-                if not (instance_url and user and pwd):
-                    return {"ok": False, "error": "Missing ServiceNow credentials in environment (SERVICENOW_URL, SERVICENOW_USER, SERVICENOW_PASSWORD)"}
-                client = ServiceNowITSMClient(instance_url, user, pwd)
-                res = client.enrich_incident(payload)
-                return {"ok": True, "dry_run": False, "system": "servicenow", "result": res}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        if sys_name == "jira":
+            base_url = os.environ.get("JIRA_URL") or os.environ.get("JIRA_BASE_URL", "")
+            email = os.environ.get("JIRA_EMAIL", "")
+            token = os.environ.get("JIRA_API_TOKEN", "")
+            project = os.environ.get("JIRA_PROJECT_KEY", "NET")
+            if not (base_url and email and token):
+                return {"ok": False, "error": "Missing Jira credentials in environment (JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN)"}
+            client = JiraITSMClient(base_url, email, token, project_key=project)
+            res = client.enrich_incident(payload)
+            return {"ok": True, "dry_run": False, "system": "jira", "result": res}
+        instance_url = os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL", "")
+        user = os.environ.get("SERVICENOW_USER") or os.environ.get("SNOW_USER", "")
+        pwd = os.environ.get("SERVICENOW_PASSWORD") or os.environ.get("SNOW_PASSWORD", "")
+        if not (instance_url and user and pwd):
+            return {"ok": False, "error": "Missing ServiceNow credentials in environment (SERVICENOW_URL, SERVICENOW_USER, SERVICENOW_PASSWORD)"}
+        client = ServiceNowITSMClient(instance_url, user, pwd)
+        res = client.enrich_incident(payload)
+        return {"ok": True, "dry_run": False, "system": "servicenow", "result": res}
 
-    @mcp.tool()
+    @tool(open_world=True)
     def fetch_solarwinds_logs(
         source_id: str = "",
         since_seconds: int = 3600,
         limit: int = 500,
         host_filter: str = "",
     ) -> dict[str, Any]:
-        """Pull SolarWinds syslog / OLM / SaaS log lines. Read-only; no alert writeback."""
-        try:
-            conn = _solarwinds_connector(source_id)
-            lines = conn.pull_logs(
-                limit=limit,
-                since_seconds=since_seconds,
-                host_filter=host_filter,
-                include_alerts=False,
-            )
-        except SourceError as exc:
-            return {"ok": False, "error": str(exc)}
-        return {"ok": True, "count": len(lines), "lines": lines}
+        """Pull SolarWinds syslog / OLM / SaaS log lines (secrets redacted, max 5000).
+        Read-only; no alert writeback."""
+        conn = _solarwinds_connector(source_id)
+        lines = conn.pull_logs(
+            limit=_clamp(limit, 1, _MAX_RAW_LIMIT, 500),
+            since_seconds=_clamp(since_seconds, 1, _MAX_WINDOW_S, 3600),
+            host_filter=host_filter,
+            include_alerts=False,
+        )
+        return {"ok": True, "count": len(lines), "lines": [_clean(line) for line in lines]}
 
-    @mcp.tool()
+    @tool(open_world=True)
     def fetch_solarwinds_alerts(
         source_id: str = "",
         since_seconds: int = 3600,
         host_filter: str = "",
     ) -> dict[str, Any]:
         """Pull SolarWinds active alerts (SWIS join query or SaaS GET /v1/alerts). Read-only."""
-        try:
-            conn = _solarwinds_connector(source_id)
-            alerts = conn.fetch_active_alerts(
-                since_seconds=since_seconds, host_filter=host_filter,
-            )
-        except SourceError as exc:
-            return {"ok": False, "error": str(exc)}
+        conn = _solarwinds_connector(source_id)
+        alerts = conn.fetch_active_alerts(
+            since_seconds=_clamp(since_seconds, 1, _MAX_WINDOW_S, 3600), host_filter=host_filter,
+        )
+        alerts = _clean_obj(alerts[:_MAX_LIMIT])
         return {"ok": True, "count": len(alerts), "alerts": alerts}
 
-    @mcp.tool()
+    @tool(read_only=False, idempotent=False, open_world=True)
     def push_solarwinds_alert_note(
         alert_object_id: int,
         note: str,
@@ -752,18 +914,22 @@ def _build_server():
     ) -> dict[str, Any]:
         """Explicit writeback: invoke Orion.AlertActive/AppendNote with an RCA note.
 
-        Never runs automatically — callers must invoke this tool.
+        Never runs automatically — callers must invoke this tool, and the
+        server must set NETLOG_MCP_ALLOW_WRITE=1.
         """
-        try:
-            conn = _solarwinds_connector(source_id)
-            result = conn.append_alert_note(int(alert_object_id), note)
-        except SourceError as exc:
-            return {"ok": False, "error": str(exc)}
+        if not _write_enabled():
+            return _write_denied("push_solarwinds_alert_note")
+        if len(note) > _MAX_NOTE:
+            return {"ok": False, "error": f"note is limited to {_MAX_NOTE} characters"}
+        conn = _solarwinds_connector(source_id)
+        result = conn.append_alert_note(int(alert_object_id), _clean(note))
         return {"ok": True, "alert_object_id": int(alert_object_id), "result": result}
 
-    @mcp.tool()
+    @tool()
     def netlog_deep_analytics(log_text: str, site_name: str = "") -> dict[str, Any]:
         """Flap physics, dampening status, and topology blast radius for a log snippet."""
+        if len(log_text) > _MAX_TEXT:
+            return {"ok": False, "error": f"log_text is limited to {_MAX_TEXT} characters"}
         topology = None
         if site_name:
             try:
@@ -773,9 +939,11 @@ def _build_server():
         bundle = run_deep_report(log_text=log_text, topology=topology)
         return {"ok": True, **bundle.payload}
 
-    @mcp.tool()
+    @tool()
     def netlog_servicenow_correlate_changes(log_text: str, changes_json: str) -> dict[str, Any]:
         """Correlate log anomalies with a JSON array of ServiceNow change records."""
+        if len(log_text) > _MAX_TEXT or len(changes_json) > _MAX_TEXT:
+            return {"ok": False, "error": f"inputs are limited to {_MAX_TEXT} characters"}
         try:
             changes = json.loads(changes_json or "[]")
         except json.JSONDecodeError as exc:
@@ -785,61 +953,139 @@ def _build_server():
         bundle = run_deep_report(log_text=log_text, changes=changes)
         return {"ok": True, "change_correlation": bundle.payload["change_correlation"]}
 
-    @mcp.tool()
+    @tool(read_only=False, open_world=True)
     def netlog_servicenow_sync_incident(
         log_text: str,
         instance_url: str = "",
         dry_run: bool = True,
         changes_json: str = "[]",
     ) -> dict[str, Any]:
-        """Preview or upsert an idempotent ServiceNow incident. Defaults to dry-run."""
+        """Preview or upsert an idempotent ServiceNow incident. Defaults to dry-run.
+
+        A live upsert (dry_run=False) needs NETLOG_MCP_ALLOW_WRITE=1 and uses the
+        server's SERVICENOW_* credentials, so it can only target the configured
+        SERVICENOW_URL; any other instance_url is refused.
+        """
+        if len(log_text) > _MAX_TEXT or len(changes_json) > _MAX_TEXT:
+            return {"ok": False, "error": f"inputs are limited to {_MAX_TEXT} characters"}
+        if not dry_run and not _write_enabled():
+            return _write_denied("netlog_servicenow_sync_incident (live)")
         try:
             changes = json.loads(changes_json or "[]")
         except json.JSONDecodeError as exc:
             return {"ok": False, "error": f"changes_json is not JSON: {exc}"}
         if not isinstance(changes, list):
             return {"ok": False, "error": "changes_json must be a JSON array"}
+        if not dry_run and not instance_url:
+            instance_url = os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL", "")
+            if not instance_url:
+                return {"ok": False, "error": "instance_url is required for a live sync (no SERVICENOW_URL set)"}
         live = bool(instance_url) and not dry_run
         bundle = run_deep_report(log_text=log_text, changes=changes)
-        try:
-            client = ServiceNowClient(
-                instance_url=instance_url,
-                username=os.environ.get("SERVICENOW_USER", ""),
-                password=os.environ.get("SERVICENOW_PASSWORD", ""),
-                bearer_token=os.environ.get("SERVICENOW_TOKEN", ""),
-            )
-            result = client.sync_incident(
-                bundle.summary,
-                blast_radius=bundle.blast,
-                change_report=bundle.changes,
-                flap_report=bundle.flap,
-                dry_run=not live,
-            )
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        client = ServiceNowClient(
+            instance_url=instance_url,
+            username=os.environ.get("SERVICENOW_USER", ""),
+            password=os.environ.get("SERVICENOW_PASSWORD", ""),
+            bearer_token=os.environ.get("SERVICENOW_TOKEN", ""),
+        )
+        result = client.sync_incident(
+            bundle.summary,
+            blast_radius=bundle.blast,
+            change_report=bundle.changes,
+            flap_report=bundle.flap,
+            dry_run=not live,
+        )
         return {"ok": True, **result.to_dict()}
 
     return mcp
+
+
+class _BearerAuthMiddleware:
+    """Pure-ASGI bearer-token gate for the HTTP transports (constant-time compare)."""
+
+    def __init__(self, app, token: str) -> None:
+        self.app = app
+        self._digest = hashlib.sha256(token.encode("utf-8")).digest()
+
+    def _authorized(self, scope) -> bool:
+        for key, value in scope.get("headers") or []:
+            if key.lower() == b"authorization":
+                scheme, _, supplied = value.decode("latin-1").partition(" ")
+                if scheme.lower() != "bearer":
+                    return False
+                return hmac.compare_digest(
+                    hashlib.sha256(supplied.strip().encode("utf-8")).digest(), self._digest)
+        return False
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "lifespan" or self._authorized(scope):
+            return await self.app(scope, receive, send)
+        if scope["type"] == "http":
+            body = b'{"error": "unauthorized"}'
+            await send({"type": "http.response.start", "status": 401, "headers": [
+                (b"content-type", b"application/json"),
+                (b"www-authenticate", b"Bearer"),
+                (b"content-length", str(len(body)).encode()),
+            ]})
+            await send({"type": "http.response.body", "body": body})
+        elif scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host.strip().lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip().strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def _check_http_exposure(host: str, token: str) -> None:
+    """Refuse to expose the tools on a non-loopback address without bearer auth."""
+    if token or _is_loopback_host(host):
+        return
+    raise RuntimeError(
+        f"Refusing to serve MCP over HTTP on non-loopback address {host!r} without authentication. "
+        "Set NETLOG_MCP_TOKEN to a long random secret (clients send 'Authorization: Bearer <token>'), "
+        "or bind NETLOG_MCP_HOST=127.0.0.1."
+    )
 
 
 def run(transport: str = "stdio") -> None:
     """Entry point — start the MCP server on the requested transport.
 
     Auto-loads env-configured sources before serving so the MCP client sees
-    them immediately on list_sources().
+    them immediately on list_sources(). HTTP transports (``streamable-http``,
+    ``sse``) bind NETLOG_MCP_HOST:NETLOG_MCP_PORT (default 127.0.0.1:8000),
+    require ``Authorization: Bearer $NETLOG_MCP_TOKEN`` when it is set, and
+    refuse to start on a non-loopback bind without it.
     """
+    if transport not in {"stdio", "streamable-http", "sse"}:
+        raise ValueError(f"Unsupported transport: {transport!r}")
+    host = os.environ.get("NETLOG_MCP_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    token = os.environ.get("NETLOG_MCP_TOKEN", "").strip()
+    port = _clamp(os.environ.get("NETLOG_MCP_PORT", "8000"), 1, 65535, 8000)
+    if transport != "stdio":
+        _check_http_exposure(host, token)
+        if not token:
+            log.warning("NETLOG_MCP_TOKEN is not set: the MCP HTTP endpoint on %s:%d is unauthenticated "
+                        "(loopback only)", host, port)
     try:
         source_manager.load_from_env()
     except Exception:
         log.exception("failed to load env-configured sources")
 
     server = _build_server()
-    if transport not in {"stdio", "streamable-http"}:
-        raise ValueError(f"Unsupported transport: {transport!r}")
     if transport == "stdio":
         server.run()
-    else:
-        server.run(transport=transport)
+        return
+    import uvicorn
+
+    app = server.streamable_http_app(host=host) if transport == "streamable-http" else server.sse_app(host=host)
+    if token:
+        app.add_middleware(_BearerAuthMiddleware, token=token)
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

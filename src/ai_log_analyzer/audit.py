@@ -24,6 +24,8 @@ from __future__ import annotations
 import contextvars
 import logging
 import os
+import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -83,6 +85,46 @@ def record(action: str, *, target: str = "", outcome: str = "ok", detail: dict[s
     except Exception as exc:  # sqlite3.Error / OSError — never block the audited action
         log.warning("audit record failed for %s: %s", action, exc)
         return None
+
+
+_THROTTLE_LOCK = threading.Lock()
+_THROTTLE: dict[tuple[str, str], float] = {}
+_THROTTLE_SUPPRESSED = [0]
+_THROTTLE_WINDOW_S = 60.0
+_THROTTLE_MAX_KEYS = 1024
+_THROTTLE_GLOBAL_MAX = 120     # rows per window across all keys (spoofed-source floods)
+_THROTTLE_GLOBAL = [0.0, 0]    # [window start, rows written in it]
+
+
+def record_throttled(action: str, *, key: str, target: str = "", outcome: str = "denied",
+                     detail: dict[str, Any] | None = None, actor: Actor | None = None,
+                     window_s: float = _THROTTLE_WINDOW_S) -> dict[str, Any] | None:
+    """``record`` for events an unauthenticated caller can generate at will (failed auth).
+
+    At most one row per ``(action, key)`` per ``window_s``; the rows skipped in
+    between are counted and reported as ``suppressed`` on the next row written,
+    so a flood cannot bloat the append-only log yet is still visible in it.
+    """
+    now = time.monotonic()
+    with _THROTTLE_LOCK:
+        last = _THROTTLE.get((action, key))
+        if last is not None and now - last < window_s:
+            _THROTTLE_SUPPRESSED[0] += 1
+            return None
+        if now - _THROTTLE_GLOBAL[0] >= window_s:
+            _THROTTLE_GLOBAL[:] = [now, 0]
+        if _THROTTLE_GLOBAL[1] >= _THROTTLE_GLOBAL_MAX:
+            _THROTTLE_SUPPRESSED[0] += 1
+            return None
+        _THROTTLE_GLOBAL[1] += 1
+        if len(_THROTTLE) >= _THROTTLE_MAX_KEYS:   # bound memory under a spoofed-source flood
+            _THROTTLE.clear()
+        _THROTTLE[(action, key)] = now
+        suppressed, _THROTTLE_SUPPRESSED[0] = _THROTTLE_SUPPRESSED[0], 0
+    extra = dict(detail or {})
+    if suppressed:
+        extra["suppressed"] = suppressed
+    return record(action, target=target, outcome=outcome, detail=extra, actor=actor)
 
 
 def query(*, limit: int = 100, actor: str = "", action: str = "", since: float = 0.0) -> list[dict[str, Any]]:

@@ -83,7 +83,7 @@ def test_deterministic_fingerprint_and_markdown_card() -> None:
     md = p1.to_markdown_body()
     assert "### Blast Radius & Symptom Suppression" in md
     assert "10010, 10020" in md
-    assert "commit timer 5" in md
+    assert "commit timer 00:05:00" in md
 
 
 def test_jira_creates_new_incident_when_no_fingerprint_match() -> None:

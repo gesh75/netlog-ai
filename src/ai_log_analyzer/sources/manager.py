@@ -19,6 +19,7 @@ import logging
 import os
 import threading
 
+from ai_log_analyzer import _shutdown
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.sources.base import LogSource, SourceConfig, SourceError, registry
 from ai_log_analyzer.sources.solarwinds import SolarWindsConfig
@@ -51,13 +52,19 @@ class SourceManager:
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def add(self, config: SourceConfig) -> LogSource:
+        """Register a source. Idempotent: an equal config keeps the live instance (its buffered
+        lines and open connections); only a changed config replaces it."""
         with self._lock:
-            if config.id in self._sources:
-                self._sources[config.id].close()
+            existing = self._sources.get(config.id)
+            if existing is not None:
+                if self._configs.get(config.id) == config:
+                    return existing
+                existing.close()
             src = registry.create(config)
             self._sources[config.id] = src
             self._configs[config.id] = config
-            log.info("source %s (%s) added", config.id, config.type)
+            log.info("source %s (%s) %s", config.id, config.type, "replaced" if existing is not None else "added")
+            _shutdown.register(self, "shutdown")   # flush buffered syslog lines on SIGTERM / exit
             return src
 
     def remove(self, source_id: str) -> bool:
