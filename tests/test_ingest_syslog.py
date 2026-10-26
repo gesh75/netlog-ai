@@ -181,6 +181,7 @@ def test_lines_lost_to_a_dead_database_are_counted_per_line(tmp_path):
         _udp(port, b"<13>Oct 20 10:00:00 r1 a: doomed", n=300)
         assert _wait_for(lambda: src.stats().get("received") == 300)
         assert _wait_for(lambda: src.stats().get("queue_overflow", 0) >= 200)
+        assert _wait_for(lambda: src.stats().get("spool_errors", 0) >= 1)
         assert src.stats()["spool_errors"] >= 1
     finally:
         src.close()
