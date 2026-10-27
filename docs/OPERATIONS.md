@@ -71,14 +71,20 @@ Each suppressed action item carries `suppressed_by` and ranks below the live
 roots of the same severity. Webhooks page the roots only and add a
 `suppressed_alerts` count.
 
-Address ownership comes from the logs (sender IP, FortiOS `locip`, Junos
-`Local-ip`, SD-WAN system IP, the far end of a /30–/31 BGP session). It can
-also come from an optional dependency map set in `AI_LOG_ANALYZER_DEPENDENCIES`
-or passed as the analysis `site_manifest`:
+Address ownership comes from an optional dependency map set in
+`AI_LOG_ANALYZER_DEPENDENCIES` or passed as the analysis `site_manifest`, and
+from the logs (FortiOS `locip`, Junos `Local-ip`, SD-WAN system IP, the far end of
+a /30–/31 BGP session). Log text is forgeable, so for lines received by the
+syslog listener a claim counts only when the map binds the sender address to the
+host the line names (list the address the device sends syslog from under `ips`),
+or the sender is listed under `relays` (a collector or manager that forwards
+other devices' logs). Inferred HA pairs follow the same rule. Logs from files and
+uploads carry no sender and are used as supplied.
 
 ```json
 {"devices": {"core-01": {"ips": ["10.0.0.2", "10.0.0.4"], "children": ["leaf-01", "leaf-02"],
-                         "ha_peer": "core-02", "role": "core"}}}
+                         "ha_peer": "core-02", "role": "core"}},
+ "relays": ["192.0.2.50"]}
 ```
 
 ## Ansible / Nornir export
