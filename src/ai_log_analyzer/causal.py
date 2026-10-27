@@ -10,7 +10,7 @@ via ``evpn_causal_hypotheses()`` / ``analyze(..., evpn_causal=True)``.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import MAXYEAR, MINYEAR, datetime, timezone
 from functools import lru_cache
 from typing import Any
 
@@ -108,7 +108,8 @@ def _parse_event_ts(ts: str) -> datetime | None:
     iso = stamp.replace("Z", "+00:00")
     try:
         return _as_naive(datetime.fromisoformat(iso))
-    except ValueError:
+    except (OverflowError, ValueError):
+        # OverflowError: an offset pushes a year-1/9999 stamp outside datetime.
         pass
     collapsed = " ".join(stamp.split())
     parts = collapsed.split()
@@ -201,6 +202,8 @@ def _restamp_yearless(parsed: datetime, ref: datetime) -> datetime:
     best: datetime | None = None
     best_delta: float | None = None
     for year in (ref.year - 1, ref.year, ref.year + 1):
+        if not MINYEAR <= year <= MAXYEAR:
+            continue
         candidate = _with_year(parsed, year)
         delta = abs((candidate - ref).total_seconds())
         if best is None or delta < best_delta:

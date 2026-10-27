@@ -166,3 +166,25 @@ def test_config_drift_links_mtu_and_bgp_neighbor() -> None:
 def test_config_drift_none_is_empty() -> None:
     report = correlate_config_drift(None, [Finding("leaf01", "HIGH", "bgp down")])
     assert report.hits == []
+
+
+@pytest.mark.parametrize("stamp", ["0001-01-01T00:00:00+01:00", "9999-12-31T23:30:00-01:00"])
+def test_deep_report_survives_edge_of_range_stamp(stamp: str) -> None:
+    # Year-1/9999 offset stamps overflow datetime; the report must still run.
+    from ai_log_analyzer.deep_report import run_deep_report
+
+    log_text = "\n".join([
+        f"{stamp} r1 %BGP-5-ADJCHANGE: neighbor 10.0.0.1 Down",
+        _line(0, "leaf01", "%BGP-5-ADJCHANGE: neighbor 10.0.0.2 Down"),
+    ])
+    assert run_deep_report(log_text=log_text).payload
+
+
+def test_untimed_rows_after_year_9999_anchor_keep_order_and_spacing() -> None:
+    # A year-9999 anchor overflowed once the untimed offset passed a year.
+    from ai_log_analyzer.analytics import _parse_ts
+
+    ref = datetime(9999, 12, 31, 23, 0)
+    stamps = [_parse_ts("", index, ref, 3600.0) for index in (8759, 8760, 40000)]
+    assert stamps == sorted(stamps)
+    assert stamps[1] - stamps[0] == timedelta(hours=1)

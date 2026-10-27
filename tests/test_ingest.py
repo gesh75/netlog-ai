@@ -88,6 +88,19 @@ def test_valid_timestamps_preserved():
 
 
 @pytest.mark.unit
+def test_edge_of_range_iso_year_blanked():
+    # Years 1/9999 overflow datetime once an offset or rollover is applied.
+    assert clean_timestamp("0001-01-01T00:00:00+01:00") == ""
+    assert clean_timestamp("9999-12-31T23:30:00-01:00") == ""
+    assert clean_timestamp("0002-01-01T00:00:00Z") == "0002-01-01T00:00:00Z"
+    assert clean_timestamp("9998-12-31T23:59:59Z") == "9998-12-31T23:59:59Z"
+    events = list(parse_lines([
+        "<189>1 0001-01-01T00:00:00+01:00 r1 bgpd - - - %BGP-5-ADJCHANGE: neighbor 10.0.0.1 Down",
+    ]))
+    assert len(events) == 1 and events[0].timestamp == "" and events[0].hostname == "r1"
+
+
+@pytest.mark.unit
 def test_blank_and_control_chars_skipped():
     events = list(parse_lines([
         "",

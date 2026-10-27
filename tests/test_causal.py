@@ -1593,3 +1593,36 @@ def test_analyze_timeline_keeps_same_category_storm_despite_trailing_leftover():
         if n.get("category") == "routing" and n.get("device") == "spine-01"
     ) >= 8
     assert not any(n.get("device") == "leaf-03" for n in result.timeline)
+
+
+# Year-1/9999 stamps overflow datetime once a UTC offset or a Dec/Jan
+# restamp is applied. One such line used to abort analyze() for the batch.
+_EDGE_STAMPS = ("0001-01-01T00:00:00+01:00", "9999-12-31T23:30:00-01:00")
+
+
+@pytest.mark.parametrize("stamp", _EDGE_STAMPS)
+def test_event_time_edge_of_range_offset_stamp_is_untimed(stamp):
+    assert event_time(_ce(timestamp=stamp)) is None
+
+
+@pytest.mark.parametrize(("stamp", "ref", "expected"), [
+    ("Dec 31 23:59:00", datetime(1, 1, 1, 0, 5), datetime(1, 12, 31, 23, 59)),
+    ("Jan  1 00:01:00", datetime(9999, 12, 31, 23, 0), datetime(9999, 1, 1, 0, 1)),
+])
+def test_event_time_rollover_restamp_skips_out_of_range_years(stamp, ref, expected):
+    assert event_time(_ce(timestamp=stamp), ref) == expected
+
+
+def test_analyze_survives_edge_of_range_stamps():
+    events = [
+        LogEvent(stamp, "r1", "bgpd", "err", "%BGP-5-ADJCHANGE: neighbor 10.0.0.1 Down")
+        for stamp in _EDGE_STAMPS
+    ] + [
+        # Dated 9999 anchor + RFC3164 Dec/Jan pair: restamp tried year 10000.
+        LogEvent("9999-12-31T23:00:00", "r2", "bgpd", "err", "%BGP-5-ADJCHANGE: neighbor 10.0.0.2 Down"),
+        LogEvent("Dec 31 23:59:00", "r3", "bgpd", "err", "%BGP-5-ADJCHANGE: neighbor 10.0.0.3 Down"),
+        LogEvent("Jan  1 00:01:00", "r4", "bgpd", "err", "%BGP-5-ADJCHANGE: neighbor 10.0.0.4 Down"),
+    ]
+    result = analyze(events, use_llm=False)
+    devices = {d for item in result.action_items for d in item.devices}
+    assert {"r1", "r2", "r3", "r4"} <= devices
