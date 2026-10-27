@@ -3086,6 +3086,47 @@ function stopLiveTail() {
   if (btn) btn.textContent = "▶ Start Live Tail";
 }
 
+// Read the SSE stream with fetch() rather than EventSource, so the API token
+// travels in the Authorization header (added by v2.js) and never in the URL.
+// Mirrors EventSource: an HTTP error ends the tail, a dropped connection retries.
+function openTailStream(url, onmessage) {
+  const ctl = new AbortController();
+  const handle = { close: () => ctl.abort() };
+  (async () => {
+    while (!ctl.signal.aborted) {
+      let reader = null;
+      try {
+        const resp = await fetch(url, { signal: ctl.signal, headers: { Accept: "text/event-stream" } });
+        if (!resp.ok) {
+          if (_tailES === handle) { stopLiveTail(); setStatus(`Live tail stopped: HTTP ${resp.status}`); }
+          return;
+        }
+        reader = resp.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buf = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += value;
+          let i;
+          while ((i = buf.indexOf("\n\n")) >= 0) {
+            const lines = buf.slice(0, i).split("\n");
+            buf = buf.slice(i + 2);
+            if (lines.some((l) => l.startsWith("event:"))) continue;   // e.g. "hello"
+            const data = lines.filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart());
+            if (data.length) onmessage({ data: data.join("\n") });
+          }
+        }
+      } catch { /* network drop, abort, or a handler error */ } finally {
+        if (reader) reader.cancel().catch(() => {});   // free the server's stream slot before a retry
+      }
+      if (ctl.signal.aborted) return;
+      setStatus("Live tail connection lost — retrying automatically…");
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  })();
+  return handle;
+}
+
 function toggleLiveTail() {
   if (_tailES) { stopLiveTail(); return; }
   const src = $("tail-source").value;
@@ -3098,8 +3139,7 @@ function toggleLiveTail() {
   _tailCount = 0;
   const tbody = $("live-table").querySelector("tbody");
   clear(tbody);
-  _tailES = new EventSource(`/api/tail/${encodeURIComponent(src)}?min_severity=${minSev}`);
-  _tailES.onmessage = (msg) => {
+  const onmessage = (msg) => {
     let e;
     try { e = JSON.parse(msg.data); } catch { return; }
     _tailCount += 1;
@@ -3114,9 +3154,7 @@ function toggleLiveTail() {
     tbody.insertBefore(tr, tbody.firstChild);
     while (tbody.children.length > 200) tbody.removeChild(tbody.lastChild);
   };
-  _tailES.onerror = () => {
-    setStatus("Live tail connection lost — retrying automatically…");
-  };
+  _tailES = openTailStream(`/api/tail/${encodeURIComponent(src)}?min_severity=${minSev}`, onmessage);
   $("tail-btn").textContent = "⏸ Stop Live Tail";
 }
 
