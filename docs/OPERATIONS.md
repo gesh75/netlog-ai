@@ -203,8 +203,8 @@ AI_LOG_ANALYZER_RBAC_FILE=/etc/netlog-ai/rbac.json
 # {"users": [{"name": "noc-wall", "role": "viewer", "token_sha256": "<sha256 of the token>"}]}
 ```
 
-* Send the token as `Authorization: Bearer <token>` or `X-API-Token`; the SSE live
-  tail also accepts `?token=`.
+* Send the token as `Authorization: Bearer <token>` or `X-API-Token`, including for the
+  SSE live tail. Tokens are never accepted in the URL (`?token=`), which access logs record.
 * `AI_LOG_ANALYZER_API_TOKEN` keeps working as the `admin` role.
 * With no principal configured the API stays in dev mode (open, localhost bind).
 
@@ -244,7 +244,7 @@ Add a case by dropping a JSON file with `logs`, optional `configs` / `golden` /
 ## Dashboard (V2)
 
 * **Sign in:** with RBAC on, click the 👤 chip next to the brand and paste a token.
-  * The token stays in this browser tab (`sessionStorage`) and is sent as `Authorization: Bearer` to `/api/*`, or as `?token=` for the live tail.
+  * The token stays in this browser tab (`sessionStorage`) and is sent as `Authorization: Bearer` to `/api/*`, the live tail included.
   * A viewer sees dashboards; operator and admin unlock their routes.
   * The 📜 Audit log button appears for admins.
 * **Status bar** (`GET /api/status/overview`, polled every 10 s; it never probes LLM providers):
