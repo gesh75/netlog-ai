@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.sanitize import sanitize
 
 # Raw-severity buckets considered error-grade for pattern dedup (DCN parity).
 _ERROR_SEVS: frozenset[str] = frozenset({"err", "error", "crit", "emerg", "alert"})
@@ -22,10 +23,16 @@ _PID_RE: re.Pattern[str] = re.compile(r"\[\d+\]")
 _IP_RE: re.Pattern[str]  = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
 
 
+def _clean(text: str) -> str:
+    """Secret-sanitized log text, as ``fetch_logs`` returns it (triage output goes to MCP clients/API)."""
+    return sanitize(text or "", mask_pii=False)[0]
+
+
 def normalize_pattern(message: str) -> str:
-    """Collapse a log message to a dedup key: 0x.. -> 0xADDR, [123] -> [N],
-    a.b.c.d -> IP, then truncate to 120 chars. (DCN app.py:2501-2504)."""
-    key = _HEX_RE.sub("0xADDR", message or "")
+    """Collapse a log message to a dedup key: secrets -> <REDACTED>, 0x.. -> 0xADDR,
+    [123] -> [N], a.b.c.d -> IP, then truncate to 120 chars. (DCN app.py:2501-2504).
+    Sanitizing comes first so a secret is never cut in half by the truncation."""
+    key = _HEX_RE.sub("0xADDR", _clean(message))
     key = _PID_RE.sub("[N]", key)
     key = _IP_RE.sub("IP", key)
     return key[:120].strip()
@@ -100,6 +107,13 @@ def triage_device(hostname: str, events: list[LogEvent]) -> DeviceTriage:
         )
 
     total = len(events)
+    apps: dict[str, str] = {}          # process names come from the log line too
+
+    def app_of(ev: LogEvent) -> str:
+        raw = ev.appname or "unknown"
+        if raw not in apps:
+            apps[raw] = _clean(raw)
+        return apps[raw]
 
     # ── Raw severity histogram ───────────────────────────────────────────────
     sev_dist: dict[str, int] = {}
@@ -110,7 +124,7 @@ def triage_device(hostname: str, events: list[LogEvent]) -> DeviceTriage:
     # ── Process breakdown ────────────────────────────────────────────────────
     process_counts: dict[str, int] = {}
     for ev in events:
-        proc = ev.appname or "unknown"
+        proc = app_of(ev)
         process_counts[proc] = process_counts.get(proc, 0) + 1
 
     processes: list[dict[str, Any]] = sorted(
@@ -135,7 +149,7 @@ def triage_device(hostname: str, events: list[LogEvent]) -> DeviceTriage:
         raw_sev = (ev.severity_raw or "").lower()
         if raw_sev not in _ERROR_SEVS:
             continue
-        error_apps.add(ev.appname or "unknown")
+        error_apps.add(app_of(ev))
         key = normalize_pattern(ev.message)
         if not key:
             continue
@@ -144,7 +158,7 @@ def triage_device(hostname: str, events: list[LogEvent]) -> DeviceTriage:
                 "pattern": key,
                 "count": 0,
                 "severity": raw_sev,
-                "app": ev.appname or "unknown",
+                "app": app_of(ev),
             }
         pattern_acc[key]["count"] += 1
 
