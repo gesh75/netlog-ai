@@ -8,6 +8,7 @@ import pytest
 
 from ai_log_analyzer import audit
 from ai_log_analyzer.state_store import StateDB
+from ai_log_analyzer.suppression import Topology
 from ai_log_analyzer.triage_worker import MemorySink, StreamingTriageWorker, TriageConfig, sinks_from_env
 
 FIXTURES = Path(__file__).parent / "fixtures" / "multivendor"
@@ -43,6 +44,7 @@ def _worker(db, sink=None, **cfg):
 def test_topology_suppression_turns_a_cascade_into_one_root_ticket(db):
     _feed(db, _lines("fortigate_sdwan_ipsec_bgp_cascade.log", [1, 2, 3, 4, 5, 6, 7]), T0)
     w, sink = _worker(db)
+    w.topology = Topology(relays={"10.9.9.9"})   # one collector forwards every device: it vouches for the names
     tick = w.run_once(T0)
     titles = [o["title"] for o in tick["opened"]]
     assert len(tick["opened"]) == 1, titles
