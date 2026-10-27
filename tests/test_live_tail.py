@@ -108,5 +108,7 @@ def test_sse_tail_requires_token_when_configured(monkeypatch):
     app.testing = True
     client = app.test_client()
     assert client.get("/api/tail/whatever").status_code == 401
-    # wrong query token also rejected
-    assert client.get("/api/tail/whatever?token=nope").status_code == 401
+    # the API token is never accepted from the URL (it would land in access logs)
+    assert client.get("/api/tail/whatever?token=sekrit-token-0123456789").status_code == 401
+    assert client.get("/api/tail/whatever",
+                      headers={"Authorization": "Bearer sekrit-token-0123456789"}).status_code == 404
