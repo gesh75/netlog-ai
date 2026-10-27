@@ -334,7 +334,9 @@ def deep_analyze(
             f"Category: {category}\n"
             f"Description:\n{llm.wrap_untrusted(safe_description, 'event_description')}\n"
             f"Occurrences: {count}\n"
-            f"Affected devices ({len(devices)}): {', '.join(devices[:5]) if devices else 'unknown'}\n"
+            # Hostnames come from log headers a sender controls: fence them like every other log field.
+            f"Affected devices ({len(devices)}):\n"
+            f"{llm.wrap_untrusted(', '.join(devices[:5]) if devices else 'unknown', 'affected_devices')}\n"
             f"Platform hint: {platform_hint or 'mixed (frr/junos/eos)'}\n"
             f"Sample log lines:\n{llm.wrap_untrusted(samples, 'log_samples')}\n\n"
         )
