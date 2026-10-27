@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent
-from ai_log_analyzer.parsers.base import Envelope, _canon_ts, pri_to_severity
+from ai_log_analyzer.parsers.base import Envelope, _canon_ts, _to_int, pri_to_severity
 from ai_log_analyzer.parsers.entities import enrich_netos
 from ai_log_analyzer.parsers.generic import with_structure
 from ai_log_analyzer.parsers.timeutil import normalize_ts
@@ -61,8 +61,9 @@ def _first(obj: Mapping[str, Any], keys: tuple[str, ...]) -> str:
 def _severity(raw: str, default: str = "info") -> str:
     """Syslog severity word from a word ("ERROR") or a 0-7 number."""
     text = raw.strip().lower()
-    if text.isdigit():
-        return pri_to_severity(int(text)) if int(text) <= 7 else default
+    n = _to_int(text)
+    if n is not None:
+        return pri_to_severity(n) if n <= 7 else default
     return _SEV_WORDS.get(text, default)
 
 
@@ -150,9 +151,11 @@ def _split_header(rest: str, n: int) -> tuple[list[str], str] | None:
 
 def _cef_severity(raw: str) -> str:
     text = raw.strip().lower()
-    if text.isdigit():
-        n = int(text)
+    n = _to_int(text)
+    if n is not None:
         return "info" if n <= 3 else "warning" if n <= 6 else "err" if n <= 8 else "crit"
+    if text.isdecimal():   # too long for _to_int: far above 8
+        return "crit"
     return _CEF_SEV.get(text, "info")
 
 

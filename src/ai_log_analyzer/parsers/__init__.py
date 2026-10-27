@@ -60,7 +60,11 @@ def ensure_structured(ev: LogEvent) -> LogEvent:
         return ev
     msg = ev.message or ""
     for plugin in _BODY_PLUGINS:
-        parsed = plugin.parse(msg, dataclasses.replace(_NO_ENV, body=msg), ev.hostname)
+        try:
+            parsed = plugin.parse(msg, dataclasses.replace(_NO_ENV, body=msg), ev.hostname)
+        except Exception:   # one bad connector row must not fail the batch it arrived in
+            registry.note_error(f"plugin {plugin.name}")
+            continue
         if isinstance(parsed, LogEvent):
             return dataclasses.replace(
                 parsed,
