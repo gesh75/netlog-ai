@@ -84,8 +84,11 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
                 re.IGNORECASE),
      r'\1 "<REDACTED>"'),
     # ── Arista EOS / IOS style ───────────────────────────────────────────
+    # `key` also matches `message-digest-key 7 md5 K` (key id 7): never redact the
+    # algorithm word, so the OSPF/NTP rules below still find their anchor.
     ("eos-secret-7",
-     re.compile(r'\b(secret|password|key)\s+7\s+(?!<REDACTED)\S+',
+     re.compile(r'\b(secret|password|key)\s+7\s+(?!<REDACTED)'
+                r'(?!(?:md5|sha1|sha256|hmac-sha1|hmac-sha2-256|cmac-aes-128)(?!\S))\S+',
                 re.IGNORECASE),
      r'\1 7 <REDACTED>'),
     ("eos-secret-5",
@@ -144,9 +147,10 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
                 re.IGNORECASE), _R),
     ("ospf-isis-keys",
      _kw(r"(?<!ntp[ ])\bauthentication-key(?:[ \t]+[0-9])?|\bmessage-digest-key[ \t]+\d{1,3}[ \t]+md5"
-         r"(?:[ \t]+[0-9])?", quoted=True), _R),
+         r"(?:[ \t]+(?:[0-9]|clear|encrypted))?", quoted=True), _R),
     ("ntp-authentication-key",
-     _kw(r"\bntp[ \t]+authentication-key[ \t]+\d{1,5}[ \t]+(?:md5|sha1|sha256|cmac-aes-128)"), _R),
+     _kw(r"\bntp[ \t]+authentication-key[ \t]+\d{1,5}[ \t]+"
+         r"(?:md5|sha1|sha256|hmac-sha1|hmac-sha2-256|cmac-aes-128)(?:[ \t]+(?:[0-9]|clear|encrypted))?"), _R),
     ("crypto-isakmp-key", _kw(r"\bcrypto[ \t]+isakmp[ \t]+key(?:[ \t]+[0-9])?"), _R),
     ("ikev2-pre-shared-key",
      _kw(r"\bpre-shared-key[ \t]+(?:(?:local|remote)(?:[ \t]+[0-9])?"
