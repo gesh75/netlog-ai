@@ -39,6 +39,20 @@ FORMATS: list[tuple[str, str, str]] = [
     ("ospf-message-digest", "ip ospf message-digest-key 1 md5 OspfMd5Secret", "OspfMd5Secret"),
     ("ospf-message-digest-7", "ip ospf message-digest-key 10 md5 7 104D000A0618", "104D000A0618"),
     ("ntp-authentication-key", "ntp authentication-key 1 md5 NtpSecretKey1", "NtpSecretKey1"),
+    # Key id 7 must not be read as a type-7 marker (that would redact `md5`, not the key).
+    ("ospf-message-digest-id7", "ip ospf message-digest-key 7 md5 OspfId7Secret", "OspfId7Secret"),
+    ("ospf-message-digest-id7-type7", "ip ospf message-digest-key 7 md5 7 104D000A0618", "104D000A0618"),
+    ("ospf-message-digest-id7-nxos", "ip ospf message-digest-key 7 md5 3 NxosEncKey77", "NxosEncKey77"),
+    ("ospf-message-digest-id7-xr", "message-digest-key 7 md5 encrypted 0822455D0A16", "0822455D0A16"),
+    ("ospf-virtual-link-id7", "area 1 virtual-link 10.0.0.2 message-digest-key 7 md5 VlinkSecret7",
+     "VlinkSecret7"),
+    ("ntp-authentication-key-id7", "ntp authentication-key 7 md5 NtpId7Secret", "NtpId7Secret"),
+    ("ntp-authentication-key-id7-ios", "ntp authentication-key 7 md5 NtpId7IosKey 7", "NtpId7IosKey"),
+    ("ntp-authentication-key-id7-eos", "ntp authentication-key 7 md5 7 060506324F41", "060506324F41"),
+    ("ntp-authentication-key-id7-xr", "ntp authentication-key 7 md5 encrypted 0822455D0A16", "0822455D0A16"),
+    ("ntp-authentication-key-id7-sha1", "ntp authentication-key 7 sha1 NtpId7Sha1", "NtpId7Sha1"),
+    ("ntp-authentication-key-id7-sha256", "ntp authentication-key 7 sha256 NtpId7Sha256", "NtpId7Sha256"),
+    ("ntp-authentication-key-id7-hmac", "ntp authentication-key 7 hmac-sha2-256 NtpId7Hmac", "NtpId7Hmac"),
     ("tacacs-key", "tacacs-server key TacacsKey1", "TacacsKey1"),
     ("tacacs-key-0", "tacacs-server key 0 TacacsKey0", "TacacsKey0"),
     ("tacacs-key-7", "tacacs-server key 7 02050D480809", "02050D480809"),
@@ -127,6 +141,16 @@ def test_typed_password_keeps_the_type_digit():
     assert out == "neighbor 10.0.0.1 password 0 <REDACTED>"
     out, _ = sanitize("tacacs-server key 7 02050D480809")
     assert out == "tacacs-server key 7 <REDACTED>"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("ip ospf message-digest-key 7 md5 K", "ip ospf message-digest-key 7 md5 <REDACTED>"),
+    ("ntp authentication-key 7 md5 K", "ntp authentication-key 7 md5 <REDACTED>"),
+    ("ntp authentication-key 7 sha1 K", "ntp authentication-key 7 sha1 <REDACTED>"),
+    ("ntp authentication-key 7 md5 7 0605", "ntp authentication-key 7 md5 7 <REDACTED>"),
+])
+def test_key_id_7_keeps_the_algorithm(text, expected):
+    assert sanitize(text)[0] == expected
 
 
 def test_structure_around_secrets_is_preserved():
