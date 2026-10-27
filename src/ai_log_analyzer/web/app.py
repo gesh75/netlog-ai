@@ -304,11 +304,13 @@ def _is_loopback_host(host: str) -> bool:
 def _check_auth_config() -> bool:
     """Validate the auth configuration at startup; returns whether auth is on.
 
-    A malformed token (too short) is an error, and ``AI_LOG_ANALYZER_REQUIRE_AUTH=1``
+    A malformed token (too short) or an unusable ``AI_LOG_ANALYZER_RBAC_FILE`` (missing,
+    unreadable, not JSON, no usable user) is an error, and ``AI_LOG_ANALYZER_REQUIRE_AUTH=1``
     (set by the Docker image) refuses to start with no token at all, so a container
     published on 0.0.0.0 can never come up as an open admin API.
     """
     try:
+        rbac.principals(API_TOKEN)   # loads every configured credential source: a bad one raises
         enabled = rbac.auth_enabled(API_TOKEN)
     except rbac.RbacConfigError as exc:
         raise RuntimeError(f"invalid API token configuration: {exc}") from exc
@@ -530,6 +532,13 @@ def create_app() -> Flask:
             return jsonify({"error": "host not allowed",
                             "hint": "set AI_LOG_ANALYZER_ALLOWED_HOSTS to the name you browse to"}), 400
         return None
+
+    @app.errorhandler(rbac.RbacConfigError)
+    def _auth_config_unusable(_exc):
+        # The RBAC file broke while the server runs. Auth stays on: refuse, never open up. The
+        # detail is in the server log (rbac logs it once per change); the path is not echoed.
+        return jsonify({"error": "authentication is configured but its credential store is unusable",
+                        "hint": "an administrator must fix AI_LOG_ANALYZER_RBAC_FILE"}), 503
 
     @app.errorhandler(413)
     def _too_large(_exc):
@@ -1983,6 +1992,7 @@ def main() -> None:
     host = os.environ.get("ANALYZER_HOST", "127.0.0.1")
     allow_noauth = _parse_bool(os.environ.get("AI_LOG_ANALYZER_ALLOW_NOAUTH"), default=False)
     try:
+        rbac.principals(API_TOKEN)   # a configured but unusable credential source is fatal
         auth_on = rbac.auth_enabled(API_TOKEN)
     except rbac.RbacConfigError as exc:
         raise SystemExit(f"[ERROR] invalid API token configuration: {exc}") from exc
