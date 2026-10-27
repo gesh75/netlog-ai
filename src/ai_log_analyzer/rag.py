@@ -99,6 +99,9 @@ _HIGH_DF_RATIO = 0.5
 _HIGH_DF_MIN_DOCS = 100
 _MAX_POSTINGS_PER_TERM = 5000
 _DEFAULT_REFRESH_SECONDS = 30.0
+# Bump when what is stored changes (e.g. a redaction fix): registered sites and incidents re-index once,
+# which replaces rows an older build wrote.
+_INDEX_FORMAT = 2
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tokenizer
@@ -355,14 +358,45 @@ def _heading_at(chunks: list[Chunk], line_no: int) -> str:
     return ""
 
 
-def config_drift(running: str, golden: str) -> dict[str, Any]:
+_VALUE_RE = re.compile(r"[^\s;{}\"',]+")
+
+
+def _secret_values(*texts: str) -> frozenset[str]:
+    """Every token the secret scrub rewrites anywhere in the given whole configs.
+
+    Whole configs, so rules that need a neighbouring line (a Junos ``community X {`` followed by
+    ``authorization``) see their context. A hunk, a stanza heading or a diff line cut out of the
+    config loses that context, so what is shown of it is checked against this set as well.
+    """
+    found: set[str] = set()
+    for text in texts:
+        if text:
+            found.update((Counter(_VALUE_RE.findall(text)) - Counter(_VALUE_RE.findall(_scrub(text)))))
+    return frozenset(found)
+
+
+def _hide(text: str, secrets: frozenset[str]) -> str:
+    """``text`` scrubbed, with every known secret value masked wherever it appears."""
+    out = _scrub(text)
+    if not secrets:
+        return out
+    return _VALUE_RE.sub(lambda m: "<REDACTED>" if m.group(0) in secrets else m.group(0), out)
+
+
+def config_drift(running: str, golden: str, *, secrets: frozenset[str] | None = None) -> dict[str, Any]:
     """Line-level drift of the running config against its golden config.
 
     Returns ``{"drifted": bool, "added": n, "removed": n, "hunks": [...]}``.
     Each hunk carries running/golden line ranges (1-based), the enclosing
     running-config stanza, and the added/removed lines. Volatile banner
     lines (last-commit stamps, "Building configuration") are ignored.
+
+    The diff compares the raw lines, so a changed password still counts as drift, but the stanza
+    heading and the added/removed lines are returned with secrets redacted (``secrets`` defaults
+    to the values the scrub finds in the two configs).
     """
+    if secrets is None:
+        secrets = _secret_values(running, golden)
     run_lines = (running or "").splitlines()
     gold_lines = (golden or "").splitlines()
 
@@ -393,8 +427,10 @@ def config_drift(running: str, golden: str) -> dict[str, Any]:
         ge = gold_kept[g2 - 1][0] if g2 > g1 else gs
         heading = _heading_at(run_chunks, rs) or _heading_at(gold_chunks, gs)
         hunks.append({"kind": {"replace": "changed", "insert": "added", "delete": "removed"}[tag],
-                      "running_lines": [rs, re_], "golden_lines": [gs, ge], "stanza": heading,
-                      "added": plus[:40], "removed": minus[:40]})
+                      "running_lines": [rs, re_], "golden_lines": [gs, ge],
+                      "stanza": _hide(heading, secrets),
+                      "added": _hide("\n".join(plus[:40]), secrets).split("\n") if plus else [],
+                      "removed": _hide("\n".join(minus[:40]), secrets).split("\n") if minus else []})
     return {"drifted": bool(hunks), "added": added, "removed": removed, "hunks": hunks}
 
 
@@ -662,11 +698,14 @@ def config_docs(hostname: str, platform: str, config_text: str,
     docs: list[Doc] = []
     key = f"{site}:{hostname}" if site else hostname
     extra = {"site": site} if site else {}
+    # Redact before anything is prefixed or titled: a "+ " in front of a line, or a heading cut out of
+    # its stanza, hides the context the line-anchored and multi-line scrub rules match on.
+    secrets = _secret_values(config_text, golden_text or "")
     for c in chunk_config(config_text):
-        docs.append(Doc("config", f"{key}:L{c.start}-L{c.end}", c.heading, _scrub(c.text),
+        docs.append(Doc("config", f"{key}:L{c.start}-L{c.end}", _hide(c.heading, secrets), _scrub(c.text),
                         host=hostname, meta={"start": c.start, "end": c.end, "platform": platform, **extra}))
     if golden_text is not None:
-        drift = config_drift(config_text, golden_text)
+        drift = config_drift(config_text, golden_text, secrets=secrets)
         for h in drift["hunks"]:
             rs, re_ = h["running_lines"]
             body = "\n".join([f"stanza: {h['stanza']}"] + [f"+ {ln}" for ln in h["added"]]
@@ -726,7 +765,7 @@ def _site_files(site_dir: Path, golden_dir: Path | None) -> list[Path]:
 
 def _site_fingerprint(site_dir: Path, golden_dir: Path | None) -> str:
     """Digest of (path, mtime, size) of every source file; changes when any is edited, added or removed."""
-    parts = []
+    parts = [f"format:{_INDEX_FORMAT}"]
     site_dir, golden_dir = site_dir.resolve(), golden_dir.resolve() if golden_dir else None  # stable keys
     for f in _site_files(site_dir, golden_dir):
         try:
@@ -821,7 +860,8 @@ def index_kb(index: RagIndex) -> int:
 
 def _incident_digest(inc: str, rec: Mapping[str, Any]) -> str:
     keys = ("description", "category", "severity", "devices", "sample_messages", "generated_at", "resolution")
-    return hashlib.sha1(json.dumps([inc, *(rec.get(k) for k in keys)], default=str).encode()).hexdigest()
+    return hashlib.sha1(json.dumps([_INDEX_FORMAT, inc, *(rec.get(k) for k in keys)],
+                                   default=str).encode()).hexdigest()
 
 
 def incident_doc(rec: Mapping[str, Any]) -> Doc:
@@ -837,7 +877,7 @@ def incident_doc(rec: Mapping[str, Any]) -> Doc:
             "resolution": rec.get("resolution", ""), "devices": devices,
             "category": rec.get("category", ""), "severity": rec.get("severity", ""),
             "digest": _incident_digest(inc, rec)}
-    return Doc("incident", inc, str(rec.get("description", ""))[:200], _scrub(body),
+    return Doc("incident", inc, _scrub(str(rec.get("description", ""))[:200]), _scrub(body),
                host=devices[0] if len(devices) == 1 else "", meta=meta)
 
 
