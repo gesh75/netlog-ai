@@ -30,11 +30,16 @@ const NV2 = (() => {
   window.fetch = async (input, init = {}) => {
     const url = typeof input === "string" ? input : (input && input.url) || "";
     const tok = token();
-    if (tok && isApi(url)) {
+    // Every state-changing call carries a custom header: a cross-site "simple" request cannot (the
+    // server refuses those when auth is off), and the dashboard's own calls can.
+    const method = String(init.method || (typeof input !== "string" && input.method) || "GET").toUpperCase();
+    const marked = isApi(url) && !["GET", "HEAD", "OPTIONS"].includes(method);
+    if (isApi(url) && (tok || marked)) {
       const headers = new Headers(init.headers || (typeof input !== "string" && input.headers) || {});
-      if (!headers.has("Authorization") && !headers.has("X-API-Token")) {
+      if (tok && !headers.has("Authorization") && !headers.has("X-API-Token")) {
         headers.set("Authorization", `Bearer ${tok}`);
       }
+      if (marked && !headers.has("X-Requested-With")) headers.set("X-Requested-With", "netlog-ai");
       init = { ...init, headers };
     }
     const resp = await origFetch(input, init);
