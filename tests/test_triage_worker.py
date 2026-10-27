@@ -215,3 +215,20 @@ def test_incident_keeps_one_ticket_when_it_becomes_a_suppression_root(db):
     tick = w.run_once(T0 + 10)
     assert not tick["opened"] and tick["held"] == 1
     assert len(db.triage_all()) == 1 and len(sink.sent) == 1
+
+
+def test_edge_of_range_stamps_do_not_blind_triage_for_other_devices(db):
+    # The JSON parser keeps these stamps verbatim, so they reach event_time.
+    poison = [
+        f'{{"timestamp": "{ts}", "host": "r1", "message": "%BGP-5-ADJCHANGE: neighbor 10.0.0.1 Down"}}'
+        for ts in ("0001-01-01T00:00:00+01:00", "9999-12-31T23:30:00-01:00", "9999-12-31T23:00:00")
+    ] + [
+        "Dec 31 23:59:00 r3 bgpd: %BGP-5-ADJCHANGE: neighbor 10.0.0.3 Down",
+        "Jan  1 00:01:00 r4 bgpd: %BGP-5-ADJCHANGE: neighbor 10.0.0.4 Down",
+    ]
+    _feed(db, [*poison, CONSERVE], T0)
+    w, sink = _worker(db)
+    tick = w.run_once(T0)
+    assert not tick["errors"] and not tick["aborted"]
+    titles = [o["title"] for o in tick["opened"]]
+    assert "FortiGate memory conserve mode" in titles, titles

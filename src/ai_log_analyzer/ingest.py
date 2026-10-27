@@ -91,6 +91,10 @@ def clean_timestamp(ts: str) -> str:
         month = int(match.group("month"))
         if not 1 <= month <= 12:
             return ""
+        # Years 1 and 9999 overflow datetime once a UTC offset or a
+        # year-rollover restamp is applied; no real device emits them.
+        if not 1 < int(match.group("year")) < 9999:
+            return ""
         return text if _in_range(match, day=True) else ""
     match = _HMS_TS_RE.match(text)
     if match:
