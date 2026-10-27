@@ -156,6 +156,9 @@ def _allowed_dir_files(directory: Path, pattern: str, recursive: bool) -> list[P
     return sorted(itertools.islice(allowed, _MAX_DIRECTORY_FILES))
 
 
+_STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
 class BadCommand(ValueError):
     """Raised when /api/run receives a command we won't translate to argv."""
 
@@ -531,6 +534,24 @@ def create_app() -> Flask:
             return jsonify({"error": "host not allowed",
                             "hint": "set AI_LOG_ANALYZER_ALLOWED_HOSTS to the name you browse to"}), 400
         return None
+
+    # ── Cross-site request guard ──────────────────────────────────────────
+    # With auth off, a cross-site browser request is indistinguishable from the dashboard's, and the
+    # Host check above only stops DNS rebinding. A page can still fire a "simple" request (a body-less
+    # POST, or a form / text/plain body) that the handlers read as {} and act on. A simple request
+    # cannot carry a JSON content type, a custom header or the token header (each forces a CORS
+    # preflight, which the origin allow-list refuses), so every state-changing request must have one.
+    # With auth on, a request without a token header is a plain 401 from the route gate.
+    @app.before_request
+    def _require_non_simple_request():
+        if request.method not in _STATE_CHANGING:
+            return None
+        if request.is_json or request.headers.get("X-Requested-With") or _token_supplied():
+            return None
+        if rbac.auth_enabled(API_TOKEN):
+            return None
+        return jsonify({"error": "cross-site request refused",
+                        "hint": "send Content-Type: application/json (or an X-Requested-With header)"}), 403
 
     @app.errorhandler(rbac.RbacConfigError)
     def _auth_config_unusable(_exc):
