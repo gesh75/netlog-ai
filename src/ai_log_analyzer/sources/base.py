@@ -107,6 +107,22 @@ def _parse_ipv4_loose(host: str) -> ipaddress.IPv4Address | None:
     return ipaddress.IPv4Address((value << last_bits) | nums[-1])
 
 
+def _transport_host(host: str) -> str:
+    """The ASCII name ``requests`` puts on the wire for ``host``. The stdlib resolver and ``requests`` encode
+    some Unicode names differently (``faß``: IDNA 2003 ``fass`` vs UTS46 ``xn--fa-hia``), so a check made on
+    one spelling says nothing about the other; check the spelling the transport will use."""
+    if host.isascii():
+        return host
+    try:
+        import idna
+    except ImportError:   # requests depends on it; the stdlib codec is the fallback
+        idna = None
+    try:
+        return (idna.encode(host, uts46=True) if idna else host.encode("idna")).decode("ascii")
+    except UnicodeError as exc:
+        raise SourceError("outbound URL host is not a valid internationalised name") from exc
+
+
 def _literal_address(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     try:
         return ipaddress.ip_address(host)
@@ -190,7 +206,7 @@ def validate_outbound_url(url: str, *, allow_private: bool = False,
     if require_https and (parsed.username is not None or parsed.password is not None):
         raise SourceError("outbound URL must not embed credentials")
     allow_private = allow_private or env_flag("NETLOG_ALLOW_PRIVATE_OUTBOUND")
-    lowered = host.lower().rstrip(".")
+    lowered = _transport_host(host.lower().rstrip("."))
     if lowered in _METADATA_HOSTS or lowered.endswith(".metadata.google.internal"):
         raise SourceError("outbound URL targets a blocked metadata host")
     if not allow_private and (lowered == "localhost" or lowered.endswith(".localhost")):
@@ -344,13 +360,21 @@ registry = _Registry()
 # ──────────────────────────────────────────────────────────────────────────────
 
 def guarded_session(*, verify: bool = True, allow_private: bool = False):
-    """``requests.Session`` that re-runs the SSRF guard on every redirect hop,
-    so a 3xx from a vetted host cannot bounce the (credentialed) request to
-    loopback / metadata / an internal address."""
+    """``requests.Session`` that only connects to addresses it has just checked.
+
+    Every request (each redirect hop included) is validated and every new TCP connection resolves the name
+    itself, checks all answers and connects to exactly those (``sources.pinned``), so DNS rebinding after
+    registration or an IDNA spelling difference cannot reach loopback / metadata / an internal address.
+    Redirect targets are also checked before they are followed."""
     import requests
+
+    from ai_log_analyzer.sources.pinned import PinnedAdapter
 
     session = requests.Session()
     session.verify = verify
+    adapter = PinnedAdapter(allow_private=allow_private)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
 
     def _check_redirect(response, *_args, **_kwargs):
         if response.is_redirect:
