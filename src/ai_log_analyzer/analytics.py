@@ -417,12 +417,15 @@ def _parse_ts(value: str, index: int, ref: datetime | None = None, untimed_gap_s
     if text:
         try:
             return _as_utc(datetime.fromisoformat(text))
-        except ValueError:
+        except (OverflowError, ValueError):
+            # OverflowError: an offset pushes a year-1/9999 stamp outside datetime.
             pass
         when = event_time(SimpleNamespace(timestamp=text), anchor)
         if when is not None:
             return _as_utc(when)
-    return _as_utc(datetime(anchor.year, 1, 1) + timedelta(seconds=index * untimed_gap_s))
+    # Cap the base year: a crafted year-9999 anchor left no room for the offset.
+    base = datetime(min(anchor.year, 9000), 1, 1)
+    return _as_utc(base + timedelta(seconds=index * untimed_gap_s))
 
 
 def _as_utc(moment: datetime) -> datetime:

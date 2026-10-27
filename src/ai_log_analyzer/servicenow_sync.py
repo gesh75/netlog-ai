@@ -429,7 +429,10 @@ def _parse_when(value: str) -> datetime | None:
             return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    try:
+        return parsed.astimezone(timezone.utc)
+    except OverflowError:   # an offset pushes a year-1/9999 stamp outside datetime
+        return None
 
 
 def _parse_snow_clock(text: str) -> datetime | None:
