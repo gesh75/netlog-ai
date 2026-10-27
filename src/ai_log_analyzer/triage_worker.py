@@ -7,7 +7,10 @@ tails that spool on its own, without waiting for anyone to upload logs to
 1. reads new spool rows oldest-first from a persisted cursor (restarts
    resume, and a worker that falls behind catches up instead of skipping);
 2. parses and classifies them, drops exact duplicates (relay echoes) and
-   keeps a sliding window (``window_s``) of classified events;
+   keeps a sliding window (``window_s``) of classified events. When the
+   dependency map maps the sending address to a host, a line that names a
+   different device the map knows is attributed to the sender instead
+   (``hostname_mismatch`` in the totals; list collectors under ``relays``);
 3. runs down→up entity pairing, topology-aware suppression and the
    action-item grouping over the window, so a core-router failure becomes
    one root incident instead of a ticket per dependent BGP session;
@@ -69,8 +72,10 @@ from typing import Any, Protocol
 
 from ai_log_analyzer import _shutdown, audit
 from ai_log_analyzer.classifier import ClassifiedEvent, iter_classify
+from ai_log_analyzer.hostnames import short_host
 from ai_log_analyzer.itsm import IncidentEnrichmentPayload
 from ai_log_analyzer.parsers import registry as parser_registry
+from ai_log_analyzer.parsers.entities import valid_ip
 from ai_log_analyzer.sanitize import sanitize
 from ai_log_analyzer.state_store import LeaseLost
 
@@ -311,6 +316,7 @@ class StreamingTriageWorker:
         self._cursor_pending: dict[str, int] = {}     # read this tick, committed after its deliveries
         self._gap_pending: dict[str, int] = {}
         self._warmed: set[str] = set()
+        self._mismatch_seen: set[tuple[str, str]] = set()   # (sender, claimed host) already logged
         self._state_loaded = False
         self._sink_state: dict[str, dict[str, float]] = {}
         self._last_prune = 0.0
@@ -358,10 +364,39 @@ class StreamingTriageWorker:
         self._gap_pending.clear()
 
     # ── ingest ──────────────────────────────────────────────────────────────
+    def _known_hosts(self) -> set[str]:
+        """Every device the dependency map / inventory names (short, lowercase)."""
+        t = self.topology
+        return {*t.ips.values(), *t.children, *(c for kids in t.children.values() for c in kids),
+                *t.ha_peer, *t.roles}
+
+    def _attribute(self, ev: Any, sender: str, known: set[str]) -> Any:
+        """Pin a line to the device the inventory says sent it.
+
+        The hostname inside a syslog line is whatever the sender wrote. When the dependency map maps
+        the sender address to one host and the line names a *different* device the map knows, the line
+        is attributed to its sender (the claimed name is kept in ``attrs["claimed_host"]``), so it can
+        not open, update or recover that other device's incident. Unmapped senders, listed relays and
+        names the map does not know are left as they are: nothing to check them against.
+        """
+        topo = self.topology
+        ip = valid_ip(sender)
+        owner = topo.ips.get(ip)
+        claimed = short_host(ev.hostname)
+        if not owner or ip in topo.relays or claimed == owner or claimed not in known:
+            return ev
+        self.totals["hostname_mismatch"] += 1
+        if len(self._mismatch_seen) < 256 and (ip, claimed) not in self._mismatch_seen:
+            self._mismatch_seen.add((ip, claimed))
+            log.warning("triage: %s is %s in the inventory but sent a line naming %s; attributed to %s",
+                        ip, owner, claimed, owner)
+        return dataclasses.replace(ev, hostname=owner, attrs={**ev.attrs, "claimed_host": ev.hostname})
+
     def _process(self, rows: list[tuple[int, float, str, str]], source: str, horizon: float) -> int:
         """Parse, dedup and classify spool rows into the window; returns entries added."""
         events, stamps, seens = [], [], []
         dedup_s = self.config.dedup_s
+        known = self._known_hosts() if self.topology.ips else set()
         for _id, received_at, sender, line in rows:
             if received_at < horizon:
                 continue  # backlog older than the window: nothing left to triage
@@ -370,6 +405,8 @@ class StreamingTriageWorker:
                 continue
             if sender:
                 ev = dataclasses.replace(ev, attrs={**ev.attrs, "sender_ip": sender})
+                if known:
+                    ev = self._attribute(ev, sender, known)
             key = (ev.hostname, ev.message)
             seen = self._recent.get(key)
             # The interval is fixed from the first kept copy: a steady repeat is re-admitted every
