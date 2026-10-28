@@ -22,14 +22,24 @@ Root kinds, strongest first:
 
 Device address ownership comes from the optional dependency map
 (``AI_LOG_ANALYZER_DEPENDENCIES`` JSON file or ``site_manifest``) and is
-learned from the logs themselves: syslog sender IP, FortiOS ``locip``, Junos
-``Local-ip``, SD-WAN ``system_ip``, and the far end of a /30-/31 BGP session.
+learned from the logs themselves: FortiOS ``locip``, Junos ``Local-ip``,
+SD-WAN ``system_ip``, and the far end of a /30-/31 BGP session. Text a sender
+writes is forgeable, so for events that reached the syslog listener (they carry
+``sender_ip``) a claim counts only when the dependency map binds that sender
+address to the host the line names (or lists it as a trusted relay that
+forwards for other devices); the map's own addresses always win. Logs with no
+transport information (files, uploads) are taken as the operator supplied
+them. The same rule decides which events may pair up as HA peers.
 
 Dependency map format::
 
     {"devices": {"core-01": {"ips": ["10.0.0.0", "10.0.0.2"],
                              "children": ["leaf-01", "leaf-02"],
-                             "ha_peer": "core-02", "role": "core"}}}
+                             "ha_peer": "core-02", "role": "core"}},
+     "relays": ["192.0.2.50"]}
+
+``ips`` should include the address the device sends syslog from. ``relays``
+lists collectors / managers that forward other devices' logs.
 """
 from __future__ import annotations
 
@@ -74,6 +84,7 @@ class Topology:
     children: dict[str, set[str]] = field(default_factory=dict)  # host → dependent hosts
     ha_peer: dict[str, str] = field(default_factory=dict)
     roles: dict[str, str] = field(default_factory=dict)
+    relays: set[str] = field(default_factory=set)              # sender addresses trusted to name any host
 
     def owner(self, ip: str) -> str:
         return self.ips.get(ip, "")
@@ -93,6 +104,9 @@ def load_topology(manifest: Mapping[str, Any] | None = None, path: str | None = 
     if manifest:
         blobs.append(manifest)
     for blob in blobs:
+        for relay in blob.get("relays") or []:
+            if valid_ip(str(relay)):
+                topo.relays.add(valid_ip(str(relay)))
         devices = blob.get("devices") or {}
         items = devices.items() if isinstance(devices, Mapping) else (
             (d.get("hostname") or d.get("name"), d) for d in devices if isinstance(d, Mapping))
@@ -125,10 +139,24 @@ def _p2p_far_end(ip: str) -> str:
     return str(ipaddress.IPv4Address(n ^ 1))  # /31 pair
 
 
+def _trusted_origin(ev: Any, topo: Topology) -> bool:
+    """May this event teach us addresses or HA pairings?
+
+    An event from the syslog listener carries the sender address the transport saw; its text (hostname,
+    ``locip=``, BGP neighbour) is whatever that sender chose to write, so it is believed only when the
+    dependency map says that sender is the host the line names (or a relay it lists). No sender
+    address: not a network event (file / upload), nothing to check it against.
+    """
+    sender = valid_ip((getattr(ev, "attrs", None) or {}).get("sender_ip"))
+    return not sender or sender in topo.relays or topo.ips.get(sender) == _short_host(ev.hostname)
+
+
 def _learn_ownership(events: Iterable[Any], topo: Topology) -> dict[str, tuple[str, str]]:
     """ip → (host, how) from the map plus what the devices themselves logged."""
     owned: dict[str, tuple[str, str]] = {ip: (host, "dependency_map") for ip, host in topo.ips.items()}
     for ev in events:
+        if not _trusted_origin(ev, topo):
+            continue
         host = _short_host(ev.hostname)
         attrs = getattr(ev, "attrs", {}) or {}
         for key in _OWN_IP_ATTRS:
@@ -280,7 +308,7 @@ def suppress_alerts(
             by_entity.setdefault(k, []).append(e)
 
     candidates: list[dict[str, Any]] = []
-    ha_events = [o for o in pool if o.event_type == "ha_state"]
+    ha_events = [o for o in pool if o.event_type == "ha_state" and _trusted_origin(o, topo)]
     ha_peer = _infer_ha_peers(ha_events, host_of, secs) if ha_events else {}
     # Platform roots (HA pair folded together).
     for e in pool:
