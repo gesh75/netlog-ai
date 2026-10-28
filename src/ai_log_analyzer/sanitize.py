@@ -43,6 +43,12 @@ _R = r"\1 <REDACTED>"
 _CRED_NAMES = (r"api[_-]?key|secret[_-]?(?:access[_-]?)?key|client[_-]?secret|token|passwd|password"
                r"|passphrase|private[_-]?key|secret")
 
+# A digest name after a key id (`message-digest-key 7 md5 K`, `ntp authentication-key 7 sha1 K`) and the
+# word that may sit between it and the key: an encryption type (digit, IOS-XR clear/encrypted, Aruba
+# plaintext/ciphertext). A key id is never the secret, so a rule for `key 7 ...` must not treat it as one.
+_ALG = r"(?:md5|sha-?[0-9]{0,3}|(?:hmac|cmac)-[a-z0-9-]{3,20})"
+_KTYPE = r"(?:[0-9]|clear|encrypted|plaintext|ciphertext)"
+
 
 def _kw(prefix: str, *, typed: bool = False, eol: bool = False, quoted: bool = False) -> re.Pattern[str]:
     """`<prefix> [type] <secret>` on one line: group 1 is everything but the secret.
@@ -58,14 +64,16 @@ def _kw(prefix: str, *, typed: bool = False, eol: bool = False, quoted: bool = F
 
 
 # Each rule: (description, pattern, replacement). $1 preserves the key/keyword.
+# Order matters: a general rule must never consume the keyword another rule anchors on, so the
+# statement-specific rules (FortiOS/PAN-OS/NVUE fields, key ids) run before the generic ones.
 _RULES: list[tuple[str, re.Pattern[str], str]] = [
     # ── Junos style ──────────────────────────────────────────────────────
     ("junos-encrypted-password",
-     re.compile(r'(encrypted-password|authentication-key|secret|pre-shared-key|password|shared-secret)\s+"\$[0-9]\$[^"]+"',
-                re.IGNORECASE),
+     re.compile(r'(encrypted-password|authentication-key|secret|pre-shared-key|password|shared-secret)'
+                r'[ \t]+"\$[0-9]\$[^"\n]+"', re.IGNORECASE),
      r'\1 "<REDACTED>"'),
     ("junos-quoted-encrypted",
-     re.compile(r'"\$[0-9]\$[^"]+"'),
+     re.compile(r'"\$[0-9]\$[^"\n]+"'),
      '"<REDACTED>"'),
     # Only match SNMP community context, NOT Junos policy-options BGP communities.
     # SNMP community in Junos: `community NAME { authorization ...; clients ...; }`
@@ -80,39 +88,47 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
                 re.IGNORECASE),
      r'\1 "<REDACTED>"{\3'),
     ("junos-authentication-key",
-     re.compile(r'(authentication-key|hello-authentication-key)\s+"(?!<REDACTED>")[^"]+"',
+     re.compile(r'(authentication-key|hello-authentication-key)[ \t]+"(?!<REDACTED>")[^"\n]+"',
                 re.IGNORECASE),
      r'\1 "<REDACTED>"'),
+    # ── Key ids vs keys ──────────────────────────────────────────────────
+    # The number after `message-digest-key` / `ntp authentication-key` is an id (7 is common), so these
+    # run before the type-7 rule below, which would otherwise take `key 7` and redact the digest word.
+    ("ospf-isis-keys",
+     _kw(rf"(?<!ntp[ ])\bauthentication-key(?:[ \t]+[0-9])?"
+         rf"|\bmessage-digest-key[ \t]+\d{{1,10}}[ \t]+{_ALG}(?:[ \t]+{_KTYPE})?", quoted=True), _R),
+    ("ntp-authentication-key",
+     _kw(rf"\bntp[ \t]+authentication-key[ \t]+\d{{1,10}}[ \t]+{_ALG}(?:[ \t]+{_KTYPE})?"), _R),
     # ── Arista EOS / IOS style ───────────────────────────────────────────
     ("eos-secret-7",
-     re.compile(r'\b(secret|password|key)\s+7\s+(?!<REDACTED)\S+',
+     re.compile(rf'\b(secret|password|key)[ \t]+7[ \t]+(?!<REDACTED)(?!{_ALG}(?![^\s;]))\S+',
                 re.IGNORECASE),
      r'\1 7 <REDACTED>'),
     ("eos-secret-5",
-     re.compile(r'\b(secret|password)\s+5\s+\$1\$\S+',
+     re.compile(r'\b(secret|password)[ \t]+5[ \t]+\$1\$\S+',
                 re.IGNORECASE),
      r'\1 5 <REDACTED>'),
     ("eos-snmp-community",
-     re.compile(r'\b(snmp-server\s+community)\s+(?!<REDACTED)(\S+)',
+     re.compile(r'\b(snmp-server[ \t]+community)[ \t]+(?!<REDACTED)(\S+)',
                 re.IGNORECASE),
      r'\1 <REDACTED>'),
     # `key 0 X` / `password 0 X`: the digit is the encryption TYPE, not the secret,
     # so it stays and the token after it is redacted.
     ("eos-radius-key",
      _kw(r"\b(?:radius-server[ \t]+key|radius-server[ \t]+host[ \t]+\S{1,64}[ \t]+(?:[^\n]{0,100}?[ \t])?key)"
-         r"(?:[ \t]+[0-9])?"), _R),
+         r"(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
     ("eos-tacacs-key",
      _kw(r"\b(?:tacacs-server[ \t]+key|tacacs-server[ \t]+host[ \t]+\S{1,64}[ \t]+(?:[^\n]{0,100}?[ \t])?key)"
-         r"(?:[ \t]+[0-9])?"), _R),
+         r"(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
     ("eos-bgp-password", _kw(r"\bneighbor[ \t]+\S{1,64}[ \t]+password(?:[ \t]+[0-9])?"), _R),
     # SNMPv3 USM keys — EOS/IOS `snmp-server user U G v3 auth sha KEY priv aes KEY`
     # and Junos `authentication-password "..."` / `privacy-password "..."`.
     ("snmpv3-auth-priv-key",
-     re.compile(r'\b(auth\s+(?:md5|sha\d*)|priv\s+(?:des|3des|aes\d*)(?:\s+\d+)?)\s+(?!<REDACTED>)\S+',
+     re.compile(r'\b(auth[ \t]+(?:md5|sha\d*)|priv[ \t]+(?:des|3des|aes\d*)(?:[ \t]+\d+)?)[ \t]+(?!<REDACTED>)\S+',
                 re.IGNORECASE),
      r'\1 <REDACTED>'),
     ("junos-snmpv3-password",
-     re.compile(r'\b(authentication-password|privacy-password)\s+(?!"?<REDACTED)(?:"[^"]*"|\S+)',
+     re.compile(r'\b(authentication-password|privacy-password)[ \t]+(?!"?<REDACTED)(?:"[^"\n]*"|\S+)',
                 re.IGNORECASE),
      r'\1 "<REDACTED>"'),
     # ── Generic encrypted blobs ──────────────────────────────────────────
@@ -142,11 +158,6 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("line-password",
      re.compile(rf"(?m)^([ \t]*(?:password|secret)(?:[ \t]+{_TYPE})?)[ \t]+{_TOK}(?=[ \t\r]*$)",
                 re.IGNORECASE), _R),
-    ("ospf-isis-keys",
-     _kw(r"(?<!ntp[ ])\bauthentication-key(?:[ \t]+[0-9])?|\bmessage-digest-key[ \t]+\d{1,3}[ \t]+md5"
-         r"(?:[ \t]+[0-9])?", quoted=True), _R),
-    ("ntp-authentication-key",
-     _kw(r"\bntp[ \t]+authentication-key[ \t]+\d{1,5}[ \t]+(?:md5|sha1|sha256|cmac-aes-128)"), _R),
     ("crypto-isakmp-key", _kw(r"\bcrypto[ \t]+isakmp[ \t]+key(?:[ \t]+[0-9])?"), _R),
     ("ikev2-pre-shared-key",
      _kw(r"\bpre-shared-key[ \t]+(?:(?:local|remote)(?:[ \t]+[0-9])?"
