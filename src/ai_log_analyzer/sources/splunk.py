@@ -20,12 +20,12 @@ import requests
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.sources.base import (
     SourceConfig,
-    SourceError,
     SourceTimeoutError,
     build_auth,
     guarded_session,
     registry,
     source_allow_private,
+    upstream_error,
     validate_host_filter,
 )
 
@@ -63,10 +63,10 @@ class SplunkSource:
             )
             r.raise_for_status()
             return True
-        except requests.exceptions.Timeout as exc:
-            raise SourceTimeoutError(f"Splunk {self.name} healthcheck timed out") from exc
+        except requests.exceptions.Timeout:
+            raise SourceTimeoutError(f"Splunk {self.name} healthcheck timed out") from None
         except requests.exceptions.RequestException as exc:
-            raise SourceError(f"Splunk {self.name} healthcheck failed: {exc}") from exc
+            raise upstream_error(f"Splunk {self.name} healthcheck failed", exc) from None
 
     def fetch(self, *, since_seconds: int = 3600, limit: int = 10_000,
               host_filter: str = "") -> Iterable[LogEvent]:
@@ -89,10 +89,10 @@ class SplunkSource:
             r = self.session.post(url, data=params, timeout=self.config.timeout_seconds)
             r.raise_for_status()
             payload = r.json()
-        except requests.exceptions.Timeout as exc:
-            raise SourceTimeoutError(f"Splunk {self.name} search timed out") from exc
+        except requests.exceptions.Timeout:
+            raise SourceTimeoutError(f"Splunk {self.name} search timed out") from None
         except requests.exceptions.RequestException as exc:
-            raise SourceError(f"Splunk {self.name} search failed: {exc}") from exc
+            raise upstream_error(f"Splunk {self.name} search failed", exc) from None
 
         for result in payload.get("results") or []:
             ev = _result_to_event(result)

@@ -524,7 +524,7 @@ src/ai_log_analyzer/
 | `POST` | `/api/analyze` | Full pipeline — see request shapes below (response includes `unknown_patterns`: mined templates of unmatched lines) |
 | `GET`  | `/api/rules` | Built-in rule count + registered custom classification rules |
 | `POST` | `/api/rules` | Add custom rules at runtime — `{"rules": [{"pattern", "severity", "category", "description"}]}` |
-| `GET`  | `/api/tail/<source_id>` | SSE live stream of classified events (`?min_severity=`, `?token=` on tokened deployments) |
+| `GET`  | `/api/tail/<source_id>` | SSE live stream of classified events (`?min_severity=`; token in a header, never `?token=`) |
 | `GET`  | `/api/incidents/similar` | Free-text search over the local incident journal (`?q=`, needs `AI_LOG_ANALYZER_INCIDENT_STORE`) |
 | `POST` | `/api/sanitize-diff` | Preview the sanitize-before-LLM gate on pasted text (`original`, `sanitized`, `total`, `by_rule`) |
 | `POST` | `/api/optimize` | Device-level config audit + patches |

@@ -22,6 +22,7 @@ from ai_log_analyzer.sources.base import (
     guarded_session,
     registry,
     source_allow_private,
+    upstream_error,
     validate_host_filter,
 )
 
@@ -54,10 +55,10 @@ class LibreNMSSource:
             )
             r.raise_for_status()
             return True
-        except requests.exceptions.Timeout as exc:
-            raise SourceTimeoutError(f"LibreNMS {self.name} healthcheck timed out") from exc
+        except requests.exceptions.Timeout:
+            raise SourceTimeoutError(f"LibreNMS {self.name} healthcheck timed out") from None
         except requests.exceptions.RequestException as exc:
-            raise SourceError(f"LibreNMS {self.name} healthcheck failed: {exc}") from exc
+            raise upstream_error(f"LibreNMS {self.name} healthcheck failed", exc) from None
 
     def fetch(self, *, since_seconds: int = 3600, limit: int = 10_000,
               host_filter: str = "") -> Iterable[LogEvent]:
@@ -74,10 +75,10 @@ class LibreNMSSource:
             r = self.session.get(url, params=params, timeout=self.config.timeout_seconds)
             r.raise_for_status()
             payload = r.json()
-        except requests.exceptions.Timeout as exc:
-            raise SourceTimeoutError(f"LibreNMS {self.name} query timed out") from exc
+        except requests.exceptions.Timeout:
+            raise SourceTimeoutError(f"LibreNMS {self.name} query timed out") from None
         except requests.exceptions.RequestException as exc:
-            raise SourceError(f"LibreNMS {self.name} query failed: {exc}") from exc
+            raise upstream_error(f"LibreNMS {self.name} query failed", exc) from None
 
         for ev in payload.get("logs") or []:
             msg = ev.get("message")

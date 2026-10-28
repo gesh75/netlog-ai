@@ -104,9 +104,10 @@ def test_llm_status_redacts_errors_for_anonymous_only(client):
     assert "last_errors" in client.get("/api/llm/status", headers=_h(VIEW)).get_json()
 
 
-def test_sse_tail_accepts_any_role_via_query_token(client):
+def test_sse_tail_accepts_any_role_via_header(client):
     assert client.get("/api/tail/nope").status_code == 401
-    assert client.get(f"/api/tail/nope?token={VIEW}").status_code == 404   # past the gate
+    for tok in (VIEW, OPER, ADMIN):
+        assert client.get("/api/tail/nope", headers=_h(tok)).status_code == 404   # past the gate
 
 
 def test_dev_mode_without_principals_stays_open(monkeypatch, state):
@@ -222,9 +223,9 @@ def test_triage_worker_control_is_admin_only(client):
     reset_worker()
 
 
-def test_query_string_tokens_only_work_for_the_sse_tail(client):
+def test_query_string_tokens_are_never_accepted(client):
     assert client.get(f"/api/incidents/similar?q=bgp&token={ADMIN}").status_code == 401
-    assert client.get(f"/api/tail/nope?token={ADMIN}").status_code == 404
+    assert client.get(f"/api/tail/nope?token={ADMIN}").status_code == 401
 
 
 def test_a_crashing_privileged_route_is_still_audited(client):
