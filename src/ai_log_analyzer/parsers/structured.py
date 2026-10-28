@@ -123,7 +123,7 @@ class JsonLineParser:
 
 _CEF_RE = re.compile(r"CEF:(?P<ver>\d)\|(?P<rest>.*)$", re.DOTALL)
 _LEEF_RE = re.compile(r"LEEF:(?P<ver>[12])(?:\.\d)?\|(?P<rest>.*)$", re.DOTALL)
-_EXT_RE = re.compile(r"(?<![\w.])(?P<k>[A-Za-z][\w.]*)=(?P<v>.*?)(?=\s+[A-Za-z][\w.]*=|\s*$)", re.DOTALL)
+_EXT_KEY_RE = re.compile(r"(?<![\w.])[A-Za-z][\w.]*=")
 _CEF_SEV = {"low": "info", "medium": "warning", "high": "err", "very-high": "crit", "unknown": "info"}
 
 
@@ -147,6 +147,30 @@ def _split_header(rest: str, n: int) -> tuple[list[str], str] | None:
     if len(fields) < n:
         return None
     return fields, rest[i:]
+
+
+def _ext_pairs(text: str) -> list[tuple[str, str, str]]:
+    """``(key, value, "key=value")`` for each extension, in one linear pass over ``text``.
+
+    A key starts a token (not inside a word or after a dot) and ends at ``=``. A value runs to the
+    whitespace before the next key that follows whitespace, or to the end, so it may hold spaces
+    and further ``=``. This replaces a lazy ``.*?`` regex whose whitespace lookahead backtracked
+    quadratically on a long run of spaces.
+    """
+    keys = [(m.start(), m.end()) for m in _EXT_KEY_RE.finditer(text)]
+    out: list[tuple[str, str, str]] = []
+    i, n = 0, len(keys)
+    while i < n:
+        start, vstart = keys[i]
+        j = i + 1
+        while j < n and not text[keys[j][0] - 1].isspace():
+            j += 1   # a key inside a value ("a=b=c", "a=b,c=d") does not end it
+        end = keys[j][0] if j < n else len(text)
+        while end > vstart and text[end - 1].isspace():
+            end -= 1
+        out.append((text[start:vstart - 1], text[vstart:end], text[start:end]))
+        i = j
+    return out
 
 
 def _cef_severity(raw: str) -> str:
@@ -178,7 +202,7 @@ class CefParser:
         if header is None:
             return None
         (vendor, product, _devver, sigid, name, sev), ext_text = header
-        ext = {x.group("k"): x.group("v").strip() for x in _EXT_RE.finditer(ext_text)}
+        ext = {k: v.strip() for k, v, _raw in _ext_pairs(ext_text)}
         detail = ext.get("msg", "")
         message = f"{name}: {detail}" if detail and name else (detail or name)
         if not message:
@@ -216,7 +240,7 @@ class LeefParser:
             delim = chr(int(raw[1:], 16)) if re.fullmatch(r"x[0-9A-Fa-f]{1,2}", raw) else raw[0]
         parts = body.split(delim)
         if len(parts) == 1 and "=" in body:
-            parts = [x.group(0) for x in _EXT_RE.finditer(body)]
+            parts = [raw for _k, _v, raw in _ext_pairs(body)]
         attrs_in: dict[str, str] = {}
         for part in parts:
             key, sep, val = part.partition("=")

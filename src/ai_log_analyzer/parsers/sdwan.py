@@ -18,7 +18,9 @@ from ai_log_analyzer.parsers.generic import base_event, with_structure
 # Case-sensitive substring gate — vendors emit these tokens verbatim.
 _GATE_TOKENS = ("%Viptela-", "%Cisco-SDWAN-", "bfd-state-change", "omp-peer-state-change",
                 "control-connection-state-change", "BFD-session")
-_KV_RE = re.compile(r'(?P<k>[a-z][\w-]*):(?P<v>"[^"]*"|[^\s,]+)')
+# The lookbehind and the lazy prefix keep a key attempt to the start of a word run (the first lowercase
+# letter in it), so a long run with no ":" costs one linear scan instead of one per character.
+_KV_RE = re.compile(r'(?<![\w-])(?:(?![a-z])[\w-])*(?P<k>[a-z][\w-]*):(?P<v>"[^"]*"|[^\s,]+)')
 _PAIR_RE = re.compile(r"\b(?P<k>local-tloc-ip|remote-tloc-ip|local-color|remote-color|state|"
                       r"local-system-ip|remote-system-ip|flap-reason)\s+(?P<v>[^\s,]+)", re.IGNORECASE)
 _PEER_RES = (

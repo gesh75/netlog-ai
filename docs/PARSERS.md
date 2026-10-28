@@ -30,6 +30,12 @@ timestamp carried no offset (RFC 3164, PAN-OS), it is treated as UTC and
 marked `attrs["tz_assumed"] = "utc"`. Run devices on UTC, or widen the
 correlation window to absorb the skew.
 
+Parsing is bounded, and the bounds are visible. A connector message longer than
+`AI_LOG_ANALYZER_MAX_LINE_BYTES` (counted in characters on that path) is parsed
+from its first part only and marked `attrs["parse_truncated"] = "1"`; the event
+keeps its full text. A FortiOS SD-WAN message longer than 4096 characters is
+classified from its first 4096 and marked `attrs["classify_truncated"] = "1"`.
+
 ## Parser registry
 
 `ai_log_analyzer.parsers.registry` tries plugins in priority order:
@@ -45,6 +51,9 @@ correlation window to absorb the skew.
 
 Add a parser with `registry.register(MyParser())`. A plugin returns a
 `LogEvent` (claimed), `None` (try the next plugin) or `SKIP` (drop the line).
+A plugin that raises on a line is skipped for that line only: the next plugin,
+ultimately the fallback, still takes it, and `registry.errors` counts it. One
+bad row never fails a batch, a triage tick or a source fetch.
 
 Events built outside the registry go through `parsers.ensure_structured()`
 inside the classifier. These come from API connectors such as Kibana, Splunk
