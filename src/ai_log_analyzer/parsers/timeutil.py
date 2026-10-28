@@ -45,15 +45,24 @@ def _fmt(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+_MAX_CACHED_STAMP = 64
+
+
 def normalize_ts(stamp: str, tz: str | None = None) -> tuple[str, bool]:
     """Return (ISO-8601 UTC string or "", assumed_utc).
 
     Results are cached per (stamp, tz, current hour): syslog bursts repeat
     the same second many times, and RFC 3164 year inference only needs the
-    clock to hour precision against its two-day threshold.
+    clock to hour precision against its two-day threshold. A stamp longer than any
+    real one is parsed but not cached: the JSON/CEF/LEEF parsers keep any ISO-looking
+    prefix verbatim, and 8192 slots of 64 KiB keys would pin ~500 MB.
     """
     now = _now()
-    return _normalize_cached(stamp or "", tz, now.replace(minute=0, second=0, microsecond=0))
+    stamp = stamp or ""
+    hour = now.replace(minute=0, second=0, microsecond=0)
+    if len(stamp) > _MAX_CACHED_STAMP:
+        return _normalize_cached.__wrapped__(stamp, tz, hour)
+    return _normalize_cached(stamp, tz, hour)
 
 
 # A stamp this close to the next 1 January, from a device a little ahead of us,
