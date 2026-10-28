@@ -36,8 +36,10 @@ from ai_log_analyzer.sources.base import (
     guarded_session,
     registry,
     source_allow_private,
+    upstream_error,
 )
 from ai_log_analyzer.sources.telemetry import InterfaceTelemetrySnapshot
+from ai_log_analyzer.url_redact import redact_text
 
 log = logging.getLogger(__name__)
 
@@ -413,17 +415,19 @@ class SolarWindsConnector:
                 verify=self.config.verify_ssl,
                 **kwargs,
             )
-        except requests.exceptions.Timeout as exc:
+        except requests.exceptions.Timeout:
             raise SourceTimeoutError(
                 f"SolarWinds {self.name} {method} {path} timed out"
-            ) from exc
+            ) from None
         except requests.exceptions.RequestException as exc:
-            raise _SolarWindsHTTPError(f"SolarWinds {self.name} {method} {path} failed: {exc}") from exc
+            # the exception text carries the request URL (userinfo, query): redact, and do not chain it
+            raise _SolarWindsHTTPError(
+                f"SolarWinds {self.name} {method} {path} failed: {redact_text(str(exc))}") from None
         try:
             response.raise_for_status()
-        except requests.exceptions.HTTPError as exc:
+        except requests.exceptions.HTTPError:
             raise _SolarWindsHTTPError(
-                f"SolarWinds {self.name} {method} {path} HTTP {response.status_code}") from exc
+                f"SolarWinds {self.name} {method} {path} HTTP {response.status_code}") from None
         if not response.content:
             return {}
         try:
@@ -666,7 +670,7 @@ class SolarWindsConnector:
         except SourceError:
             raise
         except requests.exceptions.RequestException as exc:
-            raise SourceError(f"SolarWinds {self.name} healthcheck failed: {exc}") from exc
+            raise upstream_error(f"SolarWinds {self.name} healthcheck failed", exc) from None
 
     def fetch(
         self,

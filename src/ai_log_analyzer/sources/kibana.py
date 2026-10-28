@@ -17,12 +17,12 @@ import requests
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.sources.base import (
     SourceConfig,
-    SourceError,
     SourceTimeoutError,
     build_auth,
     guarded_session,
     registry,
     source_allow_private,
+    upstream_error,
     validate_host_filter,
 )
 
@@ -78,10 +78,10 @@ class KibanaSource:
             data = r.json()
             # green / yellow are both operational
             return data.get("status") in {"green", "yellow"}
-        except requests.exceptions.Timeout as exc:
-            raise SourceTimeoutError(f"Kibana {self.name} healthcheck timed out") from exc
+        except requests.exceptions.Timeout:
+            raise SourceTimeoutError(f"Kibana {self.name} healthcheck timed out") from None
         except requests.exceptions.RequestException as exc:
-            raise SourceError(f"Kibana {self.name} healthcheck failed: {exc}") from exc
+            raise upstream_error(f"Kibana {self.name} healthcheck failed", exc) from None
 
     def fetch(self, *, since_seconds: int = 3600, limit: int = 10_000,
               host_filter: str = "") -> Iterable[LogEvent]:
@@ -94,10 +94,10 @@ class KibanaSource:
             r = self.session.post(url, json=query, timeout=self.config.timeout_seconds)
             r.raise_for_status()
             payload = r.json()
-        except requests.exceptions.Timeout as exc:
-            raise SourceTimeoutError(f"Kibana {self.name} search timed out") from exc
+        except requests.exceptions.Timeout:
+            raise SourceTimeoutError(f"Kibana {self.name} search timed out") from None
         except requests.exceptions.RequestException as exc:
-            raise SourceError(f"Kibana {self.name} search failed: {exc}") from exc
+            raise upstream_error(f"Kibana {self.name} search failed", exc) from None
 
         hits = (payload.get("hits") or {}).get("hits") or []
         for hit in hits:
