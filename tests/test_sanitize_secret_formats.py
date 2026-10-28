@@ -126,6 +126,19 @@ FORMATS: list[tuple[str, str, str]] = [
     ("wpa-psk-hex0", "security wpa psk set-key hex 0 " + "0123456789abcdef" * 4, "0123456789abcdef0123456789abcdef"),
     ("wpa-psk-aireos", "config wlan security wpa akm psk set-key ascii 1 AireosPskKeyX 3", "AireosPskKeyX"),
     ("wpa-psk-autonomous-ap", "wpa-psk ascii 7 0822455D0A16", "0822455D0A16"),
+    # Nokia SR Linux.
+    ("srl-secret-key-quoted", 'secret-key "SrlQuotedSecretX"', "SrlQuotedSecretX"),
+    ("srl-secret-key-bare", "secret-key SrlBareSecretX", "SrlBareSecretX"),
+    ("srl-secret-key-aes1", "secret-key $aes1$AQDsrlBlobPart0123456789=$SrlSecondPart0123456789AbCd==",
+     "SrlSecondPart0123456789AbCd"),
+    ("srl-aaa-set", 'set / system aaa server-group G server 192.0.2.1 tacacs secret-key "SrlSetFormSecretX"',
+     "SrlSetFormSecretX"),
+    ("srl-community-entry-block", "community-entry E1 {\n    community SrlCommBlockX\n}", "SrlCommBlockX"),
+    ("srl-community-entry-set", 'set / system snmp access-group G community-entry E1 community "SrlCommSetX"',
+     "SrlCommSetX"),
+    ("aes1-hash-anywhere", "value $aes1$AQDhashPart0123456789=$HashSecondPartAbCd0123456789==",
+     "HashSecondPartAbCd0123456789"),
+    ("aes-hash-anywhere", "value $aes$HashAesPlainPart0123456789", "HashAesPlainPart0123456789"),
     ("kv-psk", "psk=EqPskValueX1 ssid=corp", "EqPskValueX1"),
 ]
 
