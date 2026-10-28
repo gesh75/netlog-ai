@@ -35,7 +35,13 @@ Ticket-storm controls:
 * **Global rate limit** (``max_tickets_per_hour``): excess sends are deferred
   to a later tick, not dropped. Send attempts (failed ones too) are kept in the
   state DB, so a restart does not reset the limiter; critical incidents are
-  sent first.
+  sent first, and among equal severities the incident parked longest goes first.
+* **Shares of the budget:** one syslog sender may use at most half of the hourly
+  budget (``max_per_sender_per_hour``) and one device a fifth
+  (``max_per_device_per_hour``), so a flood from one source, even of critical
+  incidents under invented hostnames, cannot starve other devices' tickets. A
+  sender may also keep only ``max_pending_per_sender`` incidents parked; the
+  rest are dropped and counted (``dropped``).
 
 Reliability:
 
@@ -105,6 +111,9 @@ class TriageConfig:
     cooldown_s: float = 900.0
     min_severity: str = "high"
     max_tickets_per_hour: int = 30
+    max_per_sender_per_hour: int = 0     # share of the hourly budget one sender may use (0 = half, at least 2)
+    max_per_device_per_hour: int = 0     # share one device may use (0 = a fifth, at least 2)
+    max_pending_per_sender: int = 100    # parked incidents one sender may keep (0 = no limit)
     batch: int = 5000
     max_window_events: int = 20_000
     dedup_s: float = 5.0
@@ -119,6 +128,16 @@ class TriageConfig:
     pending_ttl_s: float = 86_400.0      # give up on an undeliverable incident after this long
     retention_days: float = 30.0         # prune resolved ticket rows older than this (0 = keep)
 
+    def sender_share(self) -> int:
+        """Tickets per hour one sender may use: configured, else half the budget (at least 2)."""
+        cap = self.max_tickets_per_hour
+        return min(cap, self.max_per_sender_per_hour or max(2, -(-cap // 2)))
+
+    def device_share(self) -> int:
+        """Tickets per hour one device may use: configured, else a fifth of the budget (at least 2)."""
+        cap = self.max_tickets_per_hour
+        return min(cap, self.max_per_device_per_hour or max(2, cap // 5))
+
     @classmethod
     def from_env(cls) -> TriageConfig:
         e = os.environ.get
@@ -129,6 +148,9 @@ class TriageConfig:
             cooldown_s=_env_float("AI_LOG_ANALYZER_TRIAGE_COOLDOWN_S", 900.0),
             min_severity=sev if sev in SEV_RANK else "high",
             max_tickets_per_hour=int(_env_float("AI_LOG_ANALYZER_TRIAGE_MAX_TICKETS_PER_HOUR", 30)),
+            max_per_sender_per_hour=int(_env_float("AI_LOG_ANALYZER_TRIAGE_MAX_PER_SENDER_PER_HOUR", 0)),
+            max_per_device_per_hour=int(_env_float("AI_LOG_ANALYZER_TRIAGE_MAX_PER_DEVICE_PER_HOUR", 0)),
+            max_pending_per_sender=int(_env_float("AI_LOG_ANALYZER_TRIAGE_MAX_PENDING_PER_SENDER", 100)),
             site=(e("AI_LOG_ANALYZER_TRIAGE_SITE", "") or "default").strip(),
             use_llm=(e("AI_LOG_ANALYZER_TRIAGE_USE_LLM", "") or "").strip().lower() in ("1", "true", "yes"),
             sources=tuple(s.strip() for s in (e("AI_LOG_ANALYZER_TRIAGE_SOURCES", "") or "").split(",")
@@ -313,6 +335,7 @@ class StreamingTriageWorker:
         self._window: deque[_Windowed] = deque()
         self._recent: dict[tuple[str, str], _Seen] = {}
         self._send_times: deque[float] = deque()      # persisted in kv so a restart keeps the limiter
+        self._send_log: deque[tuple[float, str, str]] = deque()   # (time, sender, device) of the same attempts
         self._cursor_pending: dict[str, int] = {}     # read this tick, committed after its deliveries
         self._gap_pending: dict[str, int] = {}
         self._warmed: set[str] = set()
@@ -350,8 +373,13 @@ class StreamingTriageWorker:
     def _load_state(self) -> None:
         if self._state_loaded:
             return
-        times = self.db.kv_get_all("triage").get("send_times") or []
-        self._send_times = deque(sorted(float(t) for t in times))
+        state = self.db.kv_get_all("triage")
+        self._send_times = deque(sorted(float(t) for t in state.get("send_times") or []))
+        try:
+            rows = state.get("send_log") or []
+            self._send_log = deque(sorted((float(t), str(s), str(d)) for t, s, d in rows))
+        except (TypeError, ValueError):
+            self._send_log = deque()
         self._state_loaded = True
 
     def _commit(self) -> None:
@@ -503,6 +531,7 @@ class StreamingTriageWorker:
                 dups_group[k] = dups_group.get(k, 0) + w.dups
                 dups_pair[pk] = dups_pair.get(pk, 0) + w.dups
         vendor_of: dict[str, str] = {}
+        senders_of: dict[str, set[str]] = {}   # lowercased host → addresses the listener saw it come from
         display: dict[str, str] = {}       # lowercased host → name as logged
         category_of: dict[str, str] = {}   # description → classifier category
         iface_display: dict[str, str] = {}   # entity keys lowercase names; tickets show them as logged
@@ -511,6 +540,8 @@ class StreamingTriageWorker:
                 iface_display.setdefault(e.interface.lower(), e.interface)
             if e.hostname:
                 display.setdefault(e.hostname.lower(), e.hostname)
+                if (e.attrs or {}).get("sender_ip"):
+                    senders_of.setdefault(e.hostname.lower(), set()).add(e.attrs["sender_ip"])
                 if e.vendor:
                     vendor_of.setdefault(e.hostname.lower(), e.vendor)
             category_of.setdefault(e.description, e.category)
@@ -551,6 +582,7 @@ class StreamingTriageWorker:
                 "messages": [f"{m.get('hostname', '')}: {m.get('description', '')}" for m in members[:5]],
                 "state": "active", "vendor": g["root"].get("vendor") or vendor_of.get(root_host.lower(), ""),
                 "root_id": g["id"], "confidence": 0.75 if g.get("inferred") else 0.9,
+                "senders": sorted(senders_of.get(root_host.lower(), ())),
                 "latest": max((latest_pair.get(pk, 0.0) for pk in pairs), default=0.0),
             })
         for (_sev, _desc), b in seen.items():
@@ -577,6 +609,7 @@ class StreamingTriageWorker:
                 "messages": [m for _, _, m in sorted(b["msg_heap"], reverse=True)],
                 "state": state or "active", "vendor": vendor_of.get(devices[0].lower(), ""), "confidence": 0.7,
                 "latest": latest_group.get((b["severity"], b["description"]), 0.0),
+                "senders": sorted(senders_of.get(devices[0].lower(), ())),
             })
         return out
 
@@ -645,18 +678,42 @@ class StreamingTriageWorker:
             if c["state"] == "active":
                 c0["state"] = "active"
             c0["devices"] = sorted(set(c0["devices"]) | set(c["devices"]))
+            c0["senders"] = sorted({*c0.get("senders", ()), *c.get("senders", ())})
             c0["related"].append(c["summary"])
         return list(merged.values())
 
-    def _rate_ok(self, now: float) -> bool:
+    def _origin(self, c: dict[str, Any]) -> tuple[str, str]:
+        """(sender, device) an incident's budget is charged to.
+
+        The device is the incident's root device. The sender is the address the listener saw that
+        device's lines come from (the least used one, so a line forged from elsewhere cannot make a
+        genuine device share its sender's cap); "" when nothing is known (file sources, inferred roots).
+        """
+        senders = [s for s in c.get("senders") or [] if s]
+        sender = min(senders, key=lambda s: (sum(1 for _, x, _d in self._send_log if x == s), s), default="")
+        return sender, (c.get("root_device") or "").lower()
+
+    def _rate_block(self, now: float, sender: str = "", device: str = "") -> str:
+        """Why this incident may not be sent now: "global", "sender", "device"; "" when it may."""
         while self._send_times and self._send_times[0] < now - 3600:
             self._send_times.popleft()
-        return len(self._send_times) < self.config.max_tickets_per_hour
+        while self._send_log and self._send_log[0][0] < now - 3600:
+            self._send_log.popleft()
+        cfg = self.config
+        if len(self._send_times) >= cfg.max_tickets_per_hour:
+            return "global"
+        if sender and sum(1 for _, s, _d in self._send_log if s == sender) >= cfg.sender_share():
+            return "sender"
+        if device and sum(1 for _, _s, d in self._send_log if d == device) >= cfg.device_share():
+            return "device"
+        return ""
 
-    def _note_attempt(self, now: float) -> None:
-        """Count one delivery attempt (failed ones too) toward the hourly limit, durably."""
+    def _note_attempt(self, now: float, sender: str = "", device: str = "") -> None:
+        """Count one delivery attempt (failed ones too) toward the hourly limits, durably."""
         self._send_times.append(now)
+        self._send_log.append((now, sender, device))
         self.db.kv_set("triage", "send_times", list(self._send_times))
+        self.db.kv_set("triage", "send_log", [list(row) for row in self._send_log])
 
     def _decide(self, rec: dict[str, Any] | None, c: dict[str, Any], now: float) -> str:
         if rec is None:
@@ -721,11 +778,23 @@ class StreamingTriageWorker:
 
     # ── pending deliveries (durable) ────────────────────────────────────────
     def _park(self, c: dict[str, Any], action: str, sinks: list[str], pend: dict[str, Any] | None,
-              now: float, nowhere: bool = False) -> None:
-        """Remember an undelivered incident so a crash or takeover still delivers it."""
+              now: float, nowhere: bool = False, sender: str = "") -> bool:
+        """Remember an undelivered incident so a crash or takeover still delivers it.
+
+        A new incident of ``sender`` is refused (False) once that sender already keeps
+        ``max_pending_per_sender`` incidents parked: one source cannot choose how much waits.
+        """
+        cap = self.config.max_pending_per_sender
+        if pend is None and sender and cap > 0:
+            held = sum(1 for p in self.db.kv_get_all("triage_pending").values()
+                       if sender in ((p.get("c") or {}).get("senders") or ()))
+            if held >= cap:
+                self.totals["dropped"] += 1
+                return False
         self.db.kv_set("triage_pending", c["fingerprint"], {
             "c": c, "action": action, "sinks": sorted(sinks), "since": (pend or {}).get("since", now),
             "attempts": int((pend or {}).get("attempts", 0)) + 1, "nowhere": nowhere})
+        return True
 
     def _put(self, rec: dict[str, Any]) -> None:
         self.db.triage_put(rec, fence=(_LEASE, self.owner), now=self._now())
@@ -744,9 +813,9 @@ class StreamingTriageWorker:
             self._last_renew = now
             self._load_state()
             tick: dict[str, Any] = {"role": "active", "at": now, "new_events": 0, "window_events": 0,
-                                    "opened": [], "updated": [], "held": 0, "deferred": 0, "backoff": 0,
-                                    "skipped_recovered": 0, "errors": [], "gap_rows": 0, "backlog": False,
-                                    "aborted": False}
+                                    "opened": [], "updated": [], "held": 0, "deferred": 0, "capped": 0,
+                                    "dropped": 0, "backoff": 0, "skipped_recovered": 0, "errors": [],
+                                    "gap_rows": 0, "backlog": False, "aborted": False}
             try:
                 self._run_active(now, tick)
             except (_LeaseGone, LeaseLost):
@@ -756,7 +825,7 @@ class StreamingTriageWorker:
                 log.warning("triage lease lost mid-tick; aborting without committing cursors")
             tick["window_events"] = len(self._window)
             tick["candidates"] = len(tick["opened"]) + len(tick["updated"]) + tick["held"] + tick["deferred"]
-            for k in ("held", "deferred", "skipped_recovered"):
+            for k in ("held", "deferred", "capped", "skipped_recovered"):
                 self.totals[k] += tick[k]
             self.totals["opened"] += len(tick["opened"])
             self.totals["updated"] += len(tick["updated"])
@@ -784,12 +853,17 @@ class StreamingTriageWorker:
         fresh_cands = {c["fingerprint"]: c for c in self._merge(self._candidates())} if fresh else {}
         items = [(c, pending.get(fp), False) for fp, c in fresh_cands.items()]
         items += [(p["c"], p, True) for fp, p in pending.items() if fp not in fresh_cands]
-        # Critical first, so the hourly limit never spends its budget on lower severities.
-        items.sort(key=lambda it: (SEV_RANK.get(it[0]["severity"], 5), it[0]["fingerprint"]))
+        # Critical first, so the hourly limit never spends its budget on lower severities; within a
+        # severity the incident parked longest goes first, so newer ones cannot overtake it for ever.
+        items.sort(key=lambda it: (SEV_RANK.get(it[0]["severity"], 5), float((it[1] or {}).get("since", now)),
+                                   it[0]["fingerprint"]))
         for c, pend, orphan in items:
             if not self._still_leader():
                 raise _LeaseGone()
             self._handle(c, pend, orphan, now, tick)
+        if tick["dropped"]:
+            log.warning("triage: dropped %d incident(s) from senders that already keep %d parked",
+                        tick["dropped"], cfg.max_pending_per_sender)
         self._commit()
         if cfg.retention_days > 0 and now - self._last_prune >= 3600:
             self._last_prune = now
@@ -823,9 +897,14 @@ class StreamingTriageWorker:
             tick["held"] += 1
             return
         targets = [s for s in self.sinks if owed is None or s.name in owed]
-        if not self._rate_ok(now):
+        sender, device = self._origin(c)
+        blocked = self._rate_block(now, sender, device)
+        if blocked:
             tick["deferred"] += 1
-            self._park(c, action, [s.name for s in targets], pend, now, nowhere=rec is None)
+            tick["capped"] += blocked != "global"
+            names = [s.name for s in targets]
+            if not self._park(c, action, names, pend, now, nowhere=rec is None, sender=sender):
+                tick["dropped"] += 1
             return
         ready = [s for s in targets if self._sink_ready(s.name, now)]
         if not ready:                           # every owed sink is backing off: wait, do not spend the limit
@@ -836,7 +915,7 @@ class StreamingTriageWorker:
         if action == "update" and c["state"] in ("recovered", "up"):
             payload.attachments["Status"] = "All affected entities have recovered; verify and close."
         results, errors, failed = self._send(payload, ready, now)
-        self._note_attempt(now)
+        self._note_attempt(now, sender, device)
         tick["errors"].extend(errors)
         undelivered = failed + [s.name for s in targets if s not in ready]
         if not results:

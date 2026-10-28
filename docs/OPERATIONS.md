@@ -172,6 +172,9 @@ ai-log-analyzer triage-worker            # or AI_LOG_ANALYZER_TRIAGE_WORKER=true
 | `AI_LOG_ANALYZER_TRIAGE_MIN_SEVERITY` | high | lowest severity that opens a ticket |
 | `AI_LOG_ANALYZER_TRIAGE_COOLDOWN_S` | 900 | per-incident quiet period after a send |
 | `AI_LOG_ANALYZER_TRIAGE_MAX_TICKETS_PER_HOUR` | 30 | global send budget; excess is deferred |
+| `AI_LOG_ANALYZER_TRIAGE_MAX_PER_SENDER_PER_HOUR` | half the budget | share one sender address may use; parked incidents go oldest first |
+| `AI_LOG_ANALYZER_TRIAGE_MAX_PER_DEVICE_PER_HOUR` | a fifth of the budget | share one device may use |
+| `AI_LOG_ANALYZER_TRIAGE_MAX_PENDING_PER_SENDER` | 100 | deferred incidents one sender may keep parked |
 | `AI_LOG_ANALYZER_TRIAGE_SINKS` | dry-run | `jira`, `servicenow`, `webhook`, `dry-run` |
 | `AI_LOG_ANALYZER_TRIAGE_USE_LLM` | false | LLM playbooks (KB playbooks otherwise) |
 

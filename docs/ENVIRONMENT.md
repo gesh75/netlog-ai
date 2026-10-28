@@ -134,6 +134,9 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `AI_LOG_ANALYZER_TRIAGE_RETENTION_DAYS` | `30` | **(new in 2.2.0)** Age after which non-active triage ticket records are pruned. |
 | `AI_LOG_ANALYZER_TRIAGE_COOLDOWN_S` | `900` | Per-incident ticket cooldown in seconds. |
 | `AI_LOG_ANALYZER_TRIAGE_MAX_TICKETS_PER_HOUR` | `30` | Hard cap on tickets per hour. |
+| `AI_LOG_ANALYZER_TRIAGE_MAX_PER_SENDER_PER_HOUR` | `0` (half the hourly cap, at least 2) | Most tickets per hour that incidents from one syslog sender address may use, so one source cannot spend the whole budget. Set it to the hourly cap if every device reaches the listener through one collector. |
+| `AI_LOG_ANALYZER_TRIAGE_MAX_PER_DEVICE_PER_HOUR` | `0` (a fifth of the hourly cap, at least 2) | Most tickets per hour one device may use. |
+| `AI_LOG_ANALYZER_TRIAGE_MAX_PENDING_PER_SENDER` | `100` | Most deferred incidents one sender may keep parked; further ones are dropped and counted (`dropped`). `0` = no limit. |
 | `AI_LOG_ANALYZER_TRIAGE_SITE` | `default` | Site label stamped on triage incidents. |
 | `AI_LOG_ANALYZER_TRIAGE_USE_LLM` | `false` | Allow the LLM in triage (sanitized first). |
 | `AI_LOG_ANALYZER_TRIAGE_SOURCES` | unset | Comma list of registered source ids to include; empty means all. |
