@@ -15,11 +15,14 @@ plugin) or ``SKIP`` (mine, but drop the line — e.g. an empty terminal row).
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Protocol
 
 from ai_log_analyzer.classifier import LogEvent
+
+log = logging.getLogger(__name__)
 
 # Stamps seen in front of the host: BSD ("Oct 22 10:15:01"), optionally with a
 # year (IOS "Oct 22 2026 10:15:01"), microseconds (SONiC) and a timezone
@@ -93,6 +96,21 @@ def pri_to_severity(pri: int) -> str:
     return SEV_NAMES[pri & 0x07]
 
 
+# A real PRI is at most 3 digits and a numeric severity 1; the cap keeps int() off device-sized digit strings.
+_MAX_INT_DIGITS = 10
+
+
+def _to_int(text: str | None) -> int | None:
+    """``int(text)`` for a short run of decimal digits, else None. Never raises.
+
+    ``str.isdigit()`` is not enough of a guard: it accepts "²", which ``int()`` rejects, and ``int()``
+    itself refuses digit strings over 4300 characters (Python 3.11+).
+    """
+    if not text or len(text) > _MAX_INT_DIGITS or not text.isdecimal():
+        return None
+    return int(text)
+
+
 def _canon_ts(ts: str) -> str:
     """Reduce an extended BSD stamp to a shape downstream code can order.
 
@@ -151,16 +169,16 @@ def split_envelope(line: str) -> Envelope:
                 ts = _canon_ts(ts)
             if fmt == "rfc3164":
                 app, msg = _unwrap_xr(app, msg)
-            return Envelope(fmt, int(pri) if pri else None, ts, m.group("host") or "", app, msg,
+            return Envelope(fmt, _to_int(pri), ts, m.group("host") or "", app, msg,
                             _SEV_BY_WORD.get(g.get("sev") or "", ""))
     m = _LOOSE_RE.match(line)
     if m:
         pri = m.group("pri")
-        return Envelope("loose", int(pri) if pri else None, _canon_ts(m.group("ts")), m.group("host"), "",
+        return Envelope("loose", _to_int(pri), _canon_ts(m.group("ts")), m.group("host"), "",
                         m.group("body"))
     m = _PRI_ONLY_RE.match(line)
     if m:
-        return Envelope("pri", int(m.group("pri")), "", "", "", m.group("body"))
+        return Envelope("pri", _to_int(m.group("pri")), "", "", "", m.group("body"))
     return Envelope("none", None, "", "", "", line)
 
 
@@ -184,6 +202,7 @@ class ParserRegistry:
 
     def __init__(self) -> None:
         self._plugins: list[ParserPlugin] = []
+        self.errors = 0   # lines on which the envelope split or a plugin raised (the line was still handled)
 
     def register(self, plugin: ParserPlugin) -> None:
         """Add (or replace by name) a plugin and keep priority order."""
@@ -204,11 +223,28 @@ class ParserRegistry:
         line = line.lstrip("﻿").strip()
         if not line:
             return None
-        env = split_envelope(line)
+        # One bad line must never fail a whole batch (triage tick, source fetch, live tail): a
+        # plugin that raises is skipped so the next one, ultimately the fallback, still gets it.
+        try:
+            env = split_envelope(line)
+        except Exception:
+            self.note_error("envelope split")
+            env = Envelope("none", None, "", "", "", line)
         for plugin in self._plugins:
-            result = plugin.parse(line, env, default_host)
+            try:
+                result = plugin.parse(line, env, default_host)
+            except Exception:
+                self.note_error(f"plugin {plugin.name}")
+                continue
             if result is SKIP:
                 return None
             if result is not None:
                 return result  # type: ignore[return-value]
         return None
+
+    def note_error(self, what: str) -> None:
+        """Count a contained failure; log the first and every 1000th (a flood must not flood the log)."""
+        self.errors += 1
+        level = logging.WARNING if self.errors == 1 or self.errors % 1000 == 0 else logging.DEBUG
+        log.log(level, "%s failed on a line; handing it on (%d such line(s) so far)", what, self.errors,
+                exc_info=True)
