@@ -11,6 +11,7 @@ No graph or ML libraries. Callers pass ``Topology`` / ``TopologyGraph``,
 """
 from __future__ import annotations
 
+import itertools
 import re
 import statistics
 from collections.abc import Iterable, Mapping
@@ -62,6 +63,13 @@ _DRIFT_GROUPS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ospf", re.compile(r"\bospf\b|\barea\b", re.IGNORECASE)),
     ("interface", re.compile(r"\bshutdown\b|\bspeed\b|\binterface\b", re.IGNORECASE)),
 )
+
+
+# Every finding is compared with every changed line, so the work is findings x lines. Both are capped
+# (the first ones in input order are kept) and what was left out is reported on the drift report.
+_MAX_DRIFT_FINDINGS = 1_000
+_MAX_DRIFT_LINES = 1_000
+_DRIFT_GENERIC_ENTITIES = frozenset({"session", "bgp", "ospf", "bfd", "lacp"})
 
 
 @dataclass
@@ -200,6 +208,9 @@ class ConfigDriftHit:
 class ConfigDriftCorrelationReport:
     hits: list[ConfigDriftHit] = field(default_factory=list)
     correlated_count: int = 0
+    # Set when an input was capped or approximated: {"findings"|"changed_lines": {seen, used, dropped},
+    # "config_diff": {"approximate": True}}. Empty when the whole input was examined.
+    truncated: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -274,16 +285,31 @@ def correlate_config_drift(
     findings: list[Any],
 ) -> ConfigDriftCorrelationReport:
     """Match changed BGP/MTU/VLAN/ACL/OSPF/interface lines to findings."""
-    lines = _diff_lines(config_diff)
+    lines, approximate = _diff_lines(config_diff)
     if not lines or not findings:
         return ConfigDriftCorrelationReport()
+    truncated: dict[str, Any] = {"config_diff": {"approximate": True}} if approximate else {}
+    if len(lines) > _MAX_DRIFT_LINES:
+        truncated["changed_lines"] = _cap_note(len(lines), _MAX_DRIFT_LINES)
+        lines = lines[:_MAX_DRIFT_LINES]
+    stream = _iter_findings(findings)
+    used = list(itertools.islice(stream, _MAX_DRIFT_FINDINGS))
+    extra = sum(1 for _ in stream)
+    if extra:
+        truncated["findings"] = _cap_note(len(used) + extra, len(used))
+    prepared = [(line, line.lower(), _drift_groups(line)) for line in lines]
+    hostname = _diff_hostname(config_diff).lower()
     hits: list[ConfigDriftHit] = []
-    for finding in _iter_findings(findings):
-        hit = _best_drift_hit(finding, lines, _diff_hostname(config_diff))
+    for finding in used:
+        hit = _best_drift_hit(finding, prepared, hostname)
         if hit is not None:
             hits.append(hit)
     hits.sort(key=lambda h: (-h.confidence, h.device))
-    return ConfigDriftCorrelationReport(hits=hits, correlated_count=len(hits))
+    return ConfigDriftCorrelationReport(hits=hits, correlated_count=len(hits), truncated=truncated)
+
+
+def _cap_note(seen: int, used: int) -> dict[str, int]:
+    return {"seen": seen, "used": used, "dropped": seen - used}
 
 
 def build_device_overlays(
@@ -733,21 +759,23 @@ def _blast_score(
 
 # ── config-drift helpers ─────────────────────────────────────────────────────
 
-def _diff_lines(config_diff: ConfigDiff | Mapping[str, Any] | None) -> list[str]:
+def _diff_lines(config_diff: ConfigDiff | Mapping[str, Any] | None) -> tuple[list[str], bool]:
+    """Changed lines, and whether they came from an approximate (size-capped) diff."""
     if config_diff is None:
-        return []
+        return [], False
     if isinstance(config_diff, ConfigDiff):
-        return [line for line in config_diff.changed_lines() if line.strip()]
+        lines, approximate = config_diff.diff_lines()
+        return [line for line in lines if line.strip()], approximate
     if isinstance(config_diff, Mapping):
         explicit = list(config_diff.get("changed_lines") or [])
         explicit += list(config_diff.get("added") or [])
         explicit += list(config_diff.get("removed") or [])
         if explicit:
-            return [str(line) for line in explicit if str(line).strip()]
+            return [str(line) for line in explicit if str(line).strip()], False
         before = str(config_diff.get("before") or "")
         after = str(config_diff.get("after") or "")
-        return ConfigDiff(before=before, after=after).changed_lines()
-    return []
+        return ConfigDiff(before=before, after=after).diff_lines()
+    return [], False
 
 
 def _diff_hostname(config_diff: ConfigDiff | Mapping[str, Any] | None) -> str:
@@ -758,48 +786,54 @@ def _diff_hostname(config_diff: ConfigDiff | Mapping[str, Any] | None) -> str:
     return ""
 
 
-def _best_drift_hit(finding: Finding, lines: list[str], hostname: str) -> ConfigDriftHit | None:
-    best: ConfigDriftHit | None = None
-    for line in lines:
-        keywords = _shared_keywords(finding.message, line)
-        entity = _entity_id(finding.message)
-        if entity.lower() in line.lower() and entity.lower() not in {k.lower() for k in keywords}:
-            keywords = [*keywords, entity]
-        if not keywords:
+def _drift_groups(text: str) -> frozenset[str]:
+    return frozenset(name for name, pattern in _DRIFT_GROUPS if pattern.search(text))
+
+
+def _best_drift_hit(
+    finding: Finding, lines: list[tuple[str, str, frozenset[str]]], hostname: str,
+) -> ConfigDriftHit | None:
+    """Best changed line for ``finding``. ``lines`` are (line, lowercased line, drift groups) and
+    ``hostname`` is lowercased: everything that depends on one side only is computed once, so a pair
+    costs a set intersection and two substring tests."""
+    message_groups = _drift_groups(finding.message)
+    entity = _entity_id(finding.message)
+    entity_low = entity.lower()
+    plain_entity = entity_low not in _DRIFT_GENERIC_ENTITIES
+    device = finding.device.lower()
+    device_hit = bool(device) and hostname == device
+    best: tuple[float, str, set[str] | frozenset[str], bool] | None = None
+    for line, low, groups in lines:
+        shared = message_groups & groups
+        entity_in_line = entity_low in low
+        entity_added = entity_in_line and entity_low not in shared
+        count = len(shared) + entity_added
+        if not count:
             continue
-        confidence = _drift_confidence(finding, line, keywords, hostname)
-        explanation = (
+        score = 0.45
+        if count > 1:
+            score += 0.1
+        if plain_entity and entity_in_line:
+            score += 0.25
+        if device and (device_hit or device in low):
+            score += 0.2
+        confidence = round(min(1.0, score), 4)
+        if best is None or confidence > best[0]:
+            best = (confidence, line, shared, entity_added)
+    if best is None:
+        return None
+    confidence, line, shared, entity_added = best
+    keywords = [name for name, _pattern in _DRIFT_GROUPS if name in shared]
+    if entity_added:
+        keywords.append(entity)
+    return ConfigDriftHit(
+        device=finding.device,
+        finding_message=finding.message,
+        changed_line=line,
+        confidence=confidence,
+        explanation=(
             f"Changed line shares {', '.join(keywords)} with a {finding.severity} finding "
             f"on {finding.device or 'unknown'}."
-        )
-        hit = ConfigDriftHit(
-            device=finding.device,
-            finding_message=finding.message,
-            changed_line=line,
-            confidence=confidence,
-            explanation=explanation,
-            matched_keywords=keywords,
-        )
-        if best is None or hit.confidence > best.confidence:
-            best = hit
-    return best
-
-
-def _shared_keywords(message: str, line: str) -> list[str]:
-    blob = f"{message}\n{line}"
-    return [name for name, pattern in _DRIFT_GROUPS if pattern.search(blob) and pattern.search(message) and pattern.search(line)]
-
-
-def _drift_confidence(finding: Finding, line: str, keywords: list[str], hostname: str) -> float:
-    score = 0.45
-    if len(keywords) > 1:
-        score += 0.1
-    entity = _entity_id(finding.message)
-    generic = {"session", "bgp", "ospf", "bfd", "lacp"}
-    if entity.lower() not in generic and entity.lower() in line.lower():
-        score += 0.25
-    device = finding.device.lower()
-    host = hostname.lower()
-    if device and (device in line.lower() or host == device):
-        score += 0.2
-    return round(min(1.0, score), 4)
+        ),
+        matched_keywords=keywords,
+    )
