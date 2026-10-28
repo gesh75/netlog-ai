@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.url_redact import redact_text
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Exceptions
@@ -36,6 +37,13 @@ class SourceTimeoutError(SourceError):
 
 class SourceAuthError(SourceError):
     """All configured auth methods failed for this source."""
+
+
+def upstream_error(prefix: str, exc: BaseException) -> SourceError:
+    """``SourceError`` for a failed upstream request. A ``requests`` exception carries the full request URL
+    (userinfo and query included), so its text goes through ``redact_text``; raise the result ``from None``,
+    because tracebacks print the chained original."""
+    return SourceError(f"{prefix}: {redact_text(str(exc))}")
 
 
 _METADATA_HOSTS = frozenset({

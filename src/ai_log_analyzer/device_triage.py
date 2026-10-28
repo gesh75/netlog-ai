@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.url_redact import redact_text
 
 # Raw-severity buckets considered error-grade for pattern dedup (DCN parity).
 _ERROR_SEVS: frozenset[str] = frozenset({"err", "error", "crit", "emerg", "alert"})
@@ -261,7 +262,7 @@ def triage_from_manager(
             all_events.extend(events)
             used_sources.append(sid)
         except SourceError as exc:
-            skipped[sid] = str(exc)
+            skipped[sid] = redact_text(str(exc))
 
     result_obj = triage_device(hostname, all_events)
     return {
