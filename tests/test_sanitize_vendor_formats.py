@@ -84,6 +84,15 @@ EXACT: list[tuple[str, str]] = [
     ("set psksecret ENC ExampleBlob0123456789==", f"set psksecret ENC {R}"),
     ("set authentication-key ENC ExampleBlob0123456789==", f"set authentication-key ENC {R}"),
     ("set password MyClearPass", f"set password {R}"),
+    # NX-OS SNMPv3 localized keys.
+    ("snmp-server user admin network-admin auth md5 0xA priv 0xB localizedkey",
+     f"snmp-server user admin network-admin auth md5 {R} priv {R} localizedkey"),
+    ("snmp-server user admin network-admin auth sha 0xA priv aes-128 0xB localizedkey",
+     f"snmp-server user admin network-admin auth sha {R} priv aes-128 {R} localizedkey"),
+    ("snmp-server user admin network-admin auth sha-256 0xA priv aes-256 0xB localizedV2key",
+     f"snmp-server user admin network-admin auth sha-256 {R} priv aes-256 {R} localizedV2key"),
+    ("snmp-server user u g v3 auth sha AuthPw1 priv aes 128 PrivPw1",
+     f"snmp-server user u g v3 auth sha {R} priv aes 128 {R}"),
 ]
 
 
@@ -105,6 +114,9 @@ BENIGN = [
     "no ip ospf message-digest-key 7",
     "ntp trusted-key 7",
     "ntp authentication-key 7",
+    # SNMPv3 groups and users without keys
+    "snmp-server group NMS v3 priv read V1 write V2",
+    "snmp-server user admin network-admin",
     # prose and logs
     "pre-shared-key authentication enabled for peer 192.0.2.1",
     "IKE: using pre-shared-key on both peers",
@@ -153,3 +165,9 @@ def test_keyword_at_end_of_line_never_eats_the_next_line(text):
 def test_type_5_secret_keeps_the_line_break_before_its_hash():
     out, _ = sanitize("secret 5\n$1$salt$HashHashHash99")
     assert out.count("\n") == 1 and "HashHashHash99" not in out
+
+
+def test_nxos_and_ios_snmpv3_keywords_do_not_redact_fields_next_to_them():
+    cfg = "snmp-server group NMS v3 priv read V1\nsnmp-server user u NMS v3 auth sha AuthPw1 priv PrivPw1\n"
+    out, _ = sanitize(cfg)
+    assert out == f"snmp-server group NMS v3 priv read V1\nsnmp-server user u NMS v3 auth sha {R} priv {R}\n"

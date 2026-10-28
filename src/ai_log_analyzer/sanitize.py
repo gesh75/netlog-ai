@@ -150,11 +150,17 @@ _RULES: list[tuple[str, Any, Any]] = [
      _kw(r"\b(?:tacacs-server[ \t]+key|tacacs-server[ \t]+host[ \t]+\S{1,64}[ \t]+(?:[^\n]{0,100}?[ \t])?key)"
          r"(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
     ("eos-bgp-password", _kw(r"\bneighbor[ \t]+\S{1,64}[ \t]+password(?:[ \t]+[0-9])?"), _R),
-    # SNMPv3 USM keys — EOS/IOS `snmp-server user U G v3 auth sha KEY priv aes KEY`
-    # and Junos `authentication-password "..."` / `privacy-password "..."`.
+    # SNMPv3 USM keys — EOS/IOS `snmp-server user U G v3 auth sha KEY priv aes KEY`, NX-OS
+    # `auth sha-256 0xKEY priv aes-128 0xKEY` / `priv 0xKEY` and Junos `authentication-password "..."`.
     ("snmpv3-auth-priv-key",
-     re.compile(r'\b(auth[ \t]+(?:md5|sha\d*)|priv[ \t]+(?:des|3des|aes\d*)(?:[ \t]+\d+)?)[ \t]+(?!<REDACTED>)\S+',
-                re.IGNORECASE),
+     re.compile(rf'\b(auth[ \t]+(?:md5|sha(?:-?\d+)?)|priv[ \t]+(?:des|3des|aes(?:-?\d+)?)(?:[ \t]+\d+)?)'
+                rf'[ \t]+{_TOK}', re.IGNORECASE),
+     r'\1 <REDACTED>'),
+    # `priv` with no cipher name (NX-OS) is a key only on a `snmp-server user` line: in `snmp-server group
+    # G v3 priv read V` it is the security level.
+    ("snmpv3-user-priv-key",
+     re.compile(r'\b(snmp-server[ \t]+user[ \t]+[^\n]{0,200}?[ \t]priv)[ \t]+'
+                rf'(?!(?:des|3des|aes(?:-?\d+)?)(?![^\s;])){_TOK}', re.IGNORECASE),
      r'\1 <REDACTED>'),
     ("junos-snmpv3-password",
      re.compile(r'\b(authentication-password|privacy-password)[ \t]+(?!"?<REDACTED)(?:"[^"\n]*"|\S+)',
