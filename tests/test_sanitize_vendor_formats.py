@@ -3,6 +3,10 @@ neighbouring lines are untouched, and no rule backtracks badly on hostile input.
 table lives in test_sanitize_secret_formats.py; these tests pin the exact output shape."""
 from __future__ import annotations
 
+import base64
+import json
+import time
+
 import pytest
 
 from ai_log_analyzer.sanitize import sanitize
@@ -223,3 +227,108 @@ def test_nxos_and_ios_snmpv3_keywords_do_not_redact_fields_next_to_them():
     cfg = "snmp-server group NMS v3 priv read V1\nsnmp-server user u NMS v3 auth sha AuthPw1 priv PrivPw1\n"
     out, _ = sanitize(cfg)
     assert out == f"snmp-server group NMS v3 priv read V1\nsnmp-server user u NMS v3 auth sha {R} priv {R}\n"
+
+
+# The serial-number (PII) and JWT rules were rewritten to run in linear time: they must still redact.
+@pytest.mark.parametrize("text,expected", [
+    ("Serial Number: FOC1234ABCD", "Serial Number: <REDACTED-SERIAL>"),
+    ("serial number FOC1234ABCD", "serial number <REDACTED-SERIAL>"),
+    ("serial#FDO21340ABC", "serial#<REDACTED-SERIAL>"),
+    ("S/N: JAE1234ABCD", "S/N: <REDACTED-SERIAL>"),
+    ("serial_no = AB-12345-CD", "serial_no = <REDACTED-SERIAL>"),
+    ("Chassis serial   FDO2132W1ZZ", "Chassis serial   <REDACTED-SERIAL>"),
+    ("serial number\tFOC1234ABCD", "serial number\t<REDACTED-SERIAL>"),
+    ("serial number:\n  FOC1234ABCD", "serial number:\n  <REDACTED-SERIAL>"),
+])
+def test_serial_number_is_still_masked_with_pii_on(text, expected):
+    assert sanitize(text, mask_pii=True, mask_public_ip=False)[0] == expected
+
+
+@pytest.mark.parametrize("text", [
+    "line vty 0 4\n transport input ssh\n serial console",
+    "interface Serial0/0\n serial restart-delay 0",
+    "serial number unknown",
+])
+def test_serial_like_text_is_not_masked(text):
+    assert sanitize(text, mask_pii=True, mask_public_ip=False)[0] == text
+
+
+def _jwt() -> str:
+    def seg(obj):
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
+    return f"{seg({'alg': 'HS256', 'typ': 'JWT'})}.{seg({'sub': 'example', 'iat': 1700000000})}.c2lnbmF0dXJlLWV4YW1wbGU"
+
+
+@pytest.mark.parametrize("wrap", ["{}", "token={}", 'jwt "{}"', "cookie: session={}; path=/", "({})", "a b {} c"])
+def test_jwt_is_still_redacted(wrap):
+    token = _jwt()
+    out, n = sanitize(wrap.format(token))
+    assert token not in out and token[:12] not in out and "<REDACTED" in out and n >= 1
+
+
+def test_run_of_eyj_without_dots_is_not_a_jwt():
+    text = "eyJ-eyJ-eyJ-eyJ-eyJ-eyJ"
+    assert sanitize(text) == (text, 0)
+
+
+# ── Whole-pipeline ReDoS regression: every rule, PII rules on, hostile 64 KiB lines ──────────────────
+
+_KB64 = 65_536
+_ADVERSARIAL = {
+    "serial-spaces-letters": "serial" + " " * (_KB64 // 2) + "a" * (_KB64 // 2),
+    "serial-spaces": "serial" + " " * _KB64,
+    "serial-letters": "serial " + "a" * _KB64,
+    "serial-digits": "serial " + "1" * _KB64,
+    "serial-repeat": "serial " * 9_400,
+    "serial-number-repeat": "serial number " * 4_700,
+    "serial-colon-repeat": "serial: " * 8_200,
+    "sn-slash-repeat": "S/N " * 16_400,
+    "sn-repeat": "SN " * 21_900,
+    "eyj-hyphen-repeat": "eyJ-" * 16_400,
+    "eyj-dot-repeat": "eyJaaaaaaaa." * 5_000,
+    "eyj-run": "eyJ" + "a" * _KB64,
+    "eyj-pairs": "eyJaaaaaaaa.eyJ" * 4_000,
+    "spaces": " " * _KB64,
+    "digits": "0" * _KB64,
+    "dots": "." * _KB64,
+    "hyphens": "-" * _KB64,
+    "base64": "AbCd+/=" * 9_300,
+    "underscores": "_" * _KB64,
+    "community-repeat": "community " * 6_500,
+    "snmp-community-repeat": "snmp community " * 4_300,
+    "psk-repeat": "pre-shared-key " * 4_300,
+    "set-repeat": "set a " * 10_900,
+    "set-secret-repeat": "set a secret " * 5_400,
+    "nv-set-repeat": "nv set a " * 7_200,
+    "key-repeat": " key 0 " * 9_300,
+    "snmp-user-repeat": "snmp-server user u g " * 3_200,
+    "colon-repeat": "password: " * 6_500,
+    "xml-repeat": "<secret>" * 8_100,
+    "xml-text": "<secret>" + "a" * _KB64,
+    "aq-repeat": "-AQ==" * 13_000,
+    "aq-run": "-AQ==" + "A" * _KB64,
+    "aes-repeat": "$aes1$" * 10_900,
+    "isis-repeat": "isis password " * 4_600,
+    "psk-set-key-repeat": "psk set-key ascii " * 3_600,
+    "brace-repeat": "snmp {\n community x {\n" * 3_000,
+    "close-repeat": "}\n" * 32_000,
+    "mixed": ("serial a community eyJ- snmp-server user pre-shared-key set password ") * 900,
+}
+
+
+def _timed(text: str) -> float:
+    best = float("inf")
+    for _ in range(2):
+        start = time.perf_counter()
+        sanitize(text, mask_pii=True)
+        best = min(best, time.perf_counter() - start)
+    return best
+
+
+@pytest.mark.parametrize("name", sorted(_ADVERSARIAL))
+def test_adversarial_64kib_is_fast_and_linear(name):
+    text = _ADVERSARIAL[name]
+    quarter, full = _timed(text[: len(text) // 4]), _timed(text)
+    assert full < 2.0, f"{name}: {full:.2f}s for {len(text)} chars"
+    # Linear work grows ~4x from a quarter to the whole input; a quadratic rule grows ~16x.
+    assert full < 7 * quarter + 0.1, f"{name}: {quarter:.3f}s -> {full:.3f}s"

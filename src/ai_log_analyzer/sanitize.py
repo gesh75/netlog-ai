@@ -335,12 +335,15 @@ _RULES: list[tuple[str, Any, Any]] = [
                 rf"""(?!["']?<REDACTED)(?!{_NOT_SECRET})(?:(")[^"\n]*"|(')[^'\n]*'|[^\s"'&;,]+)""",
                 re.IGNORECASE),
      lambda m: f"{m.group(1)}{m.group(2) or m.group(3) or ''}<REDACTED>{m.group(2) or m.group(3) or ''}"),
+    # A JWT must start a run of token characters (`(?<![A-Za-z0-9_-])`, not `\b`): its segments are unbounded,
+    # and with `\b` every `eyJ` inside a long `eyJ-eyJ-...` run restarted a scan of the rest of the run.
     ("cloud-api-token",
-     re.compile(r"\b(?:(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|AIPA)[A-Z0-9]{16}"
+     re.compile(r"(?:\b(?:(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|AIPA)[A-Z0-9]{16}"
                 r"|gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{22,255}"
                 r"|xox[abposr]-[A-Za-z0-9-]{10,200}|AIza[0-9A-Za-z_-]{35}"
-                r"|sk-(?:ant-|proj-)[A-Za-z0-9_-]{20,200}|sk-[A-Za-z0-9]{32,200}"
-                r"|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})(?![A-Za-z0-9_-])"),
+                r"|sk-(?:ant-|proj-)[A-Za-z0-9_-]{20,200}|sk-[A-Za-z0-9]{32,200})"
+                r"|(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
+                r"(?![A-Za-z0-9_-])"),
      "<REDACTED-TOKEN>"),
     # Modular-crypt hashes ($1$ md5, $5$/$6$ sha, $8$/$9$ Cisco, $y$ yescrypt, $aes1$ SR Linux, ...) anywhere.
     ("crypt-hash",
@@ -428,7 +431,10 @@ _PII_RULES: list = [
     # Chassis / module serial numbers (asset identifiers). The value must
     # contain a digit so `serial console` / `interface Serial0/0` survive.
     ("serial-number",
-     re.compile(r'(?i)\b(serial[ _-]?(?:number|num|no)?|s/n)(\s*[:=#]?\s*)(?=[A-Za-z0-9-]*\d)[A-Za-z0-9][A-Za-z0-9-]{4,}\b'),
+     # Each whitespace run is bounded (`\s*[:=#]?\s*` split a long run of spaces k ways and rescanned the
+     # value for each), and so is the digit lookahead.
+     re.compile(r'(?i)\b(serial[ _-]?(?:number|num|no)?|s/n)((?:\s{0,8}[:=#])?\s{0,8})'
+                r'(?=[A-Za-z0-9-]{0,63}\d)[A-Za-z0-9][A-Za-z0-9-]{4,}\b'),
      r'\1\2<REDACTED-SERIAL>'),
 ]
 
