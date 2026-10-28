@@ -66,6 +66,24 @@ EXACT: list[tuple[str, str]] = [
     ("X-API-Key: X1y2Z3\nHost: example.net", f"X-API-Key: {R}\nHost: example.net"),
     ("x-auth-token: X1y2Z3", f"x-auth-token: {R}"),
     ("snmp_community=X1y2Z3", f"snmp_community={R}"),
+    # PAN-OS.
+    ("set shared server-profile radius R1 server S1 secret -AQ==ExampleBlob0123456789=",
+     f"set shared server-profile radius R1 server S1 secret {R}"),
+    ("set network ike gateway GW1 authentication pre-shared-key key -AQ==ExampleBlob0123456789=",
+     f"set network ike gateway GW1 authentication pre-shared-key key {R}"),
+    ("set deviceconfig system snmp-setting access-setting version v2c snmp-community-string X1y2Z3",
+     f"set deviceconfig system snmp-setting access-setting version v2c snmp-community-string {R}"),
+    ("<secret>-AQ==ExampleBlob0123456789=</secret>", f"<secret>{R}</secret>"),
+    ("<bind-password>X1y2Z3</bind-password>", f"<bind-password>{R}</bind-password>"),
+    ("<pre-shared-key><key>-AQ==ExampleBlob0123456789=</key></pre-shared-key>",
+     f"<pre-shared-key><key>{R}</key></pre-shared-key>"),
+    ("<snmp-community-string>X1y2Z3</snmp-community-string>",
+     f"<snmp-community-string>{R}</snmp-community-string>"),
+    # FortiOS keeps the field name and the ENC marker.
+    ("    set password ENC SH2ExampleBlob0123456789==", f"    set password ENC {R}"),
+    ("set psksecret ENC ExampleBlob0123456789==", f"set psksecret ENC {R}"),
+    ("set authentication-key ENC ExampleBlob0123456789==", f"set authentication-key ENC {R}"),
+    ("set password MyClearPass", f"set password {R}"),
 ]
 
 
@@ -95,6 +113,15 @@ BENIGN = [
     "Password: ",
     "Password policy: minimum length 12",
     "no ip nhrp authentication",
+    # FortiOS / PAN-OS statements with no secret
+    "set status enable",
+    "set password-expire 90",
+    "    set minimum-length 8",
+    "set deviceconfig system hostname fw1",
+    "set shared server-profile radius R1 server S1 ip-address 192.0.2.1",
+    'set interfaces ge-0/0/0 description "reset password"',
+    "<hostname>fw1</hostname>",
+    "<password></password>",
     # wireless without a key
     "security wpa psk set-key",
     "wlan corp 1 corp\n security wpa akm psk",
