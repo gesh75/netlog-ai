@@ -40,6 +40,10 @@ Memory is bounded in bytes as well as in lines (a line can be 64 KiB): the ring 
 lines are evicted, ``ring_evicted`` counts them) and the writer queue by ``queue_max_bytes`` (new lines
 are dropped, ``queue_overflow``, ``queue_overflow_bytes`` and ``spool_lines_lost`` count them).
 
+File paths in ``extra`` (spool, tls_*) are the operator's: a source created over the web API or MCP may
+only name a spool database inside the directory of the operator's spool / state DB and no TLS files
+(see ``check_untrusted_extra``).
+
 Config ``extra`` keys: bind, port, proto (udp|tcp|tls), buffer_size, max_bytes, rcvbuf,
 max_frame, max_connections, max_connections_per_ip, idle_timeout, allow,
 tls_cert, tls_key, tls_ca, spool, queue_max, queue_max_bytes, reader_retry.
@@ -53,13 +57,15 @@ import ipaddress
 import logging
 import os
 import socket
+import sqlite3
 import ssl
 import struct
 import sys
 import threading
 import time
 from collections import Counter, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent
@@ -115,6 +121,70 @@ def _norm_ip(addr: str) -> str:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
         return str(ip.ipv4_mapped)
     return str(ip)
+
+
+# ── what a web / MCP caller may name ───────────────────────────────────────────
+# ``extra`` values that are host file paths (spool database, TLS files) come from the operator
+# (NETLOG_SOURCE_<id>_* environment, or code calling SourceManager.add). A source created through a
+# request (POST /api/sources, MCP add_source) goes through check_untrusted_extra first.
+_UNTRUSTED_TLS_KEYS = ("tls_cert", "tls_key", "tls_ca")
+_SPOOL_SUFFIXES = (".db", ".sqlite", ".sqlite3")
+_NO_TLS_FILES = ("syslog TLS files are set by the operator (NETLOG_SOURCE_<id>_TLS_CERT / _TLS_KEY / "
+                 "_TLS_CA), not over the API")
+_NO_SPOOL_PATH = ("syslog spool path is not allowed here: over the API a spool must be a .db / .sqlite file "
+                  "inside the directory of AI_LOG_ANALYZER_SYSLOG_SPOOL or AI_LOG_ANALYZER_STATE_DB")
+
+
+def _spool_roots() -> list[Path]:
+    """Directories an API-chosen spool may live in: where the operator's own spool / state DB lives."""
+    roots = []
+    for name in ("AI_LOG_ANALYZER_SYSLOG_SPOOL", "AI_LOG_ANALYZER_STATE_DB"):
+        raw = os.environ.get(name, "").strip()
+        if raw:
+            roots.append(Path(raw).expanduser().resolve().parent)
+    return roots
+
+
+def _is_spool_db(path: Path) -> bool:
+    try:
+        con = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=1.0)
+        try:
+            return con.execute("SELECT 1 FROM sqlite_master WHERE name = 'syslog_spool'").fetchone() is not None
+        finally:
+            con.close()
+    except (sqlite3.Error, ValueError):
+        return False
+
+
+def _spool_path_allowed(raw: str) -> bool:
+    """Inside a spool root after resolving ``..`` and symlinks, a database file name, and either new or
+    already a spool database: never a file this service did not create as a spool."""
+    roots = _spool_roots()
+    path = Path(raw).expanduser()
+    if not roots or ".." in path.parts or path.suffix.lower() not in _SPOOL_SUFFIXES:
+        return False
+    try:
+        target = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    if not any(target != root and target.is_relative_to(root) for root in roots):
+        return False
+    if target.exists():
+        return target.is_file() and _is_spool_db(target)
+    return True
+
+
+def check_untrusted_extra(extra: Mapping[str, str]) -> None:
+    """Refuse the file-path options of a syslog source that a request (not the operator) is creating.
+
+    One message per kind of refusal whatever the path is: nothing here tells a caller whether a path
+    exists, is a directory or is a PEM file.
+    """
+    if any(extra.get(key) for key in _UNTRUSTED_TLS_KEYS):
+        raise SourceError(_NO_TLS_FILES)
+    spool = extra.get("spool")
+    if spool and not _spool_path_allowed(str(spool)):
+        raise SourceError(_NO_SPOOL_PATH)
 
 
 def _row_bytes(line: str, sender: str) -> int:

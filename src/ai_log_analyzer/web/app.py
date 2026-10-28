@@ -1363,7 +1363,7 @@ def create_app() -> Flask:
                 verify_tls=_parse_bool(body.get("verify_tls", True), default=True),
                 timeout_seconds=float(body.get("timeout_seconds", 30.0)),
             )
-            source_manager.add(cfg)
+            source_manager.add(cfg, trusted=False)
         except SourceError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         except (TypeError, ValueError) as exc:

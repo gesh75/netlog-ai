@@ -51,9 +51,17 @@ class SourceManager:
         self._lock = threading.Lock()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
-    def add(self, config: SourceConfig) -> LogSource:
+    def add(self, config: SourceConfig, *, trusted: bool = True) -> LogSource:
         """Register a source. Idempotent: an equal config keeps the live instance (its buffered
-        lines and open connections); only a changed config replaces it."""
+        lines and open connections); only a changed config replaces it.
+
+        ``trusted=False`` is for configs that arrive in a request (web API, MCP): options that name
+        host files (a syslog spool, TLS files) are then refused or confined. The environment and code
+        that calls ``add`` directly are the operator's and stay unrestricted.
+        """
+        if not trusted and config.type == "syslog":
+            from ai_log_analyzer.sources.syslog import check_untrusted_extra
+            check_untrusted_extra(config.extra or {})
         with self._lock:
             existing = self._sources.get(config.id)
             if existing is not None:
