@@ -106,6 +106,8 @@ def run_deep_report(
     )
     diff = _config_diff(config_before, config_after)
     drift = correlate_config_drift(diff, findings)
+    if drift.truncated:
+        truncated["config_drift"] = drift.truncated
     overlays = build_device_overlays(blast, flap, change_report.to_dict()["hits"])
     summary = _summary(findings)
     payload = {
