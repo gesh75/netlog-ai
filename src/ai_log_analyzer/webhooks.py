@@ -22,6 +22,7 @@ from typing import Any
 import requests
 
 from ai_log_analyzer.sanitize import sanitize
+from ai_log_analyzer.url_redact import redact_text, redact_url
 
 logger = logging.getLogger(__name__)
 
@@ -128,9 +129,11 @@ def notify_analysis(result: dict[str, Any], source: str) -> bool:
         r = requests.post(url, json=build_payload(result, source, fmt, min_sev),
                           timeout=_TIMEOUT_S)
         if r.status_code >= 300:
-            logger.warning("Webhook %s answered HTTP %s", url, r.status_code)
+            # for Slack / Discord / Teams the URL path (or a sig= value) is the credential: host only
+            logger.warning("Webhook %s answered HTTP %s", redact_url(url, keep_path=False), r.status_code)
             return False
         return True
     except requests.RequestException as exc:
-        logger.warning("Webhook delivery failed: %s", exc)
+        logger.warning("Webhook delivery to %s failed: %s: %s", redact_url(url, keep_path=False),
+                       type(exc).__name__, redact_text(exc, keep_path=False))
         return False
