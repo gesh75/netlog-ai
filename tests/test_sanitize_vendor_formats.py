@@ -104,6 +104,19 @@ EXACT: list[tuple[str, str]] = [
     ("shared-key 0 X1y2Z3", f"shared-key 0 {R}"),
     ("nv set system aaa tacacs server 1 secret X1y2Z3", f"nv set system aaa tacacs server 1 secret {R}"),
     ("tacacs passkey X1y2Z3", f"tacacs passkey {R}"),
+    # SNMP communities.
+    ("set snmp community X1y2Z3 authorization read-only", f"set snmp community {R} authorization read-only"),
+    ("set snmp community X1y2Z3 clients 192.0.2.0/24", f"set snmp community {R} clients 192.0.2.0/24"),
+    ("community X1y2Z3;", f"community {R};"),
+    ("community X1y2Z3 {\n view all;\n authorization read-only;\n}",
+     f"community {R}{{\n view all;\n authorization read-only;\n}}"),
+    ("snmp {\n    community X1y2Z3;\n    community Y1y2Z3 {\n        authorization read-only;\n    }\n}",
+     f"snmp {{\n    community {R};\n    community {R}{{\n        authorization read-only;\n    }}\n}}"),
+    ("snmp\n community X1y2Z3\n  authorization read-only", f"snmp\n community {R}\n  authorization read-only"),
+    ("nv set service snmp-server readonly-community X1y2Z3 access any",
+     f"nv set service snmp-server readonly-community {R} access any"),
+    ("rocommunity X1y2Z3 default", f"rocommunity {R} default"),
+    ("config snmp community add X1y2Z3 RO", f"config snmp community add {R} RO"),
 ]
 
 
@@ -128,7 +141,17 @@ BENIGN = [
     # SNMPv3 groups and users without keys
     "snmp-server group NMS v3 priv read V1 write V2",
     "snmp-server user admin network-admin",
+    # BGP communities are labels, not secrets
+    "community MATCH_X members 65000:1;",
+    "policy-options {\n    community CUST members 65000:1;\n    community CUST2 {\n        members 65000:2;\n    }\n}",
+    "from community CUST;\nthen community add TAG;",
+    "term t1 {\n    from {\n        protocol bgp;\n        community CUST;\n    }\n    then accept;\n}",
+    "route-map RM permit 10\n set community 65000:100 additive",
+    "neighbor 192.0.2.1 send-community both",
+    "ip community-list standard CL permit 65000:1",
+    "set network virtual-router default protocol bgp policy export rules R action allow update community [ 65000:1 ]",
     # prose and logs
+    "community policy applied to the uplink",
     "pre-shared-key authentication enabled for peer 192.0.2.1",
     "IKE: using pre-shared-key on both peers",
     "token_type: Bearer",
@@ -167,6 +190,7 @@ def test_benign_statements_untouched(text):
     "authentication-password\nNEXT-LINE-MARKER",
     "privacy-password\nNEXT-LINE-MARKER",
     "authentication-key\n\"NEXT-LINE-MARKER\"",
+    "community\nNEXT-LINE-MARKER {\n authorization read-only;\n}",
 ])
 def test_keyword_at_end_of_line_never_eats_the_next_line(text):
     out, _ = sanitize(text)
