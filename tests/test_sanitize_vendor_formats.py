@@ -61,6 +61,11 @@ EXACT: list[tuple[str, str]] = [
     ('pre-shared-key ascii-text "X1y2Z3";', f'pre-shared-key ascii-text "{R}";'),
     ("pre-shared-key hexadecimal 0123456789abcdef0123;", f'pre-shared-key hexadecimal "{R}";'),
     ("ip nhrp authentication NhrpKey1", f"ip nhrp authentication {R}"),
+    # Colon-separated credentials.
+    ("password: X1y2Z3", f"password: {R}"),
+    ("X-API-Key: X1y2Z3\nHost: example.net", f"X-API-Key: {R}\nHost: example.net"),
+    ("x-auth-token: X1y2Z3", f"x-auth-token: {R}"),
+    ("snmp_community=X1y2Z3", f"snmp_community={R}"),
 ]
 
 
@@ -85,6 +90,10 @@ BENIGN = [
     # prose and logs
     "pre-shared-key authentication enabled for peer 192.0.2.1",
     "IKE: using pre-shared-key on both peers",
+    "token_type: Bearer",
+    "secret-manager: enabled",
+    "Password: ",
+    "Password policy: minimum length 12",
     "no ip nhrp authentication",
     # wireless without a key
     "security wpa psk set-key",
