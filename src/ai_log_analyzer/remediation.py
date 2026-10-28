@@ -21,6 +21,7 @@ import ipaddress
 import json
 import re
 import secrets
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -47,18 +48,24 @@ class RemediationActionType(str, Enum):
 
 
 # Destructive CLI patterns strictly blocked from automated or copy-paste generation.
-# Patterns are matched per command *segment*: a CLI string is split on
-# newlines, `;`, `&&`, `||` and `vtysh -c '...'` boundaries first, so
-# anchored rules still catch `vtysh -c 'reload'` or a second line `reboot`.
-# Each segment is matched twice: as written and in canonical form (lowercased,
-# whitespace collapsed, leading `do `/`sudo ` removed, IOS-style unique-prefix
-# abbreviations of the destructive verbs expanded: `rel` -> `reload`,
-# `wr er` -> `write erase`, `cle ip bgp *` -> `clear ip bgp *`).
+# Patterns are matched per command *segment*: a CLI string is split on every shell and
+# vendor command boundary first (newline, `;`, `&`, `|`, backtick, `$(`, `vtysh -c '...'`),
+# so anchored rules still catch `vtysh -c 'reload'`, `true | reboot` or a second line `reboot`.
+# Each segment is matched as written and in canonical forms (unicode-normalised, lowercased,
+# quotes and backslashes dropped, whitespace collapsed, wrapper words and paths removed:
+# `do`, `sudo`, `bash`, `run`, `top`, `up N`, `env X=y`, `/sbin/reboot`; IOS-style unique-prefix
+# abbreviations of the destructive verbs expanded: `rel` -> `reload`, `wr er` -> `write erase`,
+# `cle ip bgp *` -> `clear ip bgp *`). A denylist cannot know every form: the custom-plan card
+# says so, and custom commands still need an engineer's review.
 _BGP_AF = r"(?:vrf\s+\S+\s+|ipv[46]\s+(?:unicast|multicast|labeled-unicast)\s+(?:vrf\s+\S+\s+)?|vpnv[46]\s+unicast\s+|l2vpn\s+evpn\s+|all\s+)*"
 _FORBIDDEN_CLI_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("erase_storage", re.compile(
         r"\b(?:write\s+erase|erase\s+(?:/\S+\s+)*(?:startup-config|[a-z0-9_-]+:)|"
         r"format\s+(?:/\S+\s+)*(?:flash|bootflash|disk\d*|usb\d*|nvram)(?::|\s|$))", re.IGNORECASE)),
+    # Aruba/IOS-XE style wipes that name no `device:` (`erase all`, `erase flash`, `factory-reset all`).
+    ("erase_all", re.compile(
+        r"^\s*erase\s+(?:/\S+\s+)*(?:all|flash|nvram|bootflash|disk\d*|usb\d*)\b", re.IGNORECASE)),
+    ("factory_reset", re.compile(r"^\s*factory[- ](?:reset|default)\b", re.IGNORECASE)),
     ("system_zeroize", re.compile(r"\brequest\s+(?:system|vmhost)\s+(?:zeroize|halt|power-off|reboot|snapshot\s+delete)\b", re.IGNORECASE)),
     ("crypto_zeroize", re.compile(r"^\s*crypto\s+key\s+zeroize\b", re.IGNORECASE)),
     ("unscoped_reload", re.compile(
@@ -73,6 +80,11 @@ _FORBIDDEN_CLI_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("delete_config_stanza", re.compile(r"^\s*delete\s+(?:protocols|routing-options|routing-instances|interfaces|security|system|policy-options|firewall|chassis)(?:\s+\S+)?\s*$", re.IGNORECASE)),
     # Junos: deleting a whole protocol group/area/instance (`delete protocols bgp group X`).
     ("delete_protocol_group", re.compile(r"^\s*delete\s+protocols\s+\S+(?:\s+(?:group|area|instance|peer-group)\s+\S+)?\s*$", re.IGNORECASE)),
+    # Junos `deactivate` takes a stanza out of the config as completely as `delete` does.
+    ("deactivate_config_stanza", re.compile(r"^\s*deactivate\s+(?:protocols|routing-options|routing-instances|interfaces|security|system|policy-options|firewall|chassis)(?:\s+\S+)?\s*$", re.IGNORECASE)),
+    ("deactivate_protocol_group", re.compile(r"^\s*deactivate\s+protocols\s+\S+(?:\s+(?:group|area|instance|peer-group)\s+\S+)?\s*$", re.IGNORECASE)),
+    # Junos: switching a whole routing protocol off (`set protocols bgp disable`).
+    ("disable_routing_process", re.compile(r"^\s*set\s+protocols\s+(?:bgp|ospf3?|isis|ripng?)\s+disable\s*$", re.IGNORECASE)),
     # Hard reset of every BGP session (soft refresh and `in`/`out` are allowed).
     # Junos `clear bgp neighbor` with no peer resets every session too.
     ("clear_all_bgp", re.compile(
@@ -92,7 +104,11 @@ _FORBIDDEN_CLI_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         r"\bmkfs\b|\bdd\s+if=.*\bof=/dev/", re.IGNORECASE)),
 ]
 
-_SEGMENT_SPLIT_RE = re.compile(r"\n|;|&&|\|\||\bvtysh\b|-c\s+")
+# Read-only checks split on the boundaries that start another command; a `|` stays inside the
+# segment there because it feeds a device filter (`show ... | include x`) and is vetted separately.
+_SEGMENT_SPLIT_RE = re.compile(r"\n|;|&|\|\||\bvtysh\b|-c\s+")
+# The denylist also treats a pipe, backtick, `$(` and `<(`/`>(` as the start of another command.
+_DENY_SPLIT_RE = re.compile(r"[\n;&|`]|\$\(|[<>]\(|\bvtysh\b|-c\s+")
 _LINE_BREAK_RE = re.compile(r"[\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0e-\x1b\x7f]")
 
@@ -119,28 +135,73 @@ _CLI_TREE: _Tree = {
     "execute": (3, {"factoryreset": (4, {}), "formatlogdisk": (4, {}), "erase-disk": (4, {}), "reboot": (3, {}),
                     "shutdown": (3, {}), "restore": (3, {"image": (3, {})})}),
     "load": (3, {"override": (3, {}), "replace": (3, {}), "factory-default": (3, {})}),
+    "deactivate": (3, {}),
+    "no": (2, {"router": (3, {"bgp": (2, {}), "ospf": (2, {}), "ospfv3": (5, {}), "isis": (2, {}),
+                              "eigrp": (2, {}), "rip": (2, {})}),
+               "feature": (3, {})}),
 }
-_WRAPPER_RE = re.compile(r"^(?:do|sudo(?:\s+-\S+)*|nohup)\s+")
+_BASIC_WRAPPERS = frozenset({"do", "sudo", "nohup"})
+# Words that run the rest of the line as a command (shell, Junos and EOS prefixes). The denylist looks
+# through them: `bash sudo reboot`, `run bash reboot`, `top delete protocols bgp`, `up 2 delete ...`.
+_WRAPPER_WORDS = frozenset({
+    "do", "sudo", "doas", "nohup", "top", "wildcard", "run", "bash", "sh", "zsh", "dash", "ash", "ksh", "csh",
+    "env", "command", "builtin", "time", "nice", "ionice", "timeout", "setsid", "stdbuf", "busybox", "eval",
+    "xargs", "watch", "if", "then", "else", "elif", "while", "until", "up",
+})
+_WRAPPER_ARG_OPTS = {
+    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-R", "-r", "-t", "-T", "-U"}),
+    "doas": frozenset({"-u", "-C"}), "env": frozenset({"-u", "-C", "-S"}), "nice": frozenset({"-n"}),
+    "ionice": frozenset({"-c", "-n", "-p"}), "timeout": frozenset({"-s", "-k"}),
+}
+_ENV_ASSIGN_RE = re.compile(r"[a-z_][a-z0-9_]*=\S*")
+_DURATION_RE = re.compile(r"\d+(?:\.\d+)?[smhd]?")
+_QUOTE_ESCAPE_RE = re.compile(r"[\\'\"]")
 
 BLOCKED_CLI_PLACEHOLDER = "# BLOCKED by SafetyGuardrail ({rule}): command withheld — requires manual engineering review"
 
 
-def _command_segments(cmd: str) -> list[str]:
-    """Split one CLI string into the individual commands it would run."""
+def _command_segments(cmd: str, deny: bool = False) -> list[str]:
+    """Split one CLI string into the individual commands it would run (``deny``: every boundary)."""
     text = _CONTROL_RE.sub("", _LINE_BREAK_RE.sub("\n", cmd or ""))
-    parts = _SEGMENT_SPLIT_RE.split(text)
+    parts = (_DENY_SPLIT_RE if deny else _SEGMENT_SPLIT_RE).split(text)
     return [p.strip().strip("'\"").strip() for p in parts if p and p.strip().strip("'\"").strip()]
 
 
-def _canonical_segment(segment: str) -> str:
-    """Lowercase, collapse whitespace, drop `do`/`sudo`, expand unique-prefix verb abbreviations."""
-    text = " ".join(segment.lower().split())
-    while True:
-        stripped = _WRAPPER_RE.sub("", text, count=1)
-        if stripped == text:
+def _strip_wrappers(tokens: list[str], deep: bool, shell: bool = False) -> list[str]:
+    """Drop leading wrapper words and their options. ``deep`` also drops ``VAR=x`` assignments, a path in
+    front of the verb and the wider wrapper set (`bash`, `run`, `top`, `up N`, ...); ``shell`` adds ``exec``."""
+    words = _WRAPPER_WORDS if deep else _BASIC_WRAPPERS
+    i, n = 0, len(tokens)
+    while i < n:
+        head = tokens[i]
+        if deep:
+            if head.startswith(("/", "./", "~/")) and not head.endswith("/"):
+                head = tokens[i] = head.rsplit("/", 1)[-1]  # /sbin/reboot -> reboot
+            if _ENV_ASSIGN_RE.fullmatch(head):
+                i += 1
+                continue
+        if head not in words and not (shell and head == "exec"):
             break
-        text = stripped
-    tokens = text.split(" ")
+        i += 1
+        takes_arg = _WRAPPER_ARG_OPTS.get(head, frozenset()) if deep else frozenset()
+        while i < n and tokens[i].startswith("-"):
+            i += 2 if tokens[i] in takes_arg and i + 1 < n else 1
+        if deep and i < n and ((head == "timeout" and _DURATION_RE.fullmatch(tokens[i])) or (
+                head == "up" and tokens[i].isdigit())):
+            i += 1
+    return tokens[i:]
+
+
+def _canonical_segment(segment: str, deep: bool = False, shell: bool = False) -> str:
+    """Lowercase, collapse whitespace, drop `do`/`sudo`, expand unique-prefix verb abbreviations.
+
+    ``deep`` is the denylist's view: unicode-normalised, quotes and backslashes dropped (`re''boot`),
+    leading ``(`` / ``{`` removed, and every wrapper word and path in front of the verb stripped;
+    ``shell`` additionally treats ``exec`` as a wrapper (`exec sudo reboot`).
+    """
+    if deep:
+        segment = _QUOTE_ESCAPE_RE.sub("", unicodedata.normalize("NFKC", segment)).lstrip("({ \t")
+    tokens = _strip_wrappers(segment.lower().split(), deep, shell)
     tree: _Tree = _CLI_TREE
     for i, tok in enumerate(tokens):
         hit = next((name for name, (minlen, _) in tree.items() if len(tok) >= minlen and name.startswith(tok)), None)
@@ -153,13 +214,46 @@ def _canonical_segment(segment: str) -> str:
     return " ".join(tokens)
 
 
+_ROUTING_PROCESS_RE = re.compile(r"^router\s+(?:bgp|ospf|ospfv3|isis|eigrp|rip)\b")
+
+
+def _context_violations(commands: Any) -> dict[int, str]:
+    """Command index -> rule, for a command that is only unsafe because of the line it sits under.
+
+    A bare `shutdown` directly under `router bgp N` (by indentation, or on the next line of a flat
+    list) shuts the whole routing process, like `no router bgp N`. `neighbor X shutdown`, a deeper
+    `shutdown` under a neighbor and `interface X` / ` shutdown` are targeted and stay allowed.
+    A multi-line command string counts line by line; the index is the string's own.
+    """
+    hits: dict[int, str] = {}
+    stack: list[tuple[int, str]] = []  # (indent, text) of the enclosing lines
+    prev = (-1, "")
+    for idx, cmd in enumerate(commands):
+        if not isinstance(cmd, str):
+            continue
+        for raw in _LINE_BREAK_RE.sub("\n", cmd).split("\n"):
+            line = _CONTROL_RE.sub("", raw).expandtabs(4)
+            text = _canonical_segment(line)
+            if not text or text.startswith(("!", "#")):
+                continue
+            indent = len(line) - len(line.lstrip())
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            parent = stack[-1][1] if stack else (prev[1] if prev[0] == indent == 0 else "")
+            if text == "shutdown" and _ROUTING_PROCESS_RE.match(parent):
+                hits.setdefault(idx, "shutdown_routing_process")
+            stack.append((indent, text))
+            prev = (indent, text)
+    return hits
+
+
 # Pre/post checks run unattended before and after the change: read-only verbs only.
 _READ_ONLY_VERBS = frozenset({"show", "sho", "display", "get", "diagnose", "ping", "ping6", "traceroute",
                               "traceroute6", "tracepath", "tracert"})
 _READ_ONLY_EXEC = frozenset({"ping", "ping6", "ping-options", "traceroute", "traceroute6", "tracert"})
 _QUOTED_RE = re.compile(r"\"[^\"]*\"|'[^']*'")
-# Redirects, command substitution, and pipes into a shell / file writer.
-_CHECK_UNSAFE_RE = re.compile(r"[`>]|\$\(|\|\s*(?:sh|bash|zsh|tee|redirect|save|append|xargs)\b", re.IGNORECASE)
+# Redirects, command and process substitution, and pipes into a shell / file writer.
+_CHECK_UNSAFE_RE = re.compile(r"[`>]|\$\(|<\(|\|\s*(?:sh|bash|zsh|tee|redirect|save|append|xargs)\b", re.IGNORECASE)
 
 
 class SafetyViolationError(ValueError):
@@ -178,11 +272,18 @@ _PLAN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # Ansible host patterns that would widen `hosts:` beyond one device.
 _ANSIBLE_GROUP_WORDS = frozenset({"all", "ungrouped"})
 _CONTROL_TEXT_RE = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]+")
+# A custom command is one line: no line break or control character (a tab is fine).
+_COMMAND_CONTROL_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f\x85\u2028\u2029]")
 
 
 def clean_text(value: Any, limit: int = 500) -> str:
     """Single-line, control-character-free text for headers, comments and docstrings."""
     return _CONTROL_TEXT_RE.sub(" ", str(value if value is not None else "")).strip()[:limit]
+
+
+def _shell_quote(text: str) -> str:
+    """`text` as one single-quoted shell word (what `shlex.quote` gives, but always quoted)."""
+    return "'" + text.replace("'", "'\"'\"'") + "'"
 
 
 def validate_device(device: Any) -> str:
@@ -310,6 +411,9 @@ class RemediationPlan:
             f"{self._rollback_summary()}\n"
             f"**Rationale:** {self.rationale}\n"
             + (f"**Blast Radius:** {self.blast_radius_notes}\n" if self.blast_radius_notes else "")
+            + ("**Review required:** custom commands are screened by a denylist only, not built from a "
+               "vetted template; an engineer must read every line before applying.\n"
+               if self.action_type == RemediationActionType.CUSTOM_SAFE_CONFIG else "")
             + f"\n#### 1. Pre-Checks (Read-Only)\n```text\n{pre_block}\n```\n"
             f"#### 2. Transactional Apply ({self._apply_heading()})\n"
             f"```text\n{apply_block}\n```\n"
@@ -343,18 +447,26 @@ class SafetyGuardrail:
                 raise SafetyViolationError(
                     f"Command '{cmd}' blocked by safety guardrail '{rule_name}'."
                 )
+        for idx, rule_name in _context_violations(commands).items():
+            raise SafetyViolationError(
+                f"Command '{commands[idx]}' blocked by safety guardrail '{rule_name}' "
+                "(shuts down the routing process it is configured under)."
+            )
 
     @staticmethod
     def violation(cmd: str) -> str | None:
         """Name of the first guardrail rule ``cmd`` violates, or None if safe."""
         if not isinstance(cmd, str):
             return None
-        segments = _command_segments(cmd)
-        for segment in [cmd, *segments, *(_canonical_segment(s) for s in segments)]:
+        segments = list(dict.fromkeys(_command_segments(cmd, deny=True)))  # repeats add nothing
+        canonical = [_canonical_segment(s, deep=deep, shell=shell)
+                     for s in segments for deep, shell in ((False, False), (True, False), (True, True))]
+        for segment in dict.fromkeys([cmd, *segments, *canonical]):
             for rule_name, pattern in _FORBIDDEN_CLI_PATTERNS:
                 if pattern.search(segment):
                     return rule_name
-        return None
+        hit = _context_violations([cmd])
+        return next(iter(hit.values())) if hit else None
 
     @classmethod
     def read_only_violation(cls, cmd: str) -> str | None:
@@ -400,9 +512,10 @@ class SafetyGuardrail:
         """
         safe: list[str] = []
         blocked: list[dict[str, str]] = []
-        for cmd in commands or []:
-            text = str(cmd)
-            rule = cls.violation(text)
+        texts = [str(cmd) for cmd in commands or []]
+        context = _context_violations(texts)
+        for idx, text in enumerate(texts):
+            rule = cls.violation(text) or context.get(idx)
             if rule:
                 blocked.append({"command": text, "rule": rule})
                 safe.append(BLOCKED_CLI_PLACEHOLDER.format(rule=rule))
@@ -425,10 +538,13 @@ def screen_llm_cli(value: Any, blocked: list[dict[str, str]] | None = None) -> A
             sink.append({"command": value, "rule": rule})
             return BLOCKED_CLI_PLACEHOLDER.format(rule=rule)
         return value
-    if isinstance(value, list):
-        return [screen_llm_cli(v, sink) for v in value]
-    if isinstance(value, tuple):
-        return tuple(screen_llm_cli(v, sink) for v in value)
+    if isinstance(value, (list, tuple)):
+        out = [screen_llm_cli(v, sink) for v in value]
+        for idx, rule in _context_violations(value).items():  # `router bgp 1` then ` shutdown`
+            if out[idx] == value[idx]:
+                sink.append({"command": value[idx], "rule": rule})
+                out[idx] = BLOCKED_CLI_PLACEHOLDER.format(rule=rule)
+        return out if isinstance(value, list) else tuple(out)
     if isinstance(value, dict):
         return {k: screen_llm_cli(v, sink) for k, v in value.items()}
     return value
@@ -564,7 +680,7 @@ class RemediationGenerator:
         session_tag = f"{session_tag}_{secrets.token_hex(3)}"
         config_cmds = [
             f"cp /etc/frr/frr.conf /etc/frr/frr.conf.{session_tag}.bak",
-            "vtysh -c 'configure terminal' " + " ".join(f"-c '{c}'" for c in body_commands),
+            "vtysh -c 'configure terminal' " + " ".join(f"-c {_shell_quote(c)}" for c in body_commands),
         ]
         commit_timer = [
             f"nohup sh -c 'sleep {rollback_minutes * 60} && cp /etc/frr/frr.conf.{session_tag}.bak /etc/frr/frr.conf && systemctl reload frr' >/dev/null 2>&1 &"
@@ -758,6 +874,11 @@ class RemediationGenerator:
         validate_device(device)
         timer = self.default_rollback_minutes if rollback_minutes is None else rollback_minutes
         SafetyGuardrail.validate(commands, timer)
+        for cmd in commands:
+            if _COMMAND_CONTROL_RE.search(cmd):
+                raise PlanInputError(
+                    f"command {clean_text(cmd, 60)!r} contains a line break or control character: "
+                    "send one command per list item")
         SafetyGuardrail.validate_read_only(pre_checks, "pre-check")
         SafetyGuardrail.validate_read_only(post_checks, "post-check")
 
