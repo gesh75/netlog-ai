@@ -32,6 +32,8 @@ TEMPLATES = [
     "ip nhrp authentication {s}", "password: {s}", "X-API-Key: {s}", "psk={s}",
     "set shared server-profile radius R secret {s}", "<secret>{s}</secret>", "set password ENC {s}",
     "snmp-server user u g auth sha-256 0x{s} priv aes-256 0x{s} localizedV2key",
+    "radius server R\n key 0 {s}\n", "server-private 192.0.2.1 key {s}",
+    "nv set system aaa tacacs server 1 secret {s}", "tacacs passkey {s}",
 ]
 SECRET = st.text(alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", min_size=12, max_size=40)
 

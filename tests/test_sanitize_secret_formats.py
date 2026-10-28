@@ -204,6 +204,21 @@ FORMATS: list[tuple[str, str, str]] = [
     ("nxos-snmpv3-sha256-priv",
      "snmp-server user admin network-admin auth sha-256 0xAA11BB22CC33DD44 priv aes-256 0xEE55FF6677889900 "
      "localizedV2key", "0xEE55FF6677889900"),
+    # AAA shared secrets in block / vendor syntax.
+    ("iosxe-radius-block-key0",
+     "radius server RAD1\n address ipv4 192.0.2.1 auth-port 1812 acct-port 1813\n key 0 R4diusBlockSecretX\n",
+     "R4diusBlockSecretX"),
+    ("iosxe-tacacs-block-key", "tacacs server TAC1\n address ipv4 192.0.2.2\n key TacBlockSecretX1\n",
+     "TacBlockSecretX1"),
+    ("iosxe-tacacs-block-key6", "tacacs server TAC1\n key 6 TacBlockAesBlobX1\n", "TacBlockAesBlobX1"),
+    ("iosxe-server-private", "aaa group server radius G1\n server-private 192.0.2.1 key SrvPrivSecretX1\n",
+     "SrvPrivSecretX1"),
+    ("iosxe-server-private-opts", "server-private 192.0.2.1 timeout 5 key 0 SrvPrivSecretZ1", "SrvPrivSecretZ1"),
+    ("eos-isis-auth-key", "isis authentication key 0 IsisAuthKeyX1", "IsisAuthKeyX1"),
+    ("eos-shared-key", "shared-key 0 SharedKeyZeroX1", "SharedKeyZeroX1"),
+    ("nvue-tacacs-secret", "nv set system aaa tacacs server 1 secret NvueTacSecretX1", "NvueTacSecretX1"),
+    ("sonic-tacacs-passkey", "config tacacs passkey SonicPassKeyX1", "SonicPassKeyX1"),
+    ("sonic-radius-passkey", "radius passkey SonicRadPassKeyX1", "SonicRadPassKeyX1"),
 ]
 
 

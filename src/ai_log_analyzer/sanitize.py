@@ -110,7 +110,7 @@ _RULES: list[tuple[str, Any, Any]] = [
     ("set-secret-field",
      re.compile(rf"(?m)^([ \t]*set[ \t]+(?:{_SET_FIELDS})(?:[ \t]+ENC)?)[ \t]+{_QTOK}", re.IGNORECASE), _R),
     ("set-path-secret",
-     re.compile(rf'(?m)^([ \t]*set[ \t]+[^\n"]{{0,300}}?[ \t](?:{_PATH_FIELDS}))[ \t]+{_QTOK}',
+     re.compile(rf'(?m)^([ \t]*(?:nv[ \t]+)?set[ \t]+[^\n"]{{0,300}}?[ \t](?:{_PATH_FIELDS}))[ \t]+{_QTOK}',
                 re.IGNORECASE), _R),
     ("xml-secret-element",
      re.compile(rf"(<({_XML_SECRETS})>)[ \t\r\n]*[^<\s][^<]*(</\2>)", re.IGNORECASE), r"\1<REDACTED>\3"),
@@ -224,6 +224,26 @@ _RULES: list[tuple[str, Any, Any]] = [
     ("srl-community-entry",
      re.compile(rf"((?<![\w-])community-entry[ \t]+\S{{1,64}}(?:[ \t]*\{{)?[ \t\r\n]{{0,40}}"
                 rf"(?<![\w-])community)[ \t]+{_QTOK}", re.IGNORECASE), _R),
+    # Block-form AAA key (IOS-XE `radius server X` / `tacacs server X`, indented ` key [type] SECRET`, or
+    # echoed in a `logged command:key ...` log line). A key-chain ` key 7` is an id, so an untyped
+    # all-digit value stays; `{` is Junos `key 1 {`.
+    ("aaa-block-key",
+     re.compile(rf"(?m)((?:^[ \t]+|(?<=command:)[ \t]*)key[ \t]+(?:[0-9]|plaintext|ciphertext))[ \t]+"
+                rf"(?![{{}}]){_TOK}(?=[ \t\r]*$)", re.IGNORECASE), _R),
+    ("aaa-block-key-untyped",
+     re.compile(rf"(?m)((?:^[ \t]+|(?<=command:)[ \t]*)key)[ \t]+(?![{{}}])(?!\d{{1,5}}[ \t\r]*$)"
+                rf"{_TOK}(?=[ \t\r]*$)", re.IGNORECASE), _R),
+    ("server-private-key",
+     _kw(r"\bserver-private[ \t]+\S{1,64}[ \t]+(?:[^\n]{0,100}?[ \t])?key"
+         r"(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
+    ("isis-authentication-key",
+     _kw(r"\bisis[ \t]+authentication[ \t]+(?:[^\n]{0,100}?[ \t])?key"
+         r"(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
+    ("shared-key", _kw(r"(?<![\w-])shared-key(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
+    # SONiC `tacacs|radius passkey KEY`, `config tacacs add IP --key KEY`; the secret ends the line.
+    ("passkey", _kw(r"(?<![\w-])passkey(?:[ \t]+[0-9])?", eol=True), _R),
+    ("sonic-aaa-add-key",
+     _kw(r"\b(?:tacacs|radius)[ \t]+add[ \t]+[^\n]{0,150}?[ \t](?:--key|-k)"), _R),
     # ── Tokens, headers, URLs, key=value pairs ───────────────────────────
     ("http-authorization",
      re.compile(r"""\b(authorization["']?[ \t]*[:=][ \t]*["']?(?:(?:bearer|basic|token|negotiate)[ \t]+)?)"""
