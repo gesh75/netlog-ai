@@ -14,6 +14,7 @@ import os
 import re
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,6 +35,28 @@ def _user_agent() -> str:
 def _clean(text: str) -> str:
     """Redact secrets from free text before it is posted to an external ITSM."""
     return sanitize(text or "", mask_pii=False)[0]
+
+
+# Ticket renderers read markup out of plain text. Jira (REST v2) renders wiki markup, so an
+# unescaped `!url!` loads an image, `[a|url]` is a disguised link and `{panel}` / `{color}` /
+# `{code}` open blocks; ServiceNow journal fields show text as text except `[code]...[/code]`,
+# which is rendered as HTML. Device-derived text is neutralised for the target before it is sent.
+_BODY_TARGETS = ("markdown", "jira", "servicenow")
+_ZWSP = "\u200b"  # zero-width space: breaks a tag token without changing how the text reads
+_JIRA_MARKUP_RE = re.compile(r"([\\*_{}\[\]|!#^~])")
+_JIRA_NOFORMAT_RE = re.compile(r"\{(?=\s*noformat)", re.IGNORECASE)
+_SNOW_CODE_TAG_RE = re.compile(r"\[(?=\s*/?\s*code\s*\])", re.IGNORECASE)
+
+
+def _jira_inline(text: str) -> str:
+    """One line of device text for Jira wiki markup: whitespace collapsed (no line-start markup),
+    markup characters backslash-escaped so the text shows as typed."""
+    return _JIRA_MARKUP_RE.sub(r"\\\1", " ".join(text.split()))
+
+
+def _jira_block(text: str) -> str:
+    """Device text as a literal Jira block; a `{noformat}` inside it cannot close the block early."""
+    return "{noformat}\n" + _JIRA_NOFORMAT_RE.sub("{" + _ZWSP, text) + "\n{noformat}"
 
 
 def _jira_label(text: str) -> str:
@@ -67,18 +90,37 @@ class IncidentEnrichmentPayload:
         raw = f"{self.site}|{self.root_device}|{self.root_layer}|{self.root_interface or 'none'}"
         return "NETLOG-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12].upper()
 
-    def to_markdown_body(self) -> str:
-        """Format full RCA, blast radius, and remediation card in Markdown."""
+    def to_markdown_body(self, target: str = "markdown", scrub: Callable[[str], str] | None = None) -> str:
+        """Format full RCA, blast radius, and remediation card.
+
+        ``target`` is where the text is read: "markdown" (the default; dashboards, webhooks, previews)
+        leaves device text as it is; "jira" escapes it as wiki markup and puts multi-line sections
+        (attachments, remediation card) in a ``{noformat}`` block; "servicenow" breaks any
+        ``[code]`` tag. ``scrub`` (a secret redactor) runs on each device-derived string before it
+        is escaped, so the escaping cannot hide a secret from it.
+        """
+        if target not in _BODY_TARGETS:
+            raise ValueError(f"unknown ticket target {target!r}; use one of {', '.join(_BODY_TARGETS)}")
+        redact = scrub or (lambda t: t)
+
+        def one(value: Any) -> str:
+            text = redact(str(value))
+            return _jira_inline(text) if target == "jira" else text
+
+        def block(value: str) -> str:
+            text = redact(value)
+            return _jira_block(text) if target == "jira" else text
+
         vni_str = ", ".join(str(v) for v in sorted(self.affected_vnis)) or "None"
-        dev_str = ", ".join(sorted(self.affected_devices)) or self.root_device
+        dev_str = ", ".join(one(d) for d in sorted(self.affected_devices)) or one(self.root_device)
         lines = [
             f"## netlog-ai Automated RCA Summary (`{self.fingerprint}`)",
-            f"- **Site:** `{self.site}`",
-            f"- **Root Cause Device:** `{self.root_device}`"
-            + (f" (`{self.root_interface}`)" if self.root_interface else ""),
-            f"- **Protocol Layer:** `{self.root_layer}`",
+            f"- **Site:** `{one(self.site)}`",
+            f"- **Root Cause Device:** `{one(self.root_device)}`"
+            + (f" (`{one(self.root_interface)}`)" if self.root_interface else ""),
+            f"- **Protocol Layer:** `{one(self.root_layer)}`",
             f"- **Confidence:** `{int(self.confidence * 100)}%`",
-            f"- **Rationale:** {self.rca_rationale}",
+            f"- **Rationale:** {one(self.rca_rationale)}",
             "",
             "### Blast Radius & Symptom Suppression",
             f"- **Affected Devices ({len(self.affected_devices) or 1}):** {dev_str}",
@@ -86,13 +128,15 @@ class IncidentEnrichmentPayload:
             f"- **Suppressed Downstream Alarms:** `{self.suppressed_symptom_count}`",
         ]
         if self.telemetry_summary:
-            lines.extend(["", "### Optical / Interface Telemetry Verdict", f"> {self.telemetry_summary}"])
+            lines.extend(["", "### Optical / Interface Telemetry Verdict",
+                          f"> {one(self.telemetry_summary)}"])
         if self.remediation_plan:
-            lines.extend(["", self.remediation_plan.to_markdown_card()])
+            lines.extend(["", block(self.remediation_plan.to_markdown_card())])
         for title, body in self.attachments.items():
             if body:
-                lines.extend(["", f"### {title}", body[:_ATTACHMENT_CHARS]])
-        return "\n".join(lines)
+                lines.extend(["", f"### {one(title)}", block(body[:_ATTACHMENT_CHARS])])
+        text = "\n".join(lines)
+        return _SNOW_CODE_TAG_RE.sub("[" + _ZWSP, text) if target == "servicenow" else text
 
     def to_jira_issue_fields(self, project_key: str, issue_type: str = "Incident") -> dict[str, Any]:
         """Construct Jira REST API v2/v3 issue creation fields with fingerprint label."""
@@ -100,7 +144,7 @@ class IncidentEnrichmentPayload:
         return {
             "project": {"key": project_key},
             "summary": f"[{self.site}] {self.summary_title} on {self.root_device}",
-            "description": self.to_markdown_body(),
+            "description": self.to_markdown_body(target="jira"),
             "issuetype": {"name": issue_type},
             "priority": {"name": priority},
             "labels": ["netlog-ai", _jira_label(f"site-{self.site}"), self.fingerprint],
@@ -117,7 +161,7 @@ class IncidentEnrichmentPayload:
             "short_description": f"[{self.site}] {self.summary_title} ({self.root_device})",
             "urgency": urgency,
             "impact": impact,
-            "work_notes": self.to_markdown_body(),
+            "work_notes": self.to_markdown_body(target="servicenow"),
         }
 
 
@@ -216,13 +260,13 @@ class JiraITSMClient:
             self._request(
                 "POST",
                 f"/rest/api/2/issue/{existing_key}/comment",
-                {"body": _clean(payload.to_markdown_body())},
+                {"body": _clean(payload.to_markdown_body(target="jira", scrub=_clean))},
             )
             return {"action": "updated", "issue_key": existing_key, "fingerprint": payload.fingerprint}
 
         fields = payload.to_jira_issue_fields(self.project_key)
         fields["summary"] = _clean(fields["summary"])[:255]
-        fields["description"] = _clean(fields["description"])
+        fields["description"] = _clean(payload.to_markdown_body(target="jira", scrub=_clean))
         created = self._request("POST", "/rest/api/2/issue", {"fields": fields})
         return {
             "action": "created",
@@ -284,7 +328,7 @@ class ServiceNowITSMClient:
             self._request(
                 "PATCH",
                 f"/api/now/table/incident/{sys_id}",
-                {"work_notes": _clean(payload.to_markdown_body())},
+                {"work_notes": _clean(payload.to_markdown_body(target="servicenow", scrub=_clean))},
             )
             return {
                 "action": "updated",
@@ -294,7 +338,7 @@ class ServiceNowITSMClient:
             }
 
         record = payload.to_servicenow_record()
-        record["work_notes"] = _clean(record["work_notes"])
+        record["work_notes"] = _clean(payload.to_markdown_body(target="servicenow", scrub=_clean))
         record["short_description"] = _clean(record["short_description"])[:160]
         created = self._request("POST", "/api/now/table/incident", record)
         result_obj = created.get("result") or {}
