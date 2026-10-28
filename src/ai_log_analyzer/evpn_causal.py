@@ -105,6 +105,11 @@ _VNI_EXTRACT_RE = re.compile(
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
+# analyze() compares each event with the later ones inside the propagation window, so N events that
+# share one window cost N^2 / 2 steps whatever their layers. Past this many classified events the
+# engine keeps the earliest ones and reports the rest in ``dropped_events``.
+MAX_FABRIC_EVENTS = 2_000
+
 
 def is_evpn_causal_enabled() -> bool:
     """True when AI_LOG_ANALYZER_EVPN_CAUSAL is set. Default off."""
@@ -438,6 +443,7 @@ class EVPNBipartiteCausalEngine:
         self.adjacency_map: dict[str, set[str]] = adj
         self.max_propagation_window_sec = float(max_propagation_window_sec)
         self.max_window = float(max_propagation_window_sec)
+        self.dropped_events = 0   # fabric events the last analyze() left out (see MAX_FABRIC_EVENTS)
 
     @classmethod
     def from_site_manifest(
@@ -533,6 +539,7 @@ class EVPNBipartiteCausalEngine:
 
     def analyze(self, events: Iterable[Any]) -> list[CausalHypothesis]:
         """Group fabric events into root-cause hypotheses ordered by confidence."""
+        self.dropped_events = 0
         fabric = [e for e in self.ingest(events) if e.layer != ProtocolLayer.UNKNOWN]
 
         if not fabric:
@@ -546,6 +553,9 @@ class EVPNBipartiteCausalEngine:
                 int(e.layer),
             ),
         )
+        if len(ordered) > MAX_FABRIC_EVENTS:
+            self.dropped_events = len(ordered) - MAX_FABRIC_EVENTS
+            del ordered[MAX_FABRIC_EVENTS:]
         claimed_symptom_ids: set[str] = set()
         hypotheses: list[CausalHypothesis] = []
 
@@ -567,7 +577,9 @@ class EVPNBipartiteCausalEngine:
                 delta_sec = 0.0
                 if cand_dt and later_dt:
                     delta_sec = (later_dt - cand_dt).total_seconds()
-                    if delta_sec < 0 or delta_sec > self.max_window:
+                    if delta_sec > self.max_window:
+                        break   # time-sorted: every remaining event is further out
+                    if delta_sec < 0:
                         continue
 
                 # A lower-layer failure (e.g. L1) explains strictly higher-layer events (L2..L5)
@@ -626,13 +638,21 @@ class EVPNBipartiteCausalEngine:
         )
 
 
-def hypotheses_payload(hypotheses: Sequence[CausalHypothesis]) -> dict[str, Any]:
+def hypotheses_payload(hypotheses: Sequence[CausalHypothesis], dropped_events: int = 0) -> dict[str, Any]:
     """JSON-ready payload attached to AnalysisResult.evpn_causal."""
     elements: list[dict[str, Any]] = []
     for hyp in hypotheses:
         elements.extend(hyp.to_cytoscape_elements())
-    return {
+    payload: dict[str, Any] = {
         "enabled": True,
         "hypotheses": [h.to_dict() for h in hypotheses],
         "cytoscape_elements": elements,
     }
+    if dropped_events:
+        payload["truncated"] = True
+        payload["dropped"] = dropped_events
+        payload["warning"] = (
+            f"EVPN causality input was bounded: dropped {dropped_events} later event(s) over the "
+            f"{MAX_FABRIC_EVENTS}-event limit; hypotheses may be incomplete."
+        )
+    return payload

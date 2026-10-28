@@ -742,6 +742,10 @@ def _executive_summary(
 # the wrong device. Pin the earliest config per hostname (O(devices), the
 # same bound as by_host) and keep the newest-N for late commits.
 _CONFIG_RESERVE = 50
+# The earliest-per-host pins grow with the number of distinct hostnames in the input, and every pin
+# reaches causal_events (and the EVPN engine). Keep the earliest-committing hosts up to this many;
+# the change window needs the first commit host, not a census.
+_CONFIG_RESERVE_HOSTS = 1_000
 
 
 def _push_newest(heap: list, entry: tuple, cap: int) -> None:
@@ -768,7 +772,10 @@ def _merge_config_reserve(
     newest: list, earliest_by_host: dict[str, tuple],
 ) -> list[ClassifiedEvent]:
     reserved: dict[int, ClassifiedEvent] = {}
-    for _, _, ev in earliest_by_host.values():
+    pins = earliest_by_host.values()
+    if len(earliest_by_host) > _CONFIG_RESERVE_HOSTS:
+        pins = heapq.nsmallest(_CONFIG_RESERVE_HOSTS, pins, key=lambda t: (t[0], -t[1]))
+    for _, _, ev in pins:
         reserved[id(ev)] = ev
     for _, _, ev in newest:
         reserved[id(ev)] = ev
@@ -861,7 +868,8 @@ def _aggregate_stream_ex(
     config_events = _merge_config_reserve(config_heap, first_config)
     pool_events = corr_pool.events()
     extras = {"entities": entities, "bgp": bgp, "corr_pool": pool_events, "corr_dropped": corr_pool.dropped,
-              "corr_collapsed": corr_pool.collapsed, "corr_warning": corr_pool.warning}
+              "corr_collapsed": corr_pool.collapsed, "corr_warning": corr_pool.warning,
+              "config_hosts_dropped": max(0, len(first_config) - _CONFIG_RESERVE_HOSTS)}
     return top_events[:top_k], sev_counts, cat_counts, groups, by_host, miner, tracker, config_events, extras
 
 
@@ -1039,6 +1047,13 @@ def _analyze_inner(
         summary.append(
             f"Change window: {cw['count']} config-commit event(s) on {hosts} "
             "inside this window — treat as change-induced until proven otherwise."
+        )
+    if extras["config_hosts_dropped"]:
+        cw["truncated"] = True
+        cw["dropped_hosts"] = extras["config_hosts_dropped"]
+        summary.append(
+            f"Change window: {cw['dropped_hosts']} later-committing host(s) beyond the "
+            f"{_CONFIG_RESERVE_HOSTS}-host limit were not kept; the host list may be incomplete."
         )
 
     netbox_data = (
