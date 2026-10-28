@@ -28,7 +28,8 @@ TEMPLATES = [
     "secret={s}", '{{"password": "{s}"}}', "https://user:{s}@git.example.net/r.git", " password {s}",
     "ip ospf message-digest-key 7 md5 {s}", "ntp authentication-key 7 md5 7 {s}",
     "ntp authentication-key 1 md5 {s} 7", "ntp authentication-key 1 sha1 ciphertext {s}",
-    "security wpa psk set-key ascii 0 {s}", 'secret-key "{s}"', "psk={s}",
+    "security wpa psk set-key ascii 0 {s}", 'secret-key "{s}"', "pre-shared-key 6 {s}",
+    "ip nhrp authentication {s}", "psk={s}",
 ]
 SECRET = st.text(alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", min_size=12, max_size=40)
 
