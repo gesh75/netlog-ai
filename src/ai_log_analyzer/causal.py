@@ -93,6 +93,17 @@ def _parse_epoch(stamp: str) -> datetime | None:
         return None
 
 
+_MAX_CACHED_TS = 64
+
+
+def _event_ts(ts: str) -> datetime | None:
+    """``_parse_event_ts`` without retaining an oversized key: a stamp longer than any real
+    one is parsed once and never cached (8192 slots of 64 KiB keys would pin ~500 MB)."""
+    if len(ts) > _MAX_CACHED_TS:
+        return _parse_event_ts.__wrapped__(ts)
+    return _parse_event_ts(ts)
+
+
 @lru_cache(maxsize=8192)
 def _parse_event_ts(ts: str) -> datetime | None:
     """Parse ISO/RFC5424, FRR, epoch, and RFC3164/Junos stamps. None if unknown.
@@ -152,7 +163,7 @@ def _reference_dt(events: Iterable[ClassifiedEvent]) -> datetime:
     """
     first_yearless: datetime | None = None
     for event in events:
-        parsed = _parse_event_ts(event.timestamp or "")
+        parsed = _event_ts(event.timestamp or "")
         if parsed is None:
             continue
         if parsed.year != _RFC3164_YEARLESS:
@@ -224,7 +235,7 @@ def event_time(event: ClassifiedEvent, year: datetime | int | None = None) -> da
     (``Aug 29`` + ``2026`` stays ``2026-08-29``). ``None`` restamps
     against ``now()``.
     """
-    parsed = _parse_event_ts(event.timestamp or "")
+    parsed = _event_ts(event.timestamp or "")
     if parsed is None:
         return None
     if parsed.year != _RFC3164_YEARLESS:
