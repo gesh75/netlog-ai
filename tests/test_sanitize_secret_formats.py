@@ -92,6 +92,35 @@ FORMATS: list[tuple[str, str, str]] = [
      "SecretPgp"),
     ("pem-truncated", "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkSecretTruncated\nmore lines", "SecretTruncated"),
     ("bare-crypt-hash", "admin hash $6$rounds=5000$saltsalt$CryptHashBodyValue1234567890", "CryptHashBodyValue1234567890"),
+    # Key id 7 is an id, not a type-7 marker: the md5/sha word must survive as the rule anchor.
+    ("ospf-md5-id7", "ip ospf message-digest-key 7 md5 OspfId7Secret", "OspfId7Secret"),
+    ("ospf-md5-id7-eos7", "ip ospf message-digest-key 7 md5 7 104D000A0618", "104D000A0618"),
+    ("ospf-md5-id7-nxos3", "ip ospf message-digest-key 7 md5 3 NxosEncKey77", "NxosEncKey77"),
+    ("ospf-md5-id7-xr-encrypted", "message-digest-key 7 md5 encrypted 0822455D0A16", "0822455D0A16"),
+    ("ospf-md5-id7-xr-clear", "message-digest-key 7 md5 clear XrClearKey77", "XrClearKey77"),
+    ("ospf-vlink-id7", "area 1 virtual-link 192.0.2.2 message-digest-key 7 md5 VlinkSecret7", "VlinkSecret7"),
+    ("ospf-sha256-id7-eos", "ip ospf message-digest-key 7 sha256 7 060506324F41", "060506324F41"),
+    ("ntp-key-id7", "ntp authentication-key 7 md5 NtpId7Secret", "NtpId7Secret"),
+    ("ntp-key-id7-ios-type", "ntp authentication-key 7 md5 NtpId7IosKey 7", "NtpId7IosKey"),
+    ("ntp-key-id7-eos-type", "ntp authentication-key 7 md5 7 060506324F41", "060506324F41"),
+    ("ntp-key-id7-xr", "ntp authentication-key 7 md5 encrypted 0822455D0A16", "0822455D0A16"),
+    ("ntp-key-id7-sha1", "ntp authentication-key 7 sha1 NtpId7Sha1", "NtpId7Sha1"),
+    ("ntp-key-id7-sha256", "ntp authentication-key 7 sha256 NtpId7Sha256", "NtpId7Sha256"),
+    ("ntp-key-id7-hmac", "ntp authentication-key 7 hmac-sha2-256 NtpId7Hmac", "NtpId7Hmac"),
+    # NTP keys with the type before the key (EOS, Aruba) or other algorithm names (IOS-XE).
+    ("ntp-key-eos-type7", "ntp authentication-key 1 md5 7 06120A3258", "06120A3258"),
+    ("ntp-key-aoscx-ciphertext", "ntp authentication-key 1 sha1 ciphertext AQBapXyzNtpAosCx", "AQBapXyzNtpAosCx"),
+    ("ntp-key-aoscx-plaintext", "ntp authentication-key 1 md5 plaintext NtpAosPlain1", "NtpAosPlain1"),
+    ("ntp-key-ios-hmac-type", "ntp authentication-key 1 hmac-sha2-256 MyNtpHmacKey 7", "MyNtpHmacKey"),
+    ("ntp-key-ios-hmac-sha1", "ntp authentication-key 1 hmac-sha1 NtpHmacSha1Key", "NtpHmacSha1Key"),
+    # A secret rule must never reach into the next line and eat the keyword that anchors another rule.
+    ("keychain-id7-key-string", "key chain K\n key 7\n  key-string KeyChainSecret7\n", "KeyChainSecret7"),
+    ("key7-eol-then-username", "x key 7\nusername bob password Hunter2Pw9", "Hunter2Pw9"),
+    ("snmp-community-eol-then-host", "snmp-server community\nsnmp-server host 192.0.2.9 version 2c HostCommLeak1",
+     "HostCommLeak1"),
+    ("snmpv3-auth-eol-then-username", "snmp-server user u g v3 auth sha\nusername bob password Hunter2Pw9",
+     "Hunter2Pw9"),
+    ("junos-snmpv3-eol-then-username", "authentication-password\nusername bob password Hunter2Pw9", "Hunter2Pw9"),
 ]
 
 

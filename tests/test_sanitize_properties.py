@@ -26,6 +26,8 @@ TEMPLATES = [
     "snmp-server host 10.9.9.9 version 2c {s}", "key-string {s}", "Authorization: Bearer {s}",
     "Authorization: Basic {s}", "GET /x?api_key={s}&n=1", "token={s}", "password={s}", "passwd={s}",
     "secret={s}", '{{"password": "{s}"}}', "https://user:{s}@git.example.net/r.git", " password {s}",
+    "ip ospf message-digest-key 7 md5 {s}", "ntp authentication-key 7 md5 7 {s}",
+    "ntp authentication-key 1 md5 {s} 7", "ntp authentication-key 1 sha1 ciphertext {s}",
 ]
 SECRET = st.text(alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", min_size=12, max_size=40)
 
