@@ -14,11 +14,38 @@ from __future__ import annotations
 import csv
 import html
 import io
+import math
+import re
 import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+
+_SEVERITIES = frozenset({"critical", "high", "medium", "low"})
+
+
+def _e(value: Any) -> str:
+    """HTML-escape any value (model and request data are not always strings)."""
+    return html.escape("" if value is None else str(value))
+
+
+def _text_list(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    return "" if value is None else str(value)
+
+
+def _score(value: Any) -> str:
+    """A report score is a number; anything else is shown as n/a instead of being written into the page."""
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if not math.isfinite(n):
+        return "n/a"
+    return str(int(n)) if n == int(n) else f"{n:.1f}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Markdown
@@ -132,21 +159,37 @@ def to_markdown_optimize(result: dict) -> str:
 # CSV
 # ─────────────────────────────────────────────────────────────────────────────
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_cell(value: Any) -> Any:
+    """Numbers stay numbers; text that a spreadsheet would read as a formula gets a leading `'`."""
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    text = str(value)
+    return "'" + text if text.startswith(_FORMULA_PREFIXES) else text
+
+
 def to_csv_findings(result: dict) -> str:
-    """Flat CSV of every finding (single-device or site-level)."""
+    """Flat CSV of every finding (single-device or site-level).
+
+    Finding text comes from a model, so a cell that starts with `=`, `+`, `-`, `@`, tab or CR is
+    prefixed with `'` and opens as literal text in Excel and LibreOffice.
+    """
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["severity", "category", "title", "affected", "evidence", "rationale"])
     findings = result.get("cross_device_findings") or result.get("findings") or []
     for f in findings:
-        affected = ", ".join(f.get("affected_devices") or
-                             [result.get("hostname", "")])
-        w.writerow([
+        affected = _text_list(f.get("affected_devices") or [result.get("hostname", "")])
+        w.writerow([_csv_cell(v) for v in (
             f.get("severity", ""), f.get("category", ""),
             f.get("title", ""), affected,
-            (f.get("evidence") or "").replace("\n", " "),
-            (f.get("rationale") or "").replace("\n", " "),
-        ])
+            str(f.get("evidence") or "").replace("\n", " "),
+            str(f.get("rationale") or "").replace("\n", " "),
+        )])
     return buf.getvalue()
 
 
@@ -167,52 +210,53 @@ def to_html_site(result: dict, mermaid_diagram: str | None = None) -> str:
 
     findings_html = []
     for i, f in enumerate(findings, 1):
-        sev = (f.get("severity") or "low").lower()
+        sev_text = str(f.get("severity") or "low").lower()
+        sev = sev_text if sev_text in _SEVERITIES else "unknown"  # class names come from a fixed list
         affected = f.get("affected_devices") or []
         patches_html = ""
         for dev, cmds in (f.get("fix_per_device") or {}).items():
             if isinstance(cmds, list) and cmds:
-                patches_html += f'<h4>Fix on <code>{html.escape(dev)}</code></h4><pre>{html.escape(chr(10).join(cmds))}</pre>'
+                patches_html += f'<h4>Fix on <code>{_e(dev)}</code></h4><pre>{_e(chr(10).join(map(str, cmds)))}</pre>'
         verify_html = ""
         if f.get("verify_cli"):
-            verify_html = f'<h4>Verify</h4><pre>{html.escape(chr(10).join(f["verify_cli"]))}</pre>'
+            verify_html = f'<h4>Verify</h4><pre>{_e(chr(10).join(map(str, f["verify_cli"])))}</pre>'
         findings_html.append(f"""
 <div class="finding sev-{sev}">
   <div class="finding-head">
-    <span class="sev-pill sev-{sev}">{sev.upper()}</span>
-    <strong>{html.escape(f.get('title', ''))}</strong>
-    <span class="cat">{html.escape(f.get('category', ''))}</span>
+    <span class="sev-pill sev-{sev}">{_e(sev_text.upper())}</span>
+    <strong>{_e(f.get('title', ''))}</strong>
+    <span class="cat">{_e(f.get('category', ''))}</span>
   </div>
-  <p><b>Affected:</b> {html.escape(', '.join(affected))}</p>
-  <p><b>Evidence:</b> {html.escape(f.get('evidence') or '—')}</p>
-  <p><b>Why it matters:</b> {html.escape(f.get('rationale') or '—')}</p>
+  <p><b>Affected:</b> {_e(_text_list(affected))}</p>
+  <p><b>Evidence:</b> {_e(f.get('evidence') or '—')}</p>
+  <p><b>Why it matters:</b> {_e(f.get('rationale') or '—')}</p>
   {patches_html}
   {verify_html}
 </div>""")
 
     mons_html = ""
     if result.get("monitoring_gaps"):
-        items = "".join(f"<li>{html.escape(m)}</li>" for m in result["monitoring_gaps"])
+        items = "".join(f"<li>{_e(m)}</li>" for m in result["monitoring_gaps"])
         mons_html = f"<h2>Monitoring Gaps</h2><ul>{items}</ul>"
 
     topo_html = ""
     if topo.get("devices_seen"):
         topo_html = (f"<h2>Topology</h2>"
                      f"<p><b>Devices ({len(topo['devices_seen'])}):</b> "
-                     f"{html.escape(', '.join(topo['devices_seen']))}</p>")
+                     f"{_e(_text_list(topo['devices_seen']))}</p>")
 
     diagram_html = ""
     if mermaid_diagram:
         # Embed mermaid.js from a CDN — only external dep
         diagram_html = f"""
 <h2>Topology Diagram</h2>
-<div class="mermaid">{html.escape(mermaid_diagram)}</div>
+<div class="mermaid">{_e(mermaid_diagram)}</div>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js" crossorigin="anonymous"></script>
 <script>mermaid.initialize({{startOnLoad:true,theme:'dark'}});</script>
 """
 
     return f"""<!DOCTYPE html><html lang="en"><head>
-<meta charset="UTF-8"><title>{html.escape(site)} — AI Network Analysis</title>
+<meta charset="UTF-8"><title>{_e(site)} — AI Network Analysis</title>
 <style>
   body {{ font: 14px/1.5 -apple-system, system-ui, sans-serif;
           background:#0d1117; color:#e6edf3; margin:0; padding:20px; max-width:1100px; margin:auto; }}
@@ -242,10 +286,10 @@ def to_html_site(result: dict, mermaid_diagram: str | None = None) -> str:
   @media print {{ body {{ background:white; color:black; }} h2 {{ color:#0366d6; }}
                   .finding {{ background:#f6f8fa; }} pre, code {{ background:#f6f8fa; color:#24292e; }} }}
 </style></head><body>
-<h1>🧠 AI Network Analysis — {html.escape(site)}</h1>
+<h1>🧠 AI Network Analysis — {_e(site)}</h1>
 <p class="meta">Generated {timestamp} · LLM: {'on' if result.get('llm_powered') else 'rule-based'} · {len(findings)} findings</p>
-<div class="score">{result.get('site_score', result.get('score', 0))}/100</div>
-<p><b>Summary:</b> {html.escape(result.get('site_summary', result.get('summary', '')))}</p>
+<div class="score">{_score(result.get('site_score', result.get('score', 0)))}/100</div>
+<p><b>Summary:</b> {_e(result.get('site_summary', result.get('summary', '')))}</p>
 {topo_html}
 {diagram_html}
 <h2>Findings ({len(findings)})</h2>
@@ -258,6 +302,28 @@ def to_html_site(result: dict, mermaid_diagram: str | None = None) -> str:
 # PDF (best-effort: try weasyprint, fall back to wkhtmltopdf, fall back to None)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# The page being printed may hold text a model or an operator wrote, so no renderer may follow a
+# link out of it: a `file://` or `http://` reference in the markup must not be read into the PDF.
+_PDF_CSP = ('<meta http-equiv="Content-Security-Policy" '
+            "content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:\">")
+
+
+def _locked_down(html_text: str) -> str:
+    """The report with a policy that forbids scripts, frames and every external fetch, placed first."""
+    head = re.search(r"<head[^>]*>", html_text, re.IGNORECASE)
+    if head:
+        return html_text[:head.end()] + _PDF_CSP + html_text[head.end():]
+    return _PDF_CSP + html_text
+
+
+def _refuse_fetch(url: str, *_args: Any, **_kwargs: Any) -> Any:
+    """WeasyPrint url_fetcher: only `data:` URLs (decoded in-process) are loaded, nothing else."""
+    if url[:5].lower() == "data:":
+        from weasyprint import default_url_fetcher  # type: ignore
+        return default_url_fetcher(url)
+    raise ValueError(f"external resource blocked: {url[:80]}")
+
+
 def to_pdf(html_text: str) -> bytes | None:
     """Render HTML to PDF if a backend is available. Returns bytes or None.
 
@@ -265,11 +331,18 @@ def to_pdf(html_text: str) -> bytes | None:
       1. weasyprint (pure Python — preferred)
       2. wkhtmltopdf binary
       3. Chrome / Chromium headless (--print-to-pdf)
+
+    The renderers cannot read local files or reach the network on behalf of the document:
+    WeasyPrint gets a url_fetcher that allows only `data:` URLs, wkhtmltopdf runs without local
+    file access or JavaScript, and every page carries a Content-Security-Policy meta tag that
+    Chrome enforces. The mermaid diagram therefore prints as its (escaped) source in the PDF;
+    open the HTML report in a browser for the drawn diagram.
     """
+    html_text = _locked_down(html_text)
     # Try weasyprint
     try:
         from weasyprint import HTML  # type: ignore
-        return HTML(string=html_text).write_pdf()
+        return HTML(string=html_text, url_fetcher=_refuse_fetch).write_pdf()
     except ImportError:
         pass
     except Exception:
@@ -282,7 +355,7 @@ def to_pdf(html_text: str) -> bytes | None:
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as out:
                 outpath = out.name
             proc = subprocess.run(
-                [wk, "--quiet", "-", outpath],
+                [wk, "--quiet", "--disable-local-file-access", "--disable-javascript", "-", outpath],
                 input=html_text, text=True, capture_output=True, timeout=60,
             )
             if proc.returncode == 0:
