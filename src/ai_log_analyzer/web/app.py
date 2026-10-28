@@ -1970,7 +1970,11 @@ def create_app() -> Flask:
         except ValueError:
             return jsonify({"error": "limit must be an integer"}), 400
         tickets = worker.db.triage_all(limit=limit)
-        return jsonify({**worker.status(), "tickets": tickets})
+        status = worker.status()
+        if not _actor_allows("admin"):   # sink error text is for admins; everyone else gets the count
+            last = status.get("last_tick") or {}
+            status["last_tick"] = {**last, "errors": [], "error_count": len(last.get("errors") or [])}
+        return jsonify({**status, "tickets": tickets})
 
     @app.route("/api/triage/stream/start", methods=["POST"])
     @require_role("admin", "triage.worker.start")
