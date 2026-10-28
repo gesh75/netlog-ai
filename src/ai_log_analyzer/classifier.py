@@ -29,7 +29,7 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     # They quote the command text ("show chassis alarms", "show bgp ... | match down"), so every
     # keyword rule below would fire on the operator's own keystrokes. First match wins.
     (r"ui_cmdline_read_line|cfglog_loggedcmd|logged command\b|%accounting-\d-cmd\b|\bcommand=/"
-     r"|\bcommand\s*[:=]?\s*['\"](?:show|display|get|ping|traceroute|clear|request|configure|set|delete|commit|run)\b",
+     r"|\bcommand\s*(?:[:=]\s*)?['\"](?:show|display|get|ping|traceroute|clear|request|configure|set|delete|commit|run)\b",
                                                                          "low",      "config",     "CLI management activity"),
     # ── Security / SD-WAN vendors (gated on parser appnames / vendor tokens) ──
     # FortiOS appnames are "fortios-<subtype>", PAN-OS "panos-<subtype>";
@@ -121,7 +121,7 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"out\s+of\s+memory|heap.*exhaust|(?!.*\b(?:[0-9]|[1-8][0-9])(?:\.\d+)?%\s*full\b)memory.*full|oom.?kill",
                                                                          "critical", "system",     "Memory exhaustion / OOM"),
     (r"parity\s+error|sbus\s+transaction|ser_overlay_mem_correction",   "critical", "hardware",   "ASIC memory parity error (hard)"),
-    (r"fpc\d+.*(?:offline|power.?off|restart|crash|halt)",              "critical", "hardware",   "FPC/line card offline or crash"),
+    (r"fpc\d.*(?:offline|power.?off|restart|crash|halt)",               "critical", "hardware",   "FPC/line card offline or crash"),
     (r"(?:major|minor|chassis)\s+alarm",                                "critical", "hardware",   "Chassis alarm triggered"),
     # Junos alarmd: the colour is the severity (RED = major, YELLOW = minor).
     (r"alarm set.*color=red",                                           "critical", "hardware",   "Chassis alarm triggered"),
@@ -142,7 +142,7 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"bgp_mgr.*(?:to\s+(?:idle|active|connect)\b|session.*(?:down|fail))", "high", "routing",    "BGP peer down / connect failure"),
     (r"%(?:\w+-)?(?:link-\d-updown|lineproto-\d-updown).*to\s+down",    "high",     "interface",  "Interface link down"),
     (r"%ethport-5-if_down|%eth_port_channel.*down",                     "high",     "interface",  "Interface link down"),
-    (r"\w+_mgr.*oper.*state.*down|srlinux.*port.*down",                 "high",     "interface",  "Interface link down"),
+    (r"\w_mgr.*oper.*state.*down|srlinux.*port.*down",                  "high",     "interface",  "Interface link down"),
     (r"%sec_login-4-login_failed|%authpriv.*fail",                      "high",     "security",   "Authentication failure"),
     (r"%sysmgr-2-service_crashed|%sysmgr.*(?:crash|terminated)",        "critical", "system",     "NX-OS service crash"),
     (r"%vpc-2-|vpc.*peer.*(?:down|fail)",                               "high",     "lag",        "vPC peer failure (NX-OS)"),
@@ -213,7 +213,7 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"vrrp.*(?:master.*change|backup|failover)|hsrp.*change",          "high",     "redundancy", "VRRP/gateway failover"),
     (r"(?:rx|receive|input)[ _-]?(?:optical )?power.{0,40}(?:low|high)[ _-]?alarm|(?:low|high)[ _-]?(?:rx|receive)[ _-]?power[ _-]?alarm",
                                                                          "high",     "hardware",   "Optical Rx power alarm"),
-    (r"fpc\d+.*(?:error|mem:|unit:)",                                   "high",     "hardware",   "FPC hardware error"),
+    (r"fpc\d.*(?:error|mem:|unit:)",                                    "high",     "hardware",   "FPC hardware error"),
     (r"l3_entry|l2_entry|memory\s+block|blk:",                          "high",     "hardware",   "ASIC forwarding table error"),
     # Established -> Active/Connect/Clearing is a DOWN event; without this the generic
     # "bgp.*established" rule below ranks it as a medium "peer established".
