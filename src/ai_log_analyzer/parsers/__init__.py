@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 
 from ai_log_analyzer.classifier import LogEvent
+from ai_log_analyzer.ingest import default_max_line_bytes
 from ai_log_analyzer.parsers.base import (
     SKIP,
     Envelope,
@@ -54,13 +55,24 @@ def ensure_structured(ev: LogEvent) -> LogEvent:
     Events that already went through a parser plugin are returned unchanged.
     Otherwise the vendor body parsers are tried on the message (a Splunk or
     Kibana hit often *is* a raw FortiGate / PAN-OS line); the event keeps its
-    own timestamp/hostname unless it had none.
+    own timestamp/hostname unless it had none. Connector text has no ingest
+    cap, so the parsers see at most the ingest line limit (AI_LOG_ANALYZER_MAX_LINE_BYTES,
+    in characters here) of it; a longer message is flagged ``attrs["parse_truncated"]``.
     """
     if not isinstance(ev, LogEvent) or ev.attrs.get("parser"):
         return ev
     msg = ev.message or ""
+    limit = default_max_line_bytes()
+    capped = 0 < limit < len(msg)
+    note = {"parse_truncated": "1"} if capped else {}
+    if capped:
+        msg = msg[:limit]
     for plugin in _BODY_PLUGINS:
-        parsed = plugin.parse(msg, dataclasses.replace(_NO_ENV, body=msg), ev.hostname)
+        try:
+            parsed = plugin.parse(msg, dataclasses.replace(_NO_ENV, body=msg), ev.hostname)
+        except Exception:   # one bad connector row must not fail the batch it arrived in
+            registry.note_error(f"plugin {plugin.name}")
+            continue
         if isinstance(parsed, LogEvent):
             return dataclasses.replace(
                 parsed,
@@ -68,9 +80,9 @@ def ensure_structured(ev: LogEvent) -> LogEvent:
                 hostname=ev.hostname or parsed.hostname,
                 appname=parsed.appname if parsed.appname != "syslog" else (ev.appname or "syslog"),
                 severity_raw=ev.severity_raw if ev.severity_raw not in ("", "info") else parsed.severity_raw,
-                attrs={**parsed.attrs, "parser": f"enrich:{plugin.name}"},
+                attrs={**parsed.attrs, "parser": f"enrich:{plugin.name}", **note},
             )
-    return with_structure(ev, enrich_netos(ev.appname, msg), "enrich")
+    return with_structure(ev, enrich_netos(ev.appname, msg), "enrich", attrs=note)
 
 
 __all__ = [

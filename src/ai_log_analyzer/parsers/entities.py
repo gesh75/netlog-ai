@@ -110,7 +110,7 @@ _BGP_PEER_RES = (
     re.compile(rf"(?<![\w.:])(?P<ip>{_IPV4})\([\w.\-]+\)"),  # FRR peer description "10.1.1.2(spine1)"
 )
 _GENERIC_PEER_RES = (
-    re.compile(rf"\b(?:neighbou?r|peer|nbr|to|from|remote(?:[- ](?:peer|gateway|address|ip))?)\s*:?\s+(?P<ip>{_IP})", re.IGNORECASE),
+    re.compile(rf"\b(?:neighbou?r|peer|nbr|to|from|remote(?:[- ](?:peer|gateway|address|ip))?)(?:\s+|\s*:\s+)(?P<ip>{_IP})", re.IGNORECASE),
     re.compile(rf"(?P<ip>{_IPV4})"),
 )
 # asplain ("65010") or asdot ("1.10", "65000.100"); the written form is kept —
@@ -131,7 +131,7 @@ _VRF_RES = (
     re.compile(r"\brouting-instance\s+(?P<vrf>[A-Za-z0-9_.:\-]+)"),
 )
 _NXOS_LOCAL_AS_RE = re.compile(r"\bbgp-(?P<las>\d+(?:\.\d+)?) \[\d+\]")
-_VNI_RE = re.compile(r"\b(?:VNI|vni|VNID|vnid|l2vni|l3vni)\s*[:=]?\s*(?P<vni>\d{1,8})\b")
+_VNI_RE = re.compile(r"\b(?:VNI|vni|VNID|vnid|l2vni|l3vni)\s*(?:[:=]\s*)?(?P<vni>\d{1,8})\b")
 _INTF_NAME = (
     r"(?:(?:Ten|Forty|Hundred|TwentyFive|Fifty|FourHundred)?Gig(?:abit)?E(?:thernet)?"
     r"|FastEthernet|Ethernet|ethernet-|ethernet|Eth|Port-[Cc]hannel|port-channel|Po|Vlan|vlan|Loopback|lo"
@@ -145,7 +145,7 @@ _INTF_RES = (
 )
 _STATE_TO_RE = re.compile(
     r"(?:changed state from|from|old state)\s+(?P<old>\w+)(?:\s+(?:to|event \w+ new state)\s+|\s*->\s*)(?P<new>\w+)"
-    r"|(?:new[- ]state|state changed to|state)\s*[:=]?\s*(?P<new2>\w+)"
+    r"|(?:new[- ]state|state changed to|state)\s*(?:[:=]\s*)?(?P<new2>\w+)"
     r"|->\s*(?P<new3>\w+)",
     re.IGNORECASE,
 )
@@ -241,11 +241,11 @@ _OPER_RE = re.compile(r"\boper(?:ational)?[ -]?(?:state|status)\b")
 _MAXPFX_RE = re.compile(r"max(?:imum)?[-_ ]?(?:number of )?(?:prefix|pfx)|prefix[-_ ]limit|maxpfx", re.IGNORECASE)
 _PATHCHG_RE = re.compile(r"(?:origin(?:\s+as)?|as[-_ ]?path)\s*(?:change|changed|mismatch|conflict)|\bmoas\b|"
                          r"route leak|possible hijack", re.IGNORECASE)
-_LOCAL_IP_RE = re.compile(rf"\b(?:Local-ip|local[- ]address|local ip|source)\s*[:=]?\s*(?P<ip>{_IP})", re.IGNORECASE)
+_LOCAL_IP_RE = re.compile(rf"\b(?:Local-ip|local[- ]address|local ip|source)\s*(?:[:=]\s*)?(?P<ip>{_IP})", re.IGNORECASE)
 # "_" is a word char, so \b would miss IKE_NEGOTIATION_FAILED.
 _IPSEC_RE = re.compile(r"(?<![a-z0-9_])(?:ipsec|ike|ikev2|isakmp|crypto)(?![a-z0-9])")
 _NEGO_FAIL_RE = re.compile(r"negotiation[_ ]failed|negotiation failed with error")
-_KMD_TUNNEL_RE = re.compile(r"\bvpn name:\s*(?P<t>[^,]+)|\bVPN\s+(?P<t2>\S+)\s+from\b|\btunnel[- ](?:name|id)\s*[:=]?\s*(?P<t3>[\w.\-]+)",
+_KMD_TUNNEL_RE = re.compile(r"\bvpn name:\s*(?P<t>[^,]+)|\bVPN\s+(?P<t2>\S+)\s+from\b|\btunnel[- ](?:name|id)\s*(?:[:=]\s*)?(?P<t3>[\w.\-]+)",
                             re.IGNORECASE)
 
 

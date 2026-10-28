@@ -10,7 +10,7 @@ via ``evpn_causal_hypotheses()`` / ``analyze(..., evpn_causal=True)``.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import MAXYEAR, MINYEAR, datetime, timezone
 from functools import lru_cache
 from typing import Any
 
@@ -108,7 +108,9 @@ def _parse_event_ts(ts: str) -> datetime | None:
     iso = stamp.replace("Z", "+00:00")
     try:
         return _as_naive(datetime.fromisoformat(iso))
-    except ValueError:
+    except (OverflowError, ValueError):
+        # OverflowError: an offset pushes a year-1/9999 stamp outside datetime. The event is
+        # untimed (as for any unknown stamp); it must not fail the batch it arrived in.
         pass
     collapsed = " ".join(stamp.split())
     parts = collapsed.split()
@@ -180,7 +182,8 @@ def _is_rollover_pair(parsed: datetime, ref: datetime) -> bool:
 
 
 def _with_year(parsed: datetime, year: int) -> datetime:
-    """``replace(year=…)`` that keeps 29 Feb parseable on a common year."""
+    """``replace(year=…)`` that keeps 29 Feb parseable on a common year; the year is kept in 1..9999."""
+    year = min(max(year, MINYEAR), MAXYEAR)
     try:
         return parsed.replace(year=year)
     except ValueError:
@@ -201,6 +204,8 @@ def _restamp_yearless(parsed: datetime, ref: datetime) -> datetime:
     best: datetime | None = None
     best_delta: float | None = None
     for year in (ref.year - 1, ref.year, ref.year + 1):
+        if not MINYEAR <= year <= MAXYEAR:
+            continue
         candidate = _with_year(parsed, year)
         delta = abs((candidate - ref).total_seconds())
         if best is None or delta < best_delta:
@@ -227,10 +232,7 @@ def event_time(event: ClassifiedEvent, year: datetime | int | None = None) -> da
     if isinstance(year, datetime):
         return _restamp_yearless(parsed, year)
     if isinstance(year, int):
-        try:
-            return parsed.replace(year=year)
-        except ValueError:
-            return parsed.replace(year=year, day=28)
+        return _with_year(parsed, year)
     return _restamp_yearless(parsed, _now())
 
 

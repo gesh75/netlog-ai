@@ -18,7 +18,13 @@ from ai_log_analyzer.parsers.base import Envelope
 from ai_log_analyzer.parsers.entities import bgp_state, enrich_netos, valid_ip
 from ai_log_analyzer.parsers.generic import with_structure
 
-_KV_RE = re.compile(r'(?P<k>[A-Za-z_][\w-]*)=(?P<v>"(?:[^"\\]|\\.)*"|\S*)')
+# The lookbehind and the lazy prefix keep a key attempt to the start of a word run (the first letter or
+# underscore in it), so a long run with no "=" costs one linear scan instead of one per character.
+_KV_RE = re.compile(r'(?<![\w-])(?:(?![A-Za-z_])[\w-])*(?P<k>[A-Za-z_][\w-]*)=(?P<v>"(?:[^"\\]|\\.)*"|\S*)')
+# The SD-WAN state regexes below look at most _GAP characters past "sla" / "back", in at most
+# _CLASSIFY_CHARS characters of logdesc + msg; a longer text is flagged (attrs["classify_truncated"]).
+_CLASSIFY_CHARS = 4096
+_GAP = 300
 _START_KEYS = ("date=", "logver=", "devname=", "eventtime=", "itime=")
 _LEVELS = {
     "emergency": "emerg", "alert": "alert", "critical": "crit", "error": "err",
@@ -73,9 +79,9 @@ def _classify(kv: dict[str, str]) -> dict[str, str]:
     out: dict[str, str] = {"vendor": "fortinet", "action": kv.get("action", "")}
 
     if sub == "vpn" or "ipsec" in low or "ike" in low:
-        if re.search(r"phase\s*-?\s*2|phase2|quick mode", low) or action.startswith("phase2"):
+        if re.search(r"phase\s*(?:-\s*)?2|phase2|quick mode", low) or action.startswith("phase2"):
             out["event_type"] = "ike_phase2"
-        elif re.search(r"phase\s*-?\s*1|phase1", low) or action == "negotiate":
+        elif re.search(r"phase\s*(?:-\s*)?1|phase1", low) or action == "negotiate":
             out["event_type"] = "ike_phase1"
         else:
             out["event_type"] = "ipsec_tunnel"
@@ -90,11 +96,15 @@ def _classify(kv: dict[str, str]) -> dict[str, str]:
     elif sub == "sdwan" or re.search(r"sd-?wan|virtual wan link|health[- ]?check|\bsla\b", low):
         out["event_type"] = "sdwan_sla"
         out["interface"] = kv.get("interface", "")
+        rx = low[:_CLASSIFY_CHARS]
+        if len(low) > _CLASSIFY_CHARS:
+            out["attr:classify_truncated"] = "1"
         if status in ("down", "dead") or re.search(
-                r"out[- ]of[- ]sla|stop forwarding|unreachable|miss(?:ed)? threshold|sla.*(?:fail|violat)|\bdead\b", low):
+                rf"out[- ]of[- ]sla|stop forwarding|unreachable|miss(?:ed)? threshold"
+                rf"|sla.{{0,{_GAP}}}(?:fail|violat)|\bdead\b", rx):
             out["state"] = "down"
         elif status in ("up", "alive") or re.search(
-                r"in[- ]sla|back.*sla|start forwarding|is available|\balive\b", low):
+                rf"in[- ]sla|back.{{0,{_GAP}}}sla|start forwarding|is available|\balive\b", rx):
             out["state"] = "up"
     elif sub == "router" or "bgp" in low or "ospf" in low:
         net = enrich_netos("", kv.get("msg", "") or desc)
