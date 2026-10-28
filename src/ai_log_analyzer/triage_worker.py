@@ -73,6 +73,7 @@ from ai_log_analyzer.itsm import IncidentEnrichmentPayload
 from ai_log_analyzer.parsers import registry as parser_registry
 from ai_log_analyzer.sanitize import sanitize
 from ai_log_analyzer.state_store import LeaseLost
+from ai_log_analyzer.url_redact import redact_text
 
 log = logging.getLogger(__name__)
 
@@ -199,8 +200,12 @@ class WebhookSink:
             data = {"event": "netlog.incident", "fingerprint": payload.fingerprint, "title": title,
                     "site": payload.site, "devices": list(payload.affected_devices), "markdown": body,
                     "idempotency_key": payload.fingerprint}
-        r = requests.post(self.url, json=data, timeout=self.timeout_s,
-                          headers={"Idempotency-Key": payload.fingerprint})
+        try:
+            r = requests.post(self.url, json=data, timeout=self.timeout_s,
+                              headers={"Idempotency-Key": payload.fingerprint})
+        except requests.RequestException as exc:
+            # the exception text carries the request path and query, which for Slack-style URLs is the secret
+            raise RuntimeError(f"webhook delivery failed: {type(exc).__name__}") from None
         if r.status_code >= 300:
             raise RuntimeError(f"webhook answered HTTP {r.status_code}")
         return {"action": "posted", "ref": payload.fingerprint}
@@ -671,12 +676,14 @@ class StreamingTriageWorker:
             try:
                 res = sink.upsert_incident(payload)
             except Exception as exc:  # network / HTTP / auth errors must not stop the loop
-                errors.append(f"{sink.name}: {str(exc)[:200]}")
+                # sink URLs (webhook secrets, userinfo) must not reach the tick report, logs or audit rows
+                reason = redact_text(exc, keep_path=False)[:200]
+                errors.append(f"{sink.name}: {reason}")
                 failed.append(sink.name)
                 self._sink_failed(sink.name, now)
                 st = self._sink_state[sink.name]
                 log.warning("triage sink %s failed (%d in a row, next try in %.0f s): %s", sink.name,
-                            st["fails"], st["next_try"] - now, str(exc)[:200])
+                            st["fails"], st["next_try"] - now, reason)
                 continue
             self._sink_state.pop(sink.name, None)
             results.append({"sink": sink.name, "action": res.get("action", ""), "ref": str(res.get("ref", ""))})
