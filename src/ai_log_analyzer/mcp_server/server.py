@@ -632,6 +632,7 @@ def _build_server():
             "root_cause": root_causes[0]["root_cause"] if root_causes else None,
             "suppressed_symptoms": root_causes[0]["suppressed_symptoms"] if root_causes else [],
             "cytoscape_elements": [el for h in hypotheses for el in h.to_cytoscape_elements()],
+            **({"truncated": True, "dropped": engine.dropped_events} if engine.dropped_events else {}),
         }
 
     # ── remediation & itsm ───────────────────────────────────────────────────

@@ -741,4 +741,5 @@ def evpn_causal_hypotheses(
         adjacency_map=adjacency_map,
         max_propagation_window_sec=max_propagation_window_sec,
     )
-    return hypotheses_payload(engine.analyze(events))
+    hypotheses = engine.analyze(events)
+    return hypotheses_payload(hypotheses, dropped_events=engine.dropped_events)
