@@ -76,6 +76,52 @@ def _kw(prefix: str, *, typed: bool = False, eol: bool = False, quoted: bool = F
     return re.compile(rf"({group})[ \t]+{_QTOK if quoted else _TOK}{tail}", flags)
 
 
+class _SnmpCommunityScan:
+    """`community NAME` lines that are SNMP communities only in context.
+
+    BGP policy uses the same words (`from { community CUST; }`), so a bare `community NAME;` or an
+    indented `community NAME` is redacted only inside an `snmp` block, a SR Linux `community-entry`, or
+    a fragment with no enclosing block; never inside a policy block. One linear pass over the lines.
+    """
+
+    _STMT = re.compile(r'([ \t]*community)[ \t]+(?!"?<REDACTED)("[^"\n]*"|[^\s;{}"]+)[ \t]*(;?)[ \t\r]*')
+    _POLICY = frozenset({"policy-options", "policy-statement", "term", "from", "to", "then"})
+    _SNMP = frozenset({"snmp", "community-entry"})
+
+    @staticmethod
+    def _head(line: str) -> str:
+        words = line.lstrip("} \t").split(None, 1)
+        return words[0].rstrip("{;").lower() if words else ""
+
+    def subn(self, repl: str, text: str) -> tuple[str, int]:
+        stack: list[str] = []
+        policy = snmp = count = 0  # open policy / snmp blocks, so each line costs O(1)
+        top = ""  # the last unindented line's first word: `snmp` for an indented Viptela-style block
+        out: list[str] = []
+        for line in text.split("\n"):
+            body = line.strip()
+            m = self._STMT.fullmatch(line)
+            if m and (snmp or (top == "snmp" and line[:1] in " \t") or (m.group(3) and not policy)):
+                line = f"{m.group(1)} <REDACTED>{m.group(3)}" + ("\r" if line.endswith("\r") else "")
+                count += 1
+            if body.startswith("}"):
+                for ch in body:
+                    if ch != "}" or not stack:
+                        break
+                    head = stack.pop()
+                    policy -= head in self._POLICY
+                    snmp -= head in self._SNMP
+            elif body.endswith("{"):
+                head = self._head(body)
+                stack.append(head)
+                policy += head in self._POLICY
+                snmp += head in self._SNMP
+            if line[:1] not in (" ", "\t", ""):
+                top = "" if body.startswith(("}", "!", "#")) else self._head(body)
+            out.append(line)
+        return "\n".join(out), count
+
+
 # Each rule: (description, pattern, replacement). $1 preserves the key/keyword.
 # Order matters: a general rule must never consume the keyword another rule anchors on, so the
 # statement-specific rules (FortiOS/PAN-OS/NVUE fields, key ids) run before the generic ones.
@@ -92,14 +138,17 @@ _RULES: list[tuple[str, Any, Any]] = [
     # SNMP community in Junos: `community NAME { authorization ...; clients ...; }`
     # SNMP-style in EOS:       `snmp-server community NAME ro`
     # BGP community (skip):     `community NAME members 1:1234;`  ← these are just labels
+    # A block opens with any child but `members` / `invert-match` (a BGP community's only children).
     ("junos-snmp-community",
-     re.compile(r'\b(community)\s+(?!"?<REDACTED)(\S+)\s*\{(\s*(?:authorization|clients))',
-                re.IGNORECASE),
-     r'\1 <REDACTED>{\3'),
+     re.compile(r'(?<![\w-])(community)[ \t]+(?!"?<REDACTED)([^\s{};"]+)[ \t]*\{'
+                r'(?!\s*(?:members?|invert-match)\b)', re.IGNORECASE),
+     r'\1 <REDACTED>{'),
     ("junos-snmp-community-quoted",
-     re.compile(r'\b(community)\s+"([^"]+)"\s*\{(\s*(?:authorization|clients))',
-                re.IGNORECASE),
-     r'\1 "<REDACTED>"{\3'),
+     re.compile(r'(?<![\w-])(community)[ \t]+"(?!<REDACTED>")([^"\n]+)"[ \t]*\{'
+                r'(?!\s*(?:members?|invert-match)\b)', re.IGNORECASE),
+     r'\1 "<REDACTED>"{'),
+    # Childless `community NAME;` and indented `snmp` / `community NAME` blocks need the enclosing block.
+    ("snmp-community-in-block", _SnmpCommunityScan(), ""),
     ("junos-authentication-key",
      re.compile(r'(authentication-key|hello-authentication-key)[ \t]+"(?!<REDACTED>")[^"\n]+"',
                 re.IGNORECASE),
@@ -208,7 +257,7 @@ _RULES: list[tuple[str, Any, Any]] = [
     ("key-string", _kw(r"\bkey-string(?:[ \t]+[0-9])?"), _R),
     ("snmp-server-host-community",
      re.compile(r"\b(snmp-server[ \t]+host[ \t]+\S{1,64}(?:[ \t]+vrf[ \t]+\S{1,32})?(?:[ \t]+(?:traps|informs))?"
-                r"(?:[ \t]+version[ \t]+(?:1|2c|3(?:[ \t]+(?:auth|noauth|priv))?))?)"
+                r"(?:[ \t]+version[ \t]+(?:1|2c|3(?:[ \t]+(?:auth|noauth|priv))?))?(?:[ \t]+community)?)"
                 rf"[ \t]+(?!(?:vrf|traps|informs|version)[ \t]){_TOK}", re.IGNORECASE), _R),
     # Junos: quoted or bare values; output is always quoted.
     ("junos-secret-values",
@@ -244,6 +293,14 @@ _RULES: list[tuple[str, Any, Any]] = [
     ("passkey", _kw(r"(?<![\w-])passkey(?:[ \t]+[0-9])?", eol=True), _R),
     ("sonic-aaa-add-key",
      _kw(r"\b(?:tacacs|radius)[ \t]+add[ \t]+[^\n]{0,150}?[ \t](?:--key|-k)"), _R),
+    # SNMP communities that are not `snmp-server community` or a Junos block: Junos set format, SONiC
+    # `snmp community add`, NVUE / net-snmp keywords. BGP `community NAME members ...` is untouched.
+    ("snmp-community-set",
+     _kw(r"(?<![\w-])snmp[ \t]+community(?:[ \t]+(?:add|del))?"
+         r"(?![ \t]+(?:<|(?:strings?|names?)(?![^\s;])))", quoted=True), _R),
+    ("snmp-community-keyword",
+     _kw(r"(?<![\w-])(?:readonly-community|read-write-community|rocommunity6?|rwcommunity6?"
+         r"|trapcommunity)", quoted=True), _R),
     # ── Tokens, headers, URLs, key=value pairs ───────────────────────────
     ("http-authorization",
      re.compile(r"""\b(authorization["']?[ \t]*[:=][ \t]*["']?(?:(?:bearer|basic|token|negotiate)[ \t]+)?)"""

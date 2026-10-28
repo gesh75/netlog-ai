@@ -219,6 +219,19 @@ FORMATS: list[tuple[str, str, str]] = [
     ("nvue-tacacs-secret", "nv set system aaa tacacs server 1 secret NvueTacSecretX1", "NvueTacSecretX1"),
     ("sonic-tacacs-passkey", "config tacacs passkey SonicPassKeyX1", "SonicPassKeyX1"),
     ("sonic-radius-passkey", "radius passkey SonicRadPassKeyX1", "SonicRadPassKeyX1"),
+    # SNMP communities beyond `snmp-server community` and Junos blocks with authorization/clients first.
+    ("junos-set-snmp-community", "set snmp community CommSetFormX1 authorization read-only", "CommSetFormX1"),
+    ("junos-set-snmp-community-clients", "set snmp community CommSetClientsX1 clients 192.0.2.0/24",
+     "CommSetClientsX1"),
+    ("junos-community-childless", "community CommChildlessX1;", "CommChildlessX1"),
+    ("junos-community-view-first", "community CommViewFirstX1 {\n view all;\n authorization read-only;\n}",
+     "CommViewFirstX1"),
+    ("junos-snmp-block-childless", "snmp {\n    community CommInBlockX1;\n}", "CommInBlockX1"),
+    ("viptela-snmp-community", "snmp\n community CommViptelaX1\n  authorization read-only", "CommViptelaX1"),
+    ("nvue-readonly-community", "nv set service snmp-server readonly-community CommNvueX1 access any", "CommNvueX1"),
+    ("netsnmp-rocommunity", "rocommunity CommRoX1 default", "CommRoX1"),
+    ("netsnmp-rwcommunity", "rwcommunity CommRwX1 192.0.2.0/24", "CommRwX1"),
+    ("sonic-snmp-community-add", "config snmp community add CommSonicX1 RO", "CommSonicX1"),
 ]
 
 

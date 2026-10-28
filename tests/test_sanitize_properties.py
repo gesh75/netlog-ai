@@ -34,6 +34,8 @@ TEMPLATES = [
     "snmp-server user u g auth sha-256 0x{s} priv aes-256 0x{s} localizedV2key",
     "radius server R\n key 0 {s}\n", "server-private 192.0.2.1 key {s}",
     "nv set system aaa tacacs server 1 secret {s}", "tacacs passkey {s}",
+    "set snmp community {s} authorization read-only", "community {s};",
+    "snmp\n community {s}\n  authorization x", "rocommunity {s} default",
 ]
 SECRET = st.text(alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", min_size=12, max_size=40)
 
