@@ -188,6 +188,22 @@ FORMATS: list[tuple[str, str, str]] = [
     ("forti-ospf-key-enc", "set authentication-key ENC FortiOspfBlobExample0123456789==",
      "FortiOspfBlobExample0123456789"),
     ("forti-password-clear", "set password FortiClearPwX1", "FortiClearPwX1"),
+    # NX-OS SNMPv3 localized keys.
+    ("nxos-snmpv3-md5-auth",
+     "snmp-server user admin network-admin auth md5 0xA1B2C3D4E5F60718 priv 0x0F1E2D3C4B5A6978 localizedkey",
+     "0xA1B2C3D4E5F60718"),
+    ("nxos-snmpv3-md5-priv",
+     "snmp-server user admin network-admin auth md5 0xA1B2C3D4E5F60718 priv 0x0F1E2D3C4B5A6978 localizedkey",
+     "0x0F1E2D3C4B5A6978"),
+    ("nxos-snmpv3-aes128-priv",
+     "snmp-server user admin network-admin auth sha 0xAA11BB22CC33DD44 priv aes-128 0xEE55FF6677889900 localizedkey",
+     "0xEE55FF6677889900"),
+    ("nxos-snmpv3-sha256-auth",
+     "snmp-server user admin network-admin auth sha-256 0xAA11BB22CC33DD44 priv aes-256 0xEE55FF6677889900 "
+     "localizedV2key", "0xAA11BB22CC33DD44"),
+    ("nxos-snmpv3-sha256-priv",
+     "snmp-server user admin network-admin auth sha-256 0xAA11BB22CC33DD44 priv aes-256 0xEE55FF6677889900 "
+     "localizedV2key", "0xEE55FF6677889900"),
 ]
 
 
