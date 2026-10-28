@@ -5,7 +5,7 @@
 // audit log. Zero-build vanilla JS; every dynamic string goes through
 // textContent (via app.js's el()) so nothing from the API is parsed as HTML.
 //
-// Loaded BEFORE app.js: the fetch/EventSource wrappers below must be in place
+// Loaded BEFORE app.js: the fetch wrapper below must be in place
 // before app.js makes its first /api call. Helpers from app.js ($, el, clear,
 // codeBlock, sevBadge, toast) are only used inside functions that run later.
 
@@ -30,11 +30,16 @@ const NV2 = (() => {
   window.fetch = async (input, init = {}) => {
     const url = typeof input === "string" ? input : (input && input.url) || "";
     const tok = token();
-    if (tok && isApi(url)) {
+    // Every state-changing call carries a custom header: a cross-site "simple" request cannot (the
+    // server refuses those when auth is off), and the dashboard's own calls can.
+    const method = String(init.method || (typeof input !== "string" && input.method) || "GET").toUpperCase();
+    const marked = isApi(url) && !["GET", "HEAD", "OPTIONS"].includes(method);
+    if (isApi(url) && (tok || marked)) {
       const headers = new Headers(init.headers || (typeof input !== "string" && input.headers) || {});
-      if (!headers.has("Authorization") && !headers.has("X-API-Token")) {
+      if (tok && !headers.has("Authorization") && !headers.has("X-API-Token")) {
         headers.set("Authorization", `Bearer ${tok}`);
       }
+      if (marked && !headers.has("X-Requested-With")) headers.set("X-Requested-With", "netlog-ai");
       init = { ...init, headers };
     }
     const resp = await origFetch(input, init);
@@ -51,19 +56,6 @@ const NV2 = (() => {
     }
     return resp;
   };
-
-  // EventSource cannot send headers: the live tail accepts ?token= instead.
-  const OrigES = window.EventSource;
-  if (OrigES) {
-    window.EventSource = class extends OrigES {
-      constructor(url, cfg) {
-        const tok = token();
-        let u = String(url);
-        if (tok && isApi(u)) u += `${u.includes("?") ? "&" : "?"}token=${encodeURIComponent(tok)}`;
-        super(u, cfg);
-      }
-    };
-  }
 
   // ── small helpers ─────────────────────────────────────────────────────────
   const chipText = (id, text) => {

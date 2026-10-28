@@ -24,6 +24,11 @@ Principals are configured from the environment; any of these turns auth on:
 Tokens are compared in constant time and must be at least ``MIN_TOKEN_LEN``
 (16) characters; a shorter one is a configuration error (``RbacConfigError``),
 never silently dropped, because dropping the only token would switch auth off.
+The same holds for ``AI_LOG_ANALYZER_RBAC_FILE``: once it is configured, auth is
+on for good. A file that is missing, unreadable, not valid JSON or without a
+usable user is a ``RbacConfigError``: the server refuses to start, and a file
+that breaks while the server runs makes every request fail with 503 until it is
+fixed (the file is re-read when it changes). It never falls back to dev mode.
 With nothing configured the API runs in dev mode (no auth, bind to 127.0.0.1),
 as before; set ``AI_LOG_ANALYZER_REQUIRE_AUTH=1`` to refuse that (the Docker
 image does).
@@ -46,7 +51,7 @@ MIN_TOKEN_LEN = 16
 
 
 class RbacConfigError(ValueError):
-    """A configured token is unusable (too short); raised instead of failing open."""
+    """A configured token or RBAC file is unusable; raised instead of failing open."""
 
 
 def _check_len(token: str, where: str) -> str:
@@ -88,14 +93,26 @@ def _env_principals() -> list[Principal]:
     return out
 
 
+def _rbac_path() -> str:
+    return os.environ.get("AI_LOG_ANALYZER_RBAC_FILE", "").strip()
+
+
 def _file_principals(path: str) -> list[Principal]:
+    """Principals from the RBAC file. A configured file that cannot be used is an error, never an
+    empty list: an empty list would read as "no auth configured" and open every route."""
+    where = f"AI_LOG_ANALYZER_RBAC_FILE {path}"
     try:
         data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        log.error("RBAC file %s unreadable: %s; no principals loaded from it", path, exc)
-        return []
+        raise RbacConfigError(f"{where}: unreadable or not valid JSON ({exc})") from exc
+    users = data.get("users") if isinstance(data, dict) else None
+    if not isinstance(users, list):
+        raise RbacConfigError(f'{where}: must be a JSON object {{"users": [...]}}')
     out: list[Principal] = []
-    for u in data.get("users") or []:
+    for u in users:
+        if not isinstance(u, dict):
+            log.warning("RBAC file entry skipped (not an object)")
+            continue
         role = str(u.get("role", "")).lower()
         name = str(u.get("name", "")).strip()
         digest = str(u.get("token_sha256", "")).strip().lower()
@@ -106,33 +123,51 @@ def _file_principals(path: str) -> list[Principal]:
                         name or "?", ROLES)
             continue
         out.append(Principal(name, role, digest))
+    if not out:
+        raise RbacConfigError(f"{where}: holds no usable user (each needs name, role in {ROLES} and "
+                              "token or token_sha256)")
     return out
 
 
-_CACHE: dict[tuple, list[Principal]] = {}
+# Per configuration: the principal list, or the text of the RbacConfigError it produced (cached so a
+# broken file is logged once per change, not once per request).
+_CACHE: dict[tuple, list[Principal] | str] = {}
 
 
 def principals(legacy_token: str = "") -> list[Principal]:
-    """Configured principals; cached per configuration (env + legacy token)."""
-    path = os.environ.get("AI_LOG_ANALYZER_RBAC_FILE", "").strip()
-    mtime = 0.0
+    """Configured principals; cached per configuration (env + legacy token + RBAC file state).
+
+    Raises ``RbacConfigError`` when any configured credential source is unusable."""
+    path = _rbac_path()
+    stamp: tuple[int, int] = (0, 0)
     if path:
         try:
-            mtime = Path(path).expanduser().stat().st_mtime
+            st = Path(path).expanduser().stat()
+            stamp = (st.st_mtime_ns, st.st_size)
         except OSError:
-            mtime = -1.0
-    key = (legacy_token, path, mtime, *(os.environ.get(f"AI_LOG_ANALYZER_{r.upper()}_TOKENS", "") for r in ROLES))
+            stamp = (-1, -1)
+    key = (legacy_token, path, stamp, *(os.environ.get(f"AI_LOG_ANALYZER_{r.upper()}_TOKENS", "") for r in ROLES))
     hit = _CACHE.get(key)
     if hit is None:
-        hit = ([Principal("shared-token", "admin", _digest(_check_len(legacy_token, "AI_LOG_ANALYZER_API_TOKEN")))]
-               if legacy_token else [])
-        hit += _env_principals() + (_file_principals(path) if path else [])
+        try:
+            hit = ([Principal("shared-token", "admin", _digest(_check_len(legacy_token, "AI_LOG_ANALYZER_API_TOKEN")))]
+                   if legacy_token else [])
+            hit += _env_principals() + (_file_principals(path) if path else [])
+        except RbacConfigError as exc:
+            hit = str(exc)
+            log.error("%s; authentication stays ON and every request is refused until this is fixed", hit)
         _CACHE.clear()
         _CACHE[key] = hit
+    if isinstance(hit, str):
+        raise RbacConfigError(hit)
     return hit
 
 
 def auth_enabled(legacy_token: str = "") -> bool:
+    """Whether any credential source is configured. A configured RBAC file counts even while it is
+    unusable, so a bad file can never read as "no auth"."""
+    if _rbac_path():
+        return True
     return bool(principals(legacy_token))
 
 

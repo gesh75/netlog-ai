@@ -23,6 +23,7 @@ from ai_log_analyzer import _shutdown
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.sources.base import LogSource, SourceConfig, SourceError, registry
 from ai_log_analyzer.sources.solarwinds import SolarWindsConfig
+from ai_log_analyzer.url_redact import redact_text
 
 log = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ class SourceManager:
         try:
             return {"ok": bool(src.healthcheck())}
         except SourceError as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": redact_text(str(exc))}
 
     def fetch(self, source_id: str, *, since_seconds: int = 3600,
               limit: int = 10_000, host_filter: str = "") -> list[LogEvent]:

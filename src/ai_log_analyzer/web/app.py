@@ -156,6 +156,9 @@ def _allowed_dir_files(directory: Path, pattern: str, recursive: bool) -> list[P
     return sorted(itertools.islice(allowed, _MAX_DIRECTORY_FILES))
 
 
+_STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
 class BadCommand(ValueError):
     """Raised when /api/run receives a command we won't translate to argv."""
 
@@ -304,11 +307,13 @@ def _is_loopback_host(host: str) -> bool:
 def _check_auth_config() -> bool:
     """Validate the auth configuration at startup; returns whether auth is on.
 
-    A malformed token (too short) is an error, and ``AI_LOG_ANALYZER_REQUIRE_AUTH=1``
+    A malformed token (too short) or an unusable ``AI_LOG_ANALYZER_RBAC_FILE`` (missing,
+    unreadable, not JSON, no usable user) is an error, and ``AI_LOG_ANALYZER_REQUIRE_AUTH=1``
     (set by the Docker image) refuses to start with no token at all, so a container
     published on 0.0.0.0 can never come up as an open admin API.
     """
     try:
+        rbac.principals(API_TOKEN)   # loads every configured credential source: a bad one raises
         enabled = rbac.auth_enabled(API_TOKEN)
     except rbac.RbacConfigError as exc:
         raise RuntimeError(f"invalid API token configuration: {exc}") from exc
@@ -321,14 +326,13 @@ def _check_auth_config() -> bool:
     return enabled
 
 
-def current_principal(allow_query_token: bool = False) -> rbac.Principal | None:
+def current_principal() -> rbac.Principal | None:
     """The authenticated principal for this request.
 
-    Tokens come from headers. ``?token=`` is accepted only where a browser
-    cannot set headers (the SSE live tail), since URLs end up in proxy logs.
+    Tokens come from headers only, never the query string: URLs end up in
+    proxy and access logs.
     """
-    token = _token_supplied() or (request.args.get("token", "") if allow_query_token else "")
-    return rbac.authenticate(token, API_TOKEN)
+    return rbac.authenticate(_token_supplied(), API_TOKEN)
 
 
 def require_role(role: str, audit_action: str | None = None,
@@ -376,9 +380,9 @@ def require_role(role: str, audit_action: str | None = None,
     return deco
 
 
-def _audit_auth_failure(allow_query_token: bool = False) -> None:
+def _audit_auth_failure() -> None:
     """Audit a 401 (rate-limited per source address: anyone can generate these)."""
-    supplied = bool(_token_supplied() or (allow_query_token and request.args.get("token")))
+    supplied = bool(_token_supplied())
     audit.record_throttled(
         "authn.failed", key=_remote(), target=request.path, outcome="unauthorized",
         actor=audit.Actor("unknown", "none", _remote()),
@@ -530,6 +534,31 @@ def create_app() -> Flask:
             return jsonify({"error": "host not allowed",
                             "hint": "set AI_LOG_ANALYZER_ALLOWED_HOSTS to the name you browse to"}), 400
         return None
+
+    # ── Cross-site request guard ──────────────────────────────────────────
+    # With auth off, a cross-site browser request is indistinguishable from the dashboard's, and the
+    # Host check above only stops DNS rebinding. A page can still fire a "simple" request (a body-less
+    # POST, or a form / text/plain body) that the handlers read as {} and act on. A simple request
+    # cannot carry a JSON content type, a custom header or the token header (each forces a CORS
+    # preflight, which the origin allow-list refuses), so every state-changing request must have one.
+    # With auth on, a request without a token header is a plain 401 from the route gate.
+    @app.before_request
+    def _require_non_simple_request():
+        if request.method not in _STATE_CHANGING:
+            return None
+        if request.is_json or request.headers.get("X-Requested-With") or _token_supplied():
+            return None
+        if rbac.auth_enabled(API_TOKEN):
+            return None
+        return jsonify({"error": "cross-site request refused",
+                        "hint": "send Content-Type: application/json (or an X-Requested-With header)"}), 403
+
+    @app.errorhandler(rbac.RbacConfigError)
+    def _auth_config_unusable(_exc):
+        # The RBAC file broke while the server runs. Auth stays on: refuse, never open up. The
+        # detail is in the server log (rbac logs it once per change); the path is not echoed.
+        return jsonify({"error": "authentication is configured but its credential store is unusable",
+                        "hint": "an administrator must fix AI_LOG_ANALYZER_RBAC_FILE"}), 503
 
     @app.errorhandler(413)
     def _too_large(_exc):
@@ -1252,12 +1281,13 @@ def create_app() -> Flask:
         """Server-Sent Events stream of classified events from a syslog source.
 
         Zero-dependency real time: EventSource in the browser, chunked
-        response here — no websocket stack. EventSource cannot set request
-        headers, so on tokened deployments pass ?token=<API token>.
+        response here — no websocket stack. The token goes in a header like
+        every other route (the dashboard reads the stream with fetch(), since
+        EventSource cannot set headers); it is never accepted in the URL.
         Optional ?min_severity=critical|high|medium|low filters server-side.
         """
-        if rbac.auth_enabled(API_TOKEN) and current_principal(allow_query_token=True) is None:
-            _audit_auth_failure(allow_query_token=True)
+        if rbac.auth_enabled(API_TOKEN) and current_principal() is None:
+            _audit_auth_failure()
             abort(401)   # any role may watch the live tail
         src = source_manager.get(source_id)
         if src is None:
@@ -1940,7 +1970,11 @@ def create_app() -> Flask:
         except ValueError:
             return jsonify({"error": "limit must be an integer"}), 400
         tickets = worker.db.triage_all(limit=limit)
-        return jsonify({**worker.status(), "tickets": tickets})
+        status = worker.status()
+        if not _actor_allows("admin"):   # sink error text is for admins; everyone else gets the count
+            last = status.get("last_tick") or {}
+            status["last_tick"] = {**last, "errors": [], "error_count": len(last.get("errors") or [])}
+        return jsonify({**status, "tickets": tickets})
 
     @app.route("/api/triage/stream/start", methods=["POST"])
     @require_role("admin", "triage.worker.start")
@@ -1983,6 +2017,7 @@ def main() -> None:
     host = os.environ.get("ANALYZER_HOST", "127.0.0.1")
     allow_noauth = _parse_bool(os.environ.get("AI_LOG_ANALYZER_ALLOW_NOAUTH"), default=False)
     try:
+        rbac.principals(API_TOKEN)   # a configured but unusable credential source is fatal
         auth_on = rbac.auth_enabled(API_TOKEN)
     except rbac.RbacConfigError as exc:
         raise SystemExit(f"[ERROR] invalid API token configuration: {exc}") from exc

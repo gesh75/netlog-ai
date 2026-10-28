@@ -37,7 +37,7 @@ CHANGELOG for the exact semantics shipped.
 | `AI_LOG_ANALYZER_VIEWER_TOKENS` | unset | RBAC: comma-separated `name:token` pairs with role `viewer` (read-only). A bare token gets a generated name. Setting any RBAC token turns auth on. |
 | `AI_LOG_ANALYZER_OPERATOR_TOKENS` | unset | Same format, role `operator` (viewer plus running analyses, ITSM enrichment and incident resolution). |
 | `AI_LOG_ANALYZER_ADMIN_TOKENS` | unset | Same format, role `admin` (everything, including provider, rules, source and triage-worker control). |
-| `AI_LOG_ANALYZER_RBAC_FILE` | unset | JSON file `{"users": [{"name", "role", "token_sha256"}]}`. Prefer `token_sha256` so the file holds no usable secret. |
+| `AI_LOG_ANALYZER_RBAC_FILE` | unset | JSON file `{"users": [{"name", "role", "token_sha256"}]}`. Prefer `token_sha256` so the file holds no usable secret. Once set, auth is on for good: a missing, unreadable, invalid or user-less file stops the server at startup, and one that breaks while it runs makes every request fail with 503 until it is fixed (it never falls back to open dev mode). |
 | `AI_LOG_ANALYZER_REQUIRE_AUTH` | `false` (`1` in the Docker image) | **(new in 2.2.0)** When set, `create_app()` raises at startup unless an API token or RBAC principal is configured, so a gunicorn deployment can never start open. |
 | `AI_LOG_ANALYZER_ALLOW_NOAUTH` | `false` | **(new in 2.2.0)** `python -m` / `main()` refuses to bind a non-loopback address without a token unless this is `1`. Demos and isolated labs only. |
 | `AI_LOG_ANALYZER_ITSM_ALLOW_PRIVATE` | `false` | **(new in 2.2.0)** Lets the ServiceNow sync reach a private-range instance URL. Read from the server environment only; request bodies cannot set it. |

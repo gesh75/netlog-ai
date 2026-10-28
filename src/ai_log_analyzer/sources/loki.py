@@ -20,12 +20,12 @@ import requests
 from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.sources.base import (
     SourceConfig,
-    SourceError,
     SourceTimeoutError,
     build_auth,
     guarded_session,
     registry,
     source_allow_private,
+    upstream_error,
     validate_host_filter,
 )
 
@@ -67,10 +67,10 @@ class LokiSource:
             )
             # 200 with "ready" body OR 503 with "Ingester not ready" are both alive
             return r.status_code in (200, 503)
-        except requests.exceptions.Timeout as exc:
-            raise SourceTimeoutError(f"Loki {self.name} healthcheck timed out") from exc
+        except requests.exceptions.Timeout:
+            raise SourceTimeoutError(f"Loki {self.name} healthcheck timed out") from None
         except requests.exceptions.RequestException as exc:
-            raise SourceError(f"Loki {self.name} healthcheck failed: {exc}") from exc
+            raise upstream_error(f"Loki {self.name} healthcheck failed", exc) from None
 
     def fetch(self, *, since_seconds: int = 3600, limit: int = 10_000,
               host_filter: str = "") -> Iterable[LogEvent]:
@@ -100,10 +100,10 @@ class LokiSource:
             r = self.session.get(url, params=params, timeout=self.config.timeout_seconds)
             r.raise_for_status()
             payload = r.json()
-        except requests.exceptions.Timeout as exc:
-            raise SourceTimeoutError(f"Loki {self.name} query timed out") from exc
+        except requests.exceptions.Timeout:
+            raise SourceTimeoutError(f"Loki {self.name} query timed out") from None
         except requests.exceptions.RequestException as exc:
-            raise SourceError(f"Loki {self.name} query failed: {exc}") from exc
+            raise upstream_error(f"Loki {self.name} query failed", exc) from None
 
         returned = 0
         for stream in (payload.get("data") or {}).get("result", []):

@@ -17,6 +17,7 @@ from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent, classify_events
 from ai_log_analyzer.hostnames import short_host
+from ai_log_analyzer.url_redact import redact_text
 
 # Severity rank used to pick a device's worst severity across sources.
 _SEV_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -218,7 +219,7 @@ def correlate_from_manager(
             )
             events_by_source[sid] = events
         except SourceError as exc:
-            skipped[sid] = str(exc)
+            skipped[sid] = redact_text(str(exc))
 
     # Build a new dict rather than mutating correlate_sources()'s result,
     # whose contract is to return a fresh, self-contained dict.
