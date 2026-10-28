@@ -93,6 +93,17 @@ EXACT: list[tuple[str, str]] = [
      f"snmp-server user admin network-admin auth sha-256 {R} priv aes-256 {R} localizedV2key"),
     ("snmp-server user u g v3 auth sha AuthPw1 priv aes 128 PrivPw1",
      f"snmp-server user u g v3 auth sha {R} priv aes 128 {R}"),
+    # AAA shared secrets in block and vendor syntax keep the type digit.
+    ("radius server RAD1\n address ipv4 192.0.2.1\n key 0 R4diusSecret\n",
+     f"radius server RAD1\n address ipv4 192.0.2.1\n key 0 {R}\n"),
+    ("tacacs server TAC1\n key TacSecret1\n", f"tacacs server TAC1\n key {R}\n"),
+    ("tacacs server TAC1\n key 6 AesBlob1\n", f"tacacs server TAC1\n key 6 {R}\n"),
+    ("aaa group server radius G1\n server-private 192.0.2.1 key Sp1\n",
+     f"aaa group server radius G1\n server-private 192.0.2.1 key {R}\n"),
+    ("isis authentication key 0 X1y2Z3", f"isis authentication key 0 {R}"),
+    ("shared-key 0 X1y2Z3", f"shared-key 0 {R}"),
+    ("nv set system aaa tacacs server 1 secret X1y2Z3", f"nv set system aaa tacacs server 1 secret {R}"),
+    ("tacacs passkey X1y2Z3", f"tacacs passkey {R}"),
 ]
 
 
@@ -124,6 +135,7 @@ BENIGN = [
     "secret-manager: enabled",
     "Password: ",
     "Password policy: minimum length 12",
+    "isis authentication key-chain KC",
     "no ip nhrp authentication",
     # FortiOS / PAN-OS statements with no secret
     "set status enable",
