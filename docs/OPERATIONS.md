@@ -39,6 +39,8 @@ The database holds:
 | `max_connections`, `idle_timeout` | 512, 300 s | TCP/TLS connection limits |
 | `spool` / `AI_LOG_ANALYZER_SYSLOG_SPOOL` | `AI_LOG_ANALYZER_STATE_DB` | durable spool DB |
 | `buffer_size` | 50 000 | lines kept per source (ring or spool rows) |
+| `max_bytes` | 64 MiB | memory ring only: bytes retained before the oldest lines are evicted (`ring_evicted`) |
+| `queue_max`, `queue_max_bytes` | 200 000, 128 MiB | spool writer queue: lines / bytes waiting for SQLite before new lines are dropped and counted (`queue_overflow`, `queue_overflow_bytes`, `spool_lines_lost`) |
 
 * **Concurrency:** TCP and TLS run on one asyncio loop, so many senders are
   served at once and an idle or slow connection never blocks the others.
@@ -52,9 +54,12 @@ The database holds:
   configured, a worker whose bind fails becomes a *reader* of the shared spool
   (`stats()["role"] == "reader"`). Without a spool the bind error is raised as
   before.
+* **Memory:** a line can be 64 KiB, so the ring and the writer queue are
+  bounded in bytes as well as in lines. With a spool no line is kept in the
+  ring (the spool is what `fetch` reads).
 * **Health:** `SyslogListenerSource.stats()` reports received, spooled,
-  rejected_sender, rejected_conn_limit, dropped_oversize and
-  active_connections.
+  rejected_sender, rejected_conn_limit, dropped_oversize,
+  active_connections, ring_bytes, writer_queue_bytes and ring_evicted.
 
 ## Topology-aware suppression
 
