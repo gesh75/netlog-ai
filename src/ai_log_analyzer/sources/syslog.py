@@ -177,6 +177,9 @@ class SyslogListenerSource:
         self._allow = _parse_allow(extra.get("allow") or os.environ.get("AI_LOG_ANALYZER_SYSLOG_ALLOW"))
         self._ssl = self._tls_context(extra) if self.proto == "tls" else None
 
+        # Per listener: the kernel fills this buffer with the GIL released, so one shared by several
+        # listener threads would hand one socket's datagram to another.
+        self._udp_buf = bytearray(65_535)
         self._buffer: deque[tuple[str, str]] = deque(maxlen=self.capacity)
         self._buffer_bytes = 0     # bytes the ring retains (see max_bytes)
         self._total_ingested = 0  # monotonic — cursor base for fetch_new() (memory mode)
@@ -378,7 +381,6 @@ class SyslogListenerSource:
                 await asyncio.gather(*pending, return_exceptions=True)
 
     # ── UDP ─────────────────────────────────────────────────────────────────
-    _udp_buf = bytearray(65_535)
     _ANC = socket.CMSG_SPACE(4) if hasattr(socket, "CMSG_SPACE") else 0
 
     def _udp_readable(self) -> None:
