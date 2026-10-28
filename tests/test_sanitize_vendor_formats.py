@@ -37,6 +37,11 @@ EXACT: list[tuple[str, str]] = [
     # A secret rule never reaches into the next line.
     ("key chain K\n key 7\n  key-string MySecretKey\n", f"key chain K\n key 7\n  key-string {R}\n"),
     ("x key 7\nusername bob password Hunter2Pw9", f"x key 7\nusername bob password {R}"),
+    # Wireless PSKs keep the type digit.
+    ("security wpa psk set-key ascii 0 MyWifiPSK2024!", f"security wpa psk set-key ascii 0 {R}"),
+    ("security wpa psk set-key hex 0 0123456789abcdef", f"security wpa psk set-key hex 0 {R}"),
+    ("config wlan security wpa akm psk set-key ascii 1 MyWifiPSK 3", f"config wlan security wpa akm psk set-key ascii 1 {R} 3"),
+    ("psk=MyWifiPSK&x=1", f"psk={R}&x=1"),
 ]
 
 
@@ -58,6 +63,9 @@ BENIGN = [
     "no ip ospf message-digest-key 7",
     "ntp trusted-key 7",
     "ntp authentication-key 7",
+    # wireless without a key
+    "security wpa psk set-key",
+    "wlan corp 1 corp\n security wpa akm psk",
 ]
 
 
