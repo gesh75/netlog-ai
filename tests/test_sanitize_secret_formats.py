@@ -156,6 +156,38 @@ FORMATS: list[tuple[str, str, str]] = [
     ("kv-passkey", "passkey=EqPasskeyValX1", "EqPasskeyValX1"),
     ("kv-psk", "psk=EqPskValueX1 ssid=corp", "EqPskValueX1"),
     ("kv-pwd", "Server=db;Pwd=OdbcPwdValueX1;", "OdbcPwdValueX1"),
+    # PAN-OS set-CLI and XML.
+    ("panos-radius-secret-blob",
+     "set shared server-profile radius R1 server S1 secret -AQ==ExampleBlobRadius0123456789abcdefg=",
+     "ExampleBlobRadius0123456789abcdefg"),
+    ("panos-ldap-bind-blob",
+     "set shared server-profile ldap L1 server S1 bind-password -AQ==ExampleBlobLdap0123456789abcdefgh=",
+     "ExampleBlobLdap0123456789abcdefgh"),
+    ("panos-ike-psk-blob",
+     "set network ike gateway GW1 authentication pre-shared-key key -AQ==ExampleBlobIke0123456789abcdefghij=",
+     "ExampleBlobIke0123456789abcdefghij"),
+    ("panos-snmp-community", "set deviceconfig system snmp-setting access-setting version v2c "
+     "snmp-community-string PanSnmpCommX1", "PanSnmpCommX1"),
+    ("panos-clear-secret", "set shared server-profile radius R1 server S1 secret PanClearSecretX1",
+     "PanClearSecretX1"),
+    ("panos-xml-secret", "<secret>-AQ==ExampleBlobXmlSecret0123456789abc=</secret>", "ExampleBlobXmlSecret0123456789abc"),
+    ("panos-xml-bind-password", "<bind-password>PanXmlBindPwX1</bind-password>", "PanXmlBindPwX1"),
+    ("panos-xml-psk", "<pre-shared-key><key>-AQ==ExampleBlobXmlPsk0123456789abcd=</key></pre-shared-key>",
+     "ExampleBlobXmlPsk0123456789abcd"),
+    ("panos-xml-snmp-community", "<snmp-community-string>PanXmlCommX1</snmp-community-string>", "PanXmlCommX1"),
+    ("panos-blob-bare", "value -AQ==BareBlobExample0123456789abcdefghij= here", "BareBlobExample0123456789abcdefghij"),
+    # FortiOS `set <field> ENC <blob>` and clear text.
+    ("forti-password-enc", "    set password ENC SH2FortiAdminBlobExampleOnly0123456789==",
+     "FortiAdminBlobExampleOnly0123456789"),
+    ("forti-psksecret-enc", "        set psksecret ENC FortiPskBlobExampleOnly0123456789abcd==",
+     "FortiPskBlobExampleOnly0123456789abcd"),
+    ("forti-secret-enc", "set secret ENC FortiRadiusBlobExample0123456789==", "FortiRadiusBlobExample0123456789"),
+    ("forti-key-enc", "set key ENC FortiKeyBlobExampleOnly0123456789==", "FortiKeyBlobExampleOnly0123456789"),
+    ("forti-auth-pwd-enc", "set auth-pwd ENC FortiAuthPwdBlobEx0123456789==", "FortiAuthPwdBlobEx0123456789"),
+    ("forti-priv-pwd-enc", "set priv-pwd ENC FortiPrivPwdBlobEx0123456789==", "FortiPrivPwdBlobEx0123456789"),
+    ("forti-ospf-key-enc", "set authentication-key ENC FortiOspfBlobExample0123456789==",
+     "FortiOspfBlobExample0123456789"),
+    ("forti-password-clear", "set password FortiClearPwX1", "FortiClearPwX1"),
 ]
 
 

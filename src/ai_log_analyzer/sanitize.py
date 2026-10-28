@@ -52,6 +52,15 @@ _KTYPE = r"(?:[0-9]|clear|encrypted|plaintext|ciphertext)"
 # Words that follow `password:` / `pre-shared-key` in log prose ("pre-shared-key mismatch"), not secrets.
 _NOT_SECRET = (r"(?:required|incorrect|invalid|expired|missing|failed|mismatch(?:ed)?|none|null|true|false"
                r"|unset)(?![^\s\"'&;,])")
+# FortiOS `set <field> [ENC] <value>` and PAN-OS / NVUE `set <path> <field> <value>` secret fields.
+_SET_FIELDS = (r"password|passwd|passphrase|psksecret(?:-remote)?|ppk-secret|secret|key|auth-pwd|priv-pwd"
+               r"|auth-password|priv-password|authentication-key|key-string|md5-key|api-key|bind-password"
+               r"|shared-secret")
+_PATH_FIELDS = (r"secret|password|passphrase|passkey|bind-password|shared-secret|snmp-community-string"
+                r"|pre-shared-key[ \t]+key|auth-password|priv-password|md5-key")
+# XML elements (PAN-OS and others) whose text is a secret.
+_XML_SECRETS = (r"secret|password|passwd|passphrase|bind-password|shared-secret|snmp-community-string|phash"
+                r"|authpwd|privpwd|auth-password|priv-password|private-key|psk")
 
 
 def _kw(prefix: str, *, typed: bool = False, eol: bool = False, quoted: bool = False) -> re.Pattern[str]:
@@ -95,11 +104,27 @@ _RULES: list[tuple[str, Any, Any]] = [
      re.compile(r'(authentication-key|hello-authentication-key)[ \t]+"(?!<REDACTED>")[^"\n]+"',
                 re.IGNORECASE),
      r'\1 "<REDACTED>"'),
+    # ── Statement-style secrets: FortiOS `set password ENC <blob>`, PAN-OS / NVUE `set <path> secret <v>`,
+    # PAN-OS `-AQ==` blobs and XML elements. Before the key-id rules so `set authentication-key ENC <blob>`
+    # is not read as the OSPF `authentication-key <type> <key>`.
+    ("set-secret-field",
+     re.compile(rf"(?m)^([ \t]*set[ \t]+(?:{_SET_FIELDS})(?:[ \t]+ENC)?)[ \t]+{_QTOK}", re.IGNORECASE), _R),
+    ("set-path-secret",
+     re.compile(rf'(?m)^([ \t]*set[ \t]+[^\n"]{{0,300}}?[ \t](?:{_PATH_FIELDS}))[ \t]+{_QTOK}',
+                re.IGNORECASE), _R),
+    ("xml-secret-element",
+     re.compile(rf"(<({_XML_SECRETS})>)[ \t\r\n]*[^<\s][^<]*(</\2>)", re.IGNORECASE), r"\1<REDACTED>\3"),
+    ("xml-pre-shared-key",
+     re.compile(r"(<pre-shared-key>[ \t\r\n]*<key>)[ \t\r\n]*[^<\s][^<]*(</key>)", re.IGNORECASE),
+     r"\1<REDACTED>\2"),
+    # PAN-OS encrypts stored secrets as `-AQ==<base64>`; one anywhere is a secret.
+    ("panos-encrypted-blob",
+     re.compile(r"(?<![A-Za-z0-9+/=_-])-AQ==[A-Za-z0-9+/=]{6,}"), "<REDACTED-HASH>"),
     # ── Key ids vs keys ──────────────────────────────────────────────────
     # The number after `message-digest-key` / `ntp authentication-key` is an id (7 is common), so these
     # run before the type-7 rule below, which would otherwise take `key 7` and redact the digest word.
     ("ospf-isis-keys",
-     _kw(rf"(?<!ntp[ ])\bauthentication-key(?:[ \t]+[0-9])?"
+     _kw(rf"(?<!ntp[ ])\bauthentication-key(?:[ \t]+(?:[0-9]|ENC))?"
          rf"|\bmessage-digest-key[ \t]+\d{{1,10}}[ \t]+{_ALG}(?:[ \t]+{_KTYPE})?", quoted=True), _R),
     ("ntp-authentication-key",
      _kw(rf"\bntp[ \t]+authentication-key[ \t]+\d{{1,10}}[ \t]+{_ALG}(?:[ \t]+{_KTYPE})?"), _R),

@@ -30,6 +30,7 @@ TEMPLATES = [
     "ntp authentication-key 1 md5 {s} 7", "ntp authentication-key 1 sha1 ciphertext {s}",
     "security wpa psk set-key ascii 0 {s}", 'secret-key "{s}"', "pre-shared-key 6 {s}",
     "ip nhrp authentication {s}", "password: {s}", "X-API-Key: {s}", "psk={s}",
+    "set shared server-profile radius R secret {s}", "<secret>{s}</secret>", "set password ENC {s}",
 ]
 SECRET = st.text(alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", min_size=12, max_size=40)
 
