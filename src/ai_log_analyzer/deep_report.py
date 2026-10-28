@@ -23,6 +23,11 @@ from ai_log_analyzer.diff import ConfigDiff
 from ai_log_analyzer.servicenow_sync import correlate_changes_with_findings
 from ai_log_analyzer.topology import Topology, apply_manifest_metadata, build_topology
 
+# Topology inference tests every kept host against every distinct message (a substring test), so
+# both factors are bounded: the hosts that become nodes, and the total number of host-in-message tests.
+_MAX_TOPOLOGY_HOSTS = 2_000
+_MAX_TOPOLOGY_CHECKS = 5_000_000
+
 
 @dataclass
 class DeepBundle:
@@ -85,7 +90,13 @@ def run_deep_report(
         flap_input = raw_lines or materialized
     flap = analyze_flap_dynamics(flap_input)
     findings = _findings(materialized, raw_lines)
-    graph = topology if topology is not None else _infer_topology(flap_input)
+    truncated: dict[str, Any] = {}
+    if topology is not None:
+        graph = topology
+    else:
+        graph = _infer_topology(flap_input)
+        if "truncated" in graph:
+            truncated["topology"] = graph["truncated"]
     blast = analyze_blast_radius(graph, findings)
     when = incident_timestamp or _latest_stamp(flap_input)
     change_report = correlate_changes_with_findings(
@@ -95,6 +106,8 @@ def run_deep_report(
     )
     diff = _config_diff(config_before, config_after)
     drift = correlate_config_drift(diff, findings)
+    if drift.truncated:
+        truncated["config_drift"] = drift.truncated
     overlays = build_device_overlays(blast, flap, change_report.to_dict()["hits"])
     summary = _summary(findings)
     payload = {
@@ -105,6 +118,10 @@ def run_deep_report(
         "device_overlays": overlays,
         "markdown": _markdown(flap.to_dict(), blast.to_dict(), change_report.to_dict()),
     }
+    if truncated:   # say so: a capped answer must not read as a complete one
+        warning = "Input was bounded (" + ", ".join(sorted(truncated)) + "); the result may be incomplete."
+        payload["truncated"] = {"warning": warning, **truncated}
+        payload["markdown"] += f"\n- {warning}"
     return DeepBundle(
         payload=payload,
         flap=flap,
@@ -140,23 +157,39 @@ def _classify(events: list[Any]) -> list[Any]:
 
 
 def _infer_topology(rows: list[Any]) -> dict[str, Any]:
-    hosts: list[str] = []
-    messages: list[tuple[str, str]] = []
+    hosts: dict[str, None] = {}   # insertion-ordered set
+    dropped: set[str] = set()
+    messages: dict[tuple[str, str], None] = {}   # distinct (device, message), first-seen order
     for device, message, _stamp in _iter_rows(rows):
-        if device and device not in hosts:
-            hosts.append(device)
-        messages.append((device, message))
+        if not device:
+            continue
+        if device not in hosts:
+            if len(hosts) >= _MAX_TOPOLOGY_HOSTS:
+                dropped.add(device)
+                continue
+            hosts[device] = None
+        messages[(device, message)] = None
+    names = list(hosts)
     edges: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
-    for device, message in messages:
-        for other in hosts:
-            if not device or other == device or other not in message:
+    checks = 0
+    unscanned = 0
+    for i, (device, message) in enumerate(messages):
+        if checks + len(names) > _MAX_TOPOLOGY_CHECKS:
+            unscanned = len(messages) - i
+            break
+        checks += len(names)
+        for other in names:
+            if other == device or other not in message:
                 continue
             pair = tuple(sorted((device, other)))
             if pair not in seen:
                 seen.add(pair)
                 edges.append((device, other))
-    return {"nodes": [{"id": host} for host in hosts], "edges": edges}
+    graph: dict[str, Any] = {"nodes": [{"id": host} for host in names], "edges": edges}
+    if dropped or unscanned:
+        graph["truncated"] = {"hosts_dropped": len(dropped), "messages_unscanned": unscanned}
+    return graph
 
 
 def _latest_stamp(rows: list[Any]) -> str | None:

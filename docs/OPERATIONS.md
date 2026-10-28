@@ -34,11 +34,13 @@ The database holds:
 | `bind`, `port` | `127.0.0.1`, `5514` | listen address |
 | `rcvbuf` / `AI_LOG_ANALYZER_SYSLOG_RCVBUF` | 4 MiB | `SO_RCVBUF`; the kernel may cap it at `net.core.rmem_max` |
 | `allow` / `AI_LOG_ANALYZER_SYSLOG_ALLOW` | (all) | comma-separated sender IPs / CIDRs; others are dropped and counted |
-| `tls_cert`, `tls_key`, `tls_ca` | — | server cert/key; `tls_ca` turns on mutual TLS |
+| `tls_cert`, `tls_key`, `tls_ca` | — | server cert/key; `tls_ca` turns on mutual TLS. Operator-set only (for example `NETLOG_SOURCE_<id>_TLS_CERT`): a source created over `POST /api/sources` or MCP `add_source` is refused if it names any of them |
 | `max_frame` | 65536 | larger RFC 6587 frames are discarded without losing framing |
 | `max_connections`, `idle_timeout` | 512, 300 s | TCP/TLS connection limits |
-| `spool` / `AI_LOG_ANALYZER_SYSLOG_SPOOL` | `AI_LOG_ANALYZER_STATE_DB` | durable spool DB |
+| `spool` / `AI_LOG_ANALYZER_SYSLOG_SPOOL` | `AI_LOG_ANALYZER_STATE_DB` | durable spool DB. Over `POST /api/sources` or MCP `add_source` only a new `.db` / `.sqlite` file, or an existing spool database, inside the directory of `AI_LOG_ANALYZER_SYSLOG_SPOOL` / `AI_LOG_ANALYZER_STATE_DB` is accepted (no `..`, no symlink out); the environment and code that registers a source directly may use any path |
 | `buffer_size` | 50 000 | lines kept per source (ring or spool rows) |
+| `max_bytes` | 64 MiB | memory ring only: bytes retained before the oldest lines are evicted (`ring_evicted`) |
+| `queue_max`, `queue_max_bytes` | 200 000, 128 MiB | spool writer queue: lines / bytes waiting for SQLite before new lines are dropped and counted (`queue_overflow`, `queue_overflow_bytes`, `spool_lines_lost`) |
 
 * **Concurrency:** TCP and TLS run on one asyncio loop, so many senders are
   served at once and an idle or slow connection never blocks the others.
@@ -52,9 +54,12 @@ The database holds:
   configured, a worker whose bind fails becomes a *reader* of the shared spool
   (`stats()["role"] == "reader"`). Without a spool the bind error is raised as
   before.
+* **Memory:** a line can be 64 KiB, so the ring and the writer queue are
+  bounded in bytes as well as in lines. With a spool no line is kept in the
+  ring (the spool is what `fetch` reads).
 * **Health:** `SyslogListenerSource.stats()` reports received, spooled,
-  rejected_sender, rejected_conn_limit, dropped_oversize and
-  active_connections.
+  rejected_sender, rejected_conn_limit, dropped_oversize,
+  active_connections, ring_bytes, writer_queue_bytes and ring_evicted.
 
 ## Topology-aware suppression
 

@@ -33,11 +33,20 @@ An asyncio event loop on one background thread serves:
   UDP no longer sets ``SO_REUSEADDR``, which on Linux let two workers bind
   the same port and split datagrams between them.
 
-Without a spool, lines live in an in-memory ring buffer exactly as before.
+Without a spool, lines live in an in-memory ring buffer exactly as before. With a spool nothing is
+kept in the ring (it is never read), so memory is the writer queue alone.
 
-Config ``extra`` keys: bind, port, proto (udp|tcp|tls), buffer_size, rcvbuf,
+Memory is bounded in bytes as well as in lines (a line can be 64 KiB): the ring by ``max_bytes`` (oldest
+lines are evicted, ``ring_evicted`` counts them) and the writer queue by ``queue_max_bytes`` (new lines
+are dropped, ``queue_overflow``, ``queue_overflow_bytes`` and ``spool_lines_lost`` count them).
+
+File paths in ``extra`` (spool, tls_*) are the operator's: a source created over the web API or MCP may
+only name a spool database inside the directory of the operator's spool / state DB and no TLS files
+(see ``check_untrusted_extra``).
+
+Config ``extra`` keys: bind, port, proto (udp|tcp|tls), buffer_size, max_bytes, rcvbuf,
 max_frame, max_connections, max_connections_per_ip, idle_timeout, allow,
-tls_cert, tls_key, tls_ca, spool, queue_max, reader_retry.
+tls_cert, tls_key, tls_ca, spool, queue_max, queue_max_bytes, reader_retry.
 """
 from __future__ import annotations
 
@@ -48,13 +57,15 @@ import ipaddress
 import logging
 import os
 import socket
+import sqlite3
 import ssl
 import struct
 import sys
 import threading
 import time
 from collections import Counter, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent
@@ -74,6 +85,9 @@ _DEFAULT_MAX_CONNECTIONS = 512
 _DEFAULT_MAX_CONNECTIONS_PER_IP = 128
 _DEFAULT_IDLE_TIMEOUT = 300.0
 _DEFAULT_QUEUE_MAX = 200_000   # lines waiting for the spool writer before new ones are dropped (counted)
+_DEFAULT_MAX_BYTES = 64 * 1024 * 1024         # ring: bytes kept before the oldest lines are evicted
+_DEFAULT_QUEUE_MAX_BYTES = 128 * 1024 * 1024  # writer queue: bytes waiting before new lines are dropped
+_ROW_OVERHEAD = 120            # tuple, sender string and list slot around one retained line
 _DEFAULT_READER_RETRY = 5.0
 _FLUSH_INTERVAL_S = 0.05
 _FLUSH_BATCH = 512
@@ -109,6 +123,75 @@ def _norm_ip(addr: str) -> str:
     return str(ip)
 
 
+# ── what a web / MCP caller may name ───────────────────────────────────────────
+# ``extra`` values that are host file paths (spool database, TLS files) come from the operator
+# (NETLOG_SOURCE_<id>_* environment, or code calling SourceManager.add). A source created through a
+# request (POST /api/sources, MCP add_source) goes through check_untrusted_extra first.
+_UNTRUSTED_TLS_KEYS = ("tls_cert", "tls_key", "tls_ca")
+_SPOOL_SUFFIXES = (".db", ".sqlite", ".sqlite3")
+_NO_TLS_FILES = ("syslog TLS files are set by the operator (NETLOG_SOURCE_<id>_TLS_CERT / _TLS_KEY / "
+                 "_TLS_CA), not over the API")
+_NO_SPOOL_PATH = ("syslog spool path is not allowed here: over the API a spool must be a .db / .sqlite file "
+                  "inside the directory of AI_LOG_ANALYZER_SYSLOG_SPOOL or AI_LOG_ANALYZER_STATE_DB")
+
+
+def _spool_roots() -> list[Path]:
+    """Directories an API-chosen spool may live in: where the operator's own spool / state DB lives."""
+    roots = []
+    for name in ("AI_LOG_ANALYZER_SYSLOG_SPOOL", "AI_LOG_ANALYZER_STATE_DB"):
+        raw = os.environ.get(name, "").strip()
+        if raw:
+            roots.append(Path(raw).expanduser().resolve().parent)
+    return roots
+
+
+def _is_spool_db(path: Path) -> bool:
+    try:
+        con = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=1.0)
+        try:
+            return con.execute("SELECT 1 FROM sqlite_master WHERE name = 'syslog_spool'").fetchone() is not None
+        finally:
+            con.close()
+    except (sqlite3.Error, ValueError):
+        return False
+
+
+def _spool_path_allowed(raw: str) -> bool:
+    """Inside a spool root after resolving ``..`` and symlinks, a database file name, and either new or
+    already a spool database: never a file this service did not create as a spool."""
+    roots = _spool_roots()
+    path = Path(raw).expanduser()
+    if not roots or ".." in path.parts or path.suffix.lower() not in _SPOOL_SUFFIXES:
+        return False
+    try:
+        target = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    if not any(target != root and target.is_relative_to(root) for root in roots):
+        return False
+    if target.exists():
+        return target.is_file() and _is_spool_db(target)
+    return True
+
+
+def check_untrusted_extra(extra: Mapping[str, str]) -> None:
+    """Refuse the file-path options of a syslog source that a request (not the operator) is creating.
+
+    One message per kind of refusal whatever the path is: nothing here tells a caller whether a path
+    exists, is a directory or is a PEM file.
+    """
+    if any(extra.get(key) for key in _UNTRUSTED_TLS_KEYS):
+        raise SourceError(_NO_TLS_FILES)
+    spool = extra.get("spool")
+    if spool and not _spool_path_allowed(str(spool)):
+        raise SourceError(_NO_SPOOL_PATH)
+
+
+def _row_bytes(line: str, sender: str) -> int:
+    """Memory one retained line costs: the str object itself (not its length) plus fixed overhead."""
+    return sys.getsizeof(line) + len(sender) + _ROW_OVERHEAD
+
+
 def _system_udp_rcvbuf_errors() -> int | None:
     """Host-wide UDP ``RcvbufErrors`` from /proc/net/snmp (Linux), or None."""
     try:
@@ -134,6 +217,11 @@ class _UdpProtocol(asyncio.DatagramProtocol):
 class SyslogListenerSource:
     """Syslog UDP / TCP / TLS listener with an in-memory ring or durable spool."""
     kind = "syslog"
+    # Class-level defaults so a bare instance (tests build one with object.__new__) still ingests.
+    max_bytes = _DEFAULT_MAX_BYTES
+    queue_max_bytes = _DEFAULT_QUEUE_MAX_BYTES
+    _buffer_bytes = 0
+    _wq_bytes = 0
 
     def __init__(self, config: SourceConfig) -> None:
         extra = config.extra or {}
@@ -153,11 +241,17 @@ class SyslogListenerSource:
         self.max_connections_per_ip = int(extra.get("max_connections_per_ip", _DEFAULT_MAX_CONNECTIONS_PER_IP))
         self.idle_timeout = float(extra.get("idle_timeout", _DEFAULT_IDLE_TIMEOUT))
         self.queue_max = int(extra.get("queue_max", _DEFAULT_QUEUE_MAX))
+        self.max_bytes = int(extra.get("max_bytes", _DEFAULT_MAX_BYTES))
+        self.queue_max_bytes = int(extra.get("queue_max_bytes", _DEFAULT_QUEUE_MAX_BYTES))
         self.reader_retry = float(extra.get("reader_retry", _DEFAULT_READER_RETRY))
         self._allow = _parse_allow(extra.get("allow") or os.environ.get("AI_LOG_ANALYZER_SYSLOG_ALLOW"))
         self._ssl = self._tls_context(extra) if self.proto == "tls" else None
 
+        # Per listener: the kernel fills this buffer with the GIL released, so one shared by several
+        # listener threads would hand one socket's datagram to another.
+        self._udp_buf = bytearray(65_535)
         self._buffer: deque[tuple[str, str]] = deque(maxlen=self.capacity)
+        self._buffer_bytes = 0     # bytes the ring retains (see max_bytes)
         self._total_ingested = 0  # monotonic — cursor base for fetch_new() (memory mode)
         self._lock = threading.Lock()
         self._stats: Counter[str] = Counter()
@@ -169,6 +263,7 @@ class SyslogListenerSource:
         # Spool writer: batches wait here (bounded) so SQLite never runs on the event loop.
         self._wq: deque[list[tuple[float, str, str]]] = deque()
         self._wq_rows = 0          # lines queued, including a batch the writer is retrying
+        self._wq_bytes = 0         # bytes of those lines (see queue_max_bytes)
         self._enq_rows = 0         # lines ever accepted into the queue
         self._done_rows = 0        # lines written or abandoned
         self._wcv = threading.Condition()
@@ -356,7 +451,6 @@ class SyslogListenerSource:
                 await asyncio.gather(*pending, return_exceptions=True)
 
     # ── UDP ─────────────────────────────────────────────────────────────────
-    _udp_buf = bytearray(65_535)
     _ANC = socket.CMSG_SPACE(4) if hasattr(socket, "CMSG_SPACE") else 0
 
     def _udp_readable(self) -> None:
@@ -521,16 +615,31 @@ class SyslogListenerSource:
         if not line.strip():
             return
         with self._lock:
-            self._buffer.append((line, sender))
             self._total_ingested += 1
             self._stats["received"] += 1
             if self._db is not None:
+                # Spool mode: fetch / fetch_new read the spool, so a ring copy would be dead memory.
                 self._pending.append((time.time(), sender, line))
                 flush_now = len(self._pending) >= _FLUSH_BATCH
             else:
+                self._ring_append(line, sender)
                 flush_now = False
         if flush_now:
             self._flush()
+
+    def _ring_append(self, line: str, sender: str) -> None:
+        """Append to the memory ring, evicting the oldest lines past ``max_bytes`` (caller holds the lock)."""
+        buf = self._buffer
+        cap = getattr(buf, "maxlen", None)
+        if cap == 0:
+            return
+        if cap is not None and len(buf) == cap:
+            self._buffer_bytes -= _row_bytes(*buf[0])    # the deque is about to drop its oldest line
+        buf.append((line, sender))
+        self._buffer_bytes += _row_bytes(line, sender)
+        while self._buffer_bytes > self.max_bytes and len(buf) > 1:
+            self._buffer_bytes -= _row_bytes(*buf.popleft())
+            self._stats["ring_evicted"] += 1
 
     def _flush(self) -> None:
         """Hand pending lines to the spool writer (cheap; never touches SQLite)."""
@@ -541,20 +650,31 @@ class SyslogListenerSource:
         if not rows:
             return
         with self._wcv:
+            # Room is a line count AND a byte budget: a line can be 64 KiB, so a count alone is gigabytes.
             room = max(0, self.queue_max - self._wq_rows)
-            if len(rows) > room:   # the writer cannot keep up: drop the newest, loudly counted
-                over = len(rows) - room
+            room_bytes = max(0, self.queue_max_bytes - self._wq_bytes)
+            keep = kept_bytes = 0
+            for _ts, sender, line in rows[:room]:
+                cost = _row_bytes(line, sender)
+                if kept_bytes + cost > room_bytes:
+                    break
+                kept_bytes += cost
+                keep += 1
+            if keep < len(rows):   # the writer cannot keep up: drop the newest, loudly counted
+                over = len(rows) - keep
                 if not self._stats["queue_overflow"]:
-                    log.error("syslog %s: spool queue is full (%d lines); dropping new lines", self.name,
-                              self.queue_max)
+                    log.error("syslog %s: spool queue is full (%d lines, %d bytes); dropping new lines",
+                              self.name, self.queue_max, self.queue_max_bytes)
                 self._stats["queue_overflow"] += over
+                self._stats["queue_overflow_bytes"] += sum(_row_bytes(r[2], r[1]) for r in rows[keep:])
                 self._stats["spool_lines_lost"] += over
                 self._enq_rows += over
                 self._done_rows += over
-                rows = rows[:room]
+                rows = rows[:keep]
             if rows:
                 self._wq.append(rows)
                 self._wq_rows += len(rows)
+                self._wq_bytes += kept_bytes
                 self._enq_rows += len(rows)
             self._wcv.notify_all()
 
@@ -629,6 +749,7 @@ class SyslogListenerSource:
             delay = 0.25
             with self._wcv:
                 self._wq_rows -= len(batch)
+                self._wq_bytes -= sum(_row_bytes(line, sender) for _ts, sender, line in batch)
                 self._done_rows += len(batch)
                 self._stats["spooled"] += len(batch)
                 self._wcv.notify_all()
@@ -642,6 +763,7 @@ class SyslogListenerSource:
         """Count lines that could not be written before shutdown (caller holds ``_wcv``)."""
         self._wq.clear()
         self._wq_rows = 0
+        self._wq_bytes = 0
         self._done_rows += lost
         self._stats["spool_lines_lost"] += lost
         log.error("syslog %s: %d line(s) could not be written to the spool and were lost", self.name, lost)
@@ -675,6 +797,7 @@ class SyslogListenerSource:
         out: dict[str, Any] = {"role": self.role, "proto": self.proto, "port": self.port,
                                "active_connections": self._active_conns, "spool": bool(self._db),
                                "rcvbuf_requested": self.rcvbuf, "writer_queue_rows": self._wq_rows,
+                               "writer_queue_bytes": self._wq_bytes, "ring_bytes": self._buffer_bytes,
                                **dict(self._stats)}
         now = _system_udp_rcvbuf_errors()
         if self.proto == "udp" and now is not None and self._snmp_base is not None:
