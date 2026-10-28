@@ -232,6 +232,16 @@ FORMATS: list[tuple[str, str, str]] = [
     ("netsnmp-rocommunity", "rocommunity CommRoX1 default", "CommRoX1"),
     ("netsnmp-rwcommunity", "rwcommunity CommRwX1 192.0.2.0/24", "CommRwX1"),
     ("sonic-snmp-community-add", "config snmp community add CommSonicX1 RO", "CommSonicX1"),
+    # IS-IS / RIP / FHRP / MSDP clear-text passwords.
+    ("isis-password", "isis password IsisPwdX1 level-2", "IsisPwdX1"),
+    ("isis-area-password", "area-password AreaPwdX1 authenticate snp validate", "AreaPwdX1"),
+    ("isis-domain-password", "domain-password DomPwdX1 authenticate snp validate", "DomPwdX1"),
+    ("rip-auth-string", "ip rip authentication string RipStrX1", "RipStrX1"),
+    ("hsrp-auth-text", "standby 1 authentication text HsrpTextX1", "HsrpTextX1"),
+    ("vrrp-auth-text", "vrrp 1 authentication text VrrpTextX1", "VrrpTextX1"),
+    ("glbp-auth-text", "glbp 1 authentication text GlbpTextX1", "GlbpTextX1"),
+    ("hsrp-auth-bare", "standby 1 authentication HsrpBareX1", "HsrpBareX1"),
+    ("msdp-password", "ip msdp password peer 192.0.2.1 MsdpPwdX1", "MsdpPwdX1"),
 ]
 
 
