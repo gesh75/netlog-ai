@@ -32,6 +32,7 @@ import re
 import secrets
 import threading
 from collections import OrderedDict
+from typing import Any
 
 # A secret token: the whole non-space run, never an existing <REDACTED> (and
 # never a token that is only followed by one), so re-sanitizing is a no-op.
@@ -41,8 +42,8 @@ _TOK = r'(?!"?<REDACTED)[^\s;]+(?![^\s;])(?![ \t]+(?:[^\s<]+[ \t]+){0,3}<REDACTE
 _QTOK = r'(?:"(?!<REDACTED>")[^"\n]*"|' + _TOK + ")"
 _R = r"\1 <REDACTED>"
 _CRED_NAMES = (r"api[_-]?key|secret[_-]?(?:access[_-]?)?key|client[_-]?secret|token|passwd|password"
-               r"|passphrase|private[_-]?key|secret|psk")
-
+               r"|passphrase|private[_-]?key|secret|psk|passkey|pwd|auth[_-]?key|snmp[_-]?community"
+               r"|community[_-]?string")
 # A digest name after a key id (`message-digest-key 7 md5 K`, `ntp authentication-key 7 sha1 K`) and the
 # word that may sit between it and the key: an encryption type (digit, IOS-XR clear/encrypted, Aruba
 # plaintext/ciphertext). A key id is never the secret, so a rule for `key 7 ...` must not treat it as one.
@@ -69,7 +70,7 @@ def _kw(prefix: str, *, typed: bool = False, eol: bool = False, quoted: bool = F
 # Each rule: (description, pattern, replacement). $1 preserves the key/keyword.
 # Order matters: a general rule must never consume the keyword another rule anchors on, so the
 # statement-specific rules (FortiOS/PAN-OS/NVUE fields, key ids) run before the generic ones.
-_RULES: list[tuple[str, re.Pattern[str], str]] = [
+_RULES: list[tuple[str, Any, Any]] = [
     # ── Junos style ──────────────────────────────────────────────────────
     ("junos-encrypted-password",
      re.compile(r'(encrypted-password|authentication-key|secret|pre-shared-key|password|shared-secret)'
@@ -212,6 +213,12 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
      re.compile(r'(?<![A-Za-z0-9])("(?:' + _CRED_NAMES + r')"[ \t]*:[ \t]*)"(?!<REDACTED>")[^"\n]*"',
                 re.IGNORECASE),
      r'\1"<REDACTED>"'),
+    # `name: value` (YAML, HTTP headers, `k: v` logs, prefixed JSON keys); a quoted value keeps its quotes.
+    ("credential-colon",
+     re.compile(rf"""(?<![A-Za-z0-9])((?:{_CRED_NAMES})["']?[ \t]*:[ \t]*)"""
+                rf"""(?!["']?<REDACTED)(?!{_NOT_SECRET})(?:(")[^"\n]*"|(')[^'\n]*'|[^\s"'&;,]+)""",
+                re.IGNORECASE),
+     lambda m: f"{m.group(1)}{m.group(2) or m.group(3) or ''}<REDACTED>{m.group(2) or m.group(3) or ''}"),
     ("cloud-api-token",
      re.compile(r"\b(?:(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|AIPA)[A-Z0-9]{16}"
                 r"|gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{22,255}"

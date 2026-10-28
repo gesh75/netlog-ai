@@ -145,7 +145,17 @@ FORMATS: list[tuple[str, str, str]] = [
     ("psk-asa-ikev1", "ikev1 pre-shared-key AsaIkev1PskX", "AsaIkev1PskX"),
     ("psk-asa-ikev2", "ikev2 remote-authentication pre-shared-key AsaIkev2PskX", "AsaIkev2PskX"),
     ("nhrp-authentication", "ip nhrp authentication NhrpKey1", "NhrpKey1"),
+    # Colon-separated credentials and more credential names.
+    ("colon-password", "password: ColonPasswordX1", "ColonPasswordX1"),
+    ("colon-api_key", "api_key: ColonApiKeyX1", "ColonApiKeyX1"),
+    ("hdr-x-api-key", "X-API-Key: HdrApiKeyValueX1", "HdrApiKeyValueX1"),
+    ("hdr-x-auth-token", "x-auth-token: HdrAuthTokenX1", "HdrAuthTokenX1"),
+    ("colon-token", "token: ColonTokenValueX1", "ColonTokenValueX1"),
+    ("yaml-password-quoted", "  password: 'two words yaml' # note", "two words yaml"),
+    ("kv-snmp_community", "snmp_community=EqSnmpCommX1", "EqSnmpCommX1"),
+    ("kv-passkey", "passkey=EqPasskeyValX1", "EqPasskeyValX1"),
     ("kv-psk", "psk=EqPskValueX1 ssid=corp", "EqPskValueX1"),
+    ("kv-pwd", "Server=db;Pwd=OdbcPwdValueX1;", "OdbcPwdValueX1"),
 ]
 
 
