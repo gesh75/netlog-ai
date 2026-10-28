@@ -32,6 +32,7 @@ import re
 import secrets
 import threading
 from collections import OrderedDict
+from typing import Any
 
 # A secret token: the whole non-space run, never an existing <REDACTED> (and
 # never a token that is only followed by one), so re-sanitizing is a no-op.
@@ -41,7 +42,25 @@ _TOK = r'(?!"?<REDACTED)[^\s;]+(?![^\s;])(?![ \t]+(?:[^\s<]+[ \t]+){0,3}<REDACTE
 _QTOK = r'(?:"(?!<REDACTED>")[^"\n]*"|' + _TOK + ")"
 _R = r"\1 <REDACTED>"
 _CRED_NAMES = (r"api[_-]?key|secret[_-]?(?:access[_-]?)?key|client[_-]?secret|token|passwd|password"
-               r"|passphrase|private[_-]?key|secret")
+               r"|passphrase|private[_-]?key|secret|psk|passkey|pwd|auth[_-]?key|snmp[_-]?community"
+               r"|community[_-]?string")
+# A digest name after a key id (`message-digest-key 7 md5 K`, `ntp authentication-key 7 sha1 K`) and the
+# word that may sit between it and the key: an encryption type (digit, IOS-XR clear/encrypted, Aruba
+# plaintext/ciphertext). A key id is never the secret, so a rule for `key 7 ...` must not treat it as one.
+_ALG = r"(?:md5|sha-?[0-9]{0,3}|(?:hmac|cmac)-[a-z0-9-]{3,20})"
+_KTYPE = r"(?:[0-9]|clear|encrypted|plaintext|ciphertext)"
+# Words that follow `password:` / `pre-shared-key` in log prose ("pre-shared-key mismatch"), not secrets.
+_NOT_SECRET = (r"(?:required|incorrect|invalid|expired|missing|failed|mismatch(?:ed)?|none|null|true|false"
+               r"|unset)(?![^\s\"'&;,])")
+# FortiOS `set <field> [ENC] <value>` and PAN-OS / NVUE `set <path> <field> <value>` secret fields.
+_SET_FIELDS = (r"password|passwd|passphrase|psksecret(?:-remote)?|ppk-secret|secret|key|auth-pwd|priv-pwd"
+               r"|auth-password|priv-password|authentication-key|key-string|md5-key|api-key|bind-password"
+               r"|shared-secret")
+_PATH_FIELDS = (r"secret|password|passphrase|passkey|bind-password|shared-secret|snmp-community-string"
+                r"|pre-shared-key[ \t]+key|auth-password|priv-password|md5-key")
+# XML elements (PAN-OS and others) whose text is a secret.
+_XML_SECRETS = (r"secret|password|passwd|passphrase|bind-password|shared-secret|snmp-community-string|phash"
+                r"|authpwd|privpwd|auth-password|priv-password|private-key|psk")
 
 
 def _kw(prefix: str, *, typed: bool = False, eol: bool = False, quoted: bool = False) -> re.Pattern[str]:
@@ -57,62 +76,143 @@ def _kw(prefix: str, *, typed: bool = False, eol: bool = False, quoted: bool = F
     return re.compile(rf"({group})[ \t]+{_QTOK if quoted else _TOK}{tail}", flags)
 
 
+class _SnmpCommunityScan:
+    """`community NAME` lines that are SNMP communities only in context.
+
+    BGP policy uses the same words (`from { community CUST; }`), so a bare `community NAME;` or an
+    indented `community NAME` is redacted only inside an `snmp` block, a SR Linux `community-entry`, or
+    a fragment with no enclosing block; never inside a policy block. One linear pass over the lines.
+    """
+
+    _STMT = re.compile(r'([ \t]*community)[ \t]+(?!"?<REDACTED)("[^"\n]*"|[^\s;{}"]+)[ \t]*(;?)[ \t\r]*')
+    _POLICY = frozenset({"policy-options", "policy-statement", "term", "from", "to", "then"})
+    _SNMP = frozenset({"snmp", "community-entry"})
+
+    @staticmethod
+    def _head(line: str) -> str:
+        words = line.lstrip("} \t").split(None, 1)
+        return words[0].rstrip("{;").lower() if words else ""
+
+    def subn(self, repl: str, text: str) -> tuple[str, int]:
+        stack: list[str] = []
+        policy = snmp = count = 0  # open policy / snmp blocks, so each line costs O(1)
+        top = ""  # the last unindented line's first word: `snmp` for an indented Viptela-style block
+        out: list[str] = []
+        for line in text.split("\n"):
+            body = line.strip()
+            m = self._STMT.fullmatch(line)
+            if m and (snmp or (top == "snmp" and line[:1] in " \t") or (m.group(3) and not policy)):
+                line = f"{m.group(1)} <REDACTED>{m.group(3)}" + ("\r" if line.endswith("\r") else "")
+                count += 1
+            if body.startswith("}"):
+                for ch in body:
+                    if ch != "}" or not stack:
+                        break
+                    head = stack.pop()
+                    policy -= head in self._POLICY
+                    snmp -= head in self._SNMP
+            elif body.endswith("{"):
+                head = self._head(body)
+                stack.append(head)
+                policy += head in self._POLICY
+                snmp += head in self._SNMP
+            if line[:1] not in (" ", "\t", ""):
+                top = "" if body.startswith(("}", "!", "#")) else self._head(body)
+            out.append(line)
+        return "\n".join(out), count
+
+
 # Each rule: (description, pattern, replacement). $1 preserves the key/keyword.
-_RULES: list[tuple[str, re.Pattern[str], str]] = [
+# Order matters: a general rule must never consume the keyword another rule anchors on, so the
+# statement-specific rules (FortiOS/PAN-OS/NVUE fields, key ids) run before the generic ones.
+_RULES: list[tuple[str, Any, Any]] = [
     # ── Junos style ──────────────────────────────────────────────────────
     ("junos-encrypted-password",
-     re.compile(r'(encrypted-password|authentication-key|secret|pre-shared-key|password|shared-secret)\s+"\$[0-9]\$[^"]+"',
-                re.IGNORECASE),
+     re.compile(r'(encrypted-password|authentication-key|secret|pre-shared-key|password|shared-secret)'
+                r'[ \t]+"\$[0-9]\$[^"\n]+"', re.IGNORECASE),
      r'\1 "<REDACTED>"'),
     ("junos-quoted-encrypted",
-     re.compile(r'"\$[0-9]\$[^"]+"'),
+     re.compile(r'"\$[0-9]\$[^"\n]+"'),
      '"<REDACTED>"'),
     # Only match SNMP community context, NOT Junos policy-options BGP communities.
     # SNMP community in Junos: `community NAME { authorization ...; clients ...; }`
     # SNMP-style in EOS:       `snmp-server community NAME ro`
     # BGP community (skip):     `community NAME members 1:1234;`  ← these are just labels
+    # A block opens with any child but `members` / `invert-match` (a BGP community's only children).
     ("junos-snmp-community",
-     re.compile(r'\b(community)\s+(?!"?<REDACTED)(\S+)\s*\{(\s*(?:authorization|clients))',
-                re.IGNORECASE),
-     r'\1 <REDACTED>{\3'),
+     re.compile(r'(?<![\w-])(community)[ \t]+(?!"?<REDACTED)([^\s{};"]+)[ \t]*\{'
+                r'(?!\s*(?:members?|invert-match)\b)', re.IGNORECASE),
+     r'\1 <REDACTED>{'),
     ("junos-snmp-community-quoted",
-     re.compile(r'\b(community)\s+"([^"]+)"\s*\{(\s*(?:authorization|clients))',
-                re.IGNORECASE),
-     r'\1 "<REDACTED>"{\3'),
+     re.compile(r'(?<![\w-])(community)[ \t]+"(?!<REDACTED>")([^"\n]+)"[ \t]*\{'
+                r'(?!\s*(?:members?|invert-match)\b)', re.IGNORECASE),
+     r'\1 "<REDACTED>"{'),
+    # Childless `community NAME;` and indented `snmp` / `community NAME` blocks need the enclosing block.
+    ("snmp-community-in-block", _SnmpCommunityScan(), ""),
     ("junos-authentication-key",
-     re.compile(r'(authentication-key|hello-authentication-key)\s+"(?!<REDACTED>")[^"]+"',
+     re.compile(r'(authentication-key|hello-authentication-key)[ \t]+"(?!<REDACTED>")[^"\n]+"',
                 re.IGNORECASE),
      r'\1 "<REDACTED>"'),
+    # ── Statement-style secrets: FortiOS `set password ENC <blob>`, PAN-OS / NVUE `set <path> secret <v>`,
+    # PAN-OS `-AQ==` blobs and XML elements. Before the key-id rules so `set authentication-key ENC <blob>`
+    # is not read as the OSPF `authentication-key <type> <key>`.
+    ("set-secret-field",
+     re.compile(rf"(?m)^([ \t]*set[ \t]+(?:{_SET_FIELDS})(?:[ \t]+ENC)?)[ \t]+{_QTOK}", re.IGNORECASE), _R),
+    ("set-path-secret",
+     re.compile(rf'(?m)^([ \t]*(?:nv[ \t]+)?set[ \t]+[^\n"]{{0,300}}?[ \t](?:{_PATH_FIELDS}))[ \t]+{_QTOK}',
+                re.IGNORECASE), _R),
+    ("xml-secret-element",
+     re.compile(rf"(<({_XML_SECRETS})>)[ \t\r\n]*[^<\s][^<]*(</\2>)", re.IGNORECASE), r"\1<REDACTED>\3"),
+    ("xml-pre-shared-key",
+     re.compile(r"(<pre-shared-key>[ \t\r\n]*<key>)[ \t\r\n]*[^<\s][^<]*(</key>)", re.IGNORECASE),
+     r"\1<REDACTED>\2"),
+    # PAN-OS encrypts stored secrets as `-AQ==<base64>`; one anywhere is a secret.
+    ("panos-encrypted-blob",
+     re.compile(r"(?<![A-Za-z0-9+/=_-])-AQ==[A-Za-z0-9+/=]{6,}"), "<REDACTED-HASH>"),
+    # ── Key ids vs keys ──────────────────────────────────────────────────
+    # The number after `message-digest-key` / `ntp authentication-key` is an id (7 is common), so these
+    # run before the type-7 rule below, which would otherwise take `key 7` and redact the digest word.
+    ("ospf-isis-keys",
+     _kw(rf"(?<!ntp[ ])\bauthentication-key(?:[ \t]+(?:[0-9]|ENC))?"
+         rf"|\bmessage-digest-key[ \t]+\d{{1,10}}[ \t]+{_ALG}(?:[ \t]+{_KTYPE})?", quoted=True), _R),
+    ("ntp-authentication-key",
+     _kw(rf"\bntp[ \t]+authentication-key[ \t]+\d{{1,10}}[ \t]+{_ALG}(?:[ \t]+{_KTYPE})?"), _R),
     # ── Arista EOS / IOS style ───────────────────────────────────────────
     ("eos-secret-7",
-     re.compile(r'\b(secret|password|key)\s+7\s+(?!<REDACTED)\S+',
+     re.compile(rf'\b(secret|password|key)[ \t]+7[ \t]+(?!<REDACTED)(?!{_ALG}(?![^\s;]))\S+',
                 re.IGNORECASE),
      r'\1 7 <REDACTED>'),
     ("eos-secret-5",
-     re.compile(r'\b(secret|password)\s+5\s+\$1\$\S+',
+     re.compile(r'\b(secret|password)[ \t]+5[ \t]+\$1\$\S+',
                 re.IGNORECASE),
      r'\1 5 <REDACTED>'),
     ("eos-snmp-community",
-     re.compile(r'\b(snmp-server\s+community)\s+(?!<REDACTED)(\S+)',
+     re.compile(r'\b(snmp-server[ \t]+community)[ \t]+(?!<REDACTED)(\S+)',
                 re.IGNORECASE),
      r'\1 <REDACTED>'),
     # `key 0 X` / `password 0 X`: the digit is the encryption TYPE, not the secret,
     # so it stays and the token after it is redacted.
     ("eos-radius-key",
      _kw(r"\b(?:radius-server[ \t]+key|radius-server[ \t]+host[ \t]+\S{1,64}[ \t]+(?:[^\n]{0,100}?[ \t])?key)"
-         r"(?:[ \t]+[0-9])?"), _R),
+         r"(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
     ("eos-tacacs-key",
      _kw(r"\b(?:tacacs-server[ \t]+key|tacacs-server[ \t]+host[ \t]+\S{1,64}[ \t]+(?:[^\n]{0,100}?[ \t])?key)"
-         r"(?:[ \t]+[0-9])?"), _R),
+         r"(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
     ("eos-bgp-password", _kw(r"\bneighbor[ \t]+\S{1,64}[ \t]+password(?:[ \t]+[0-9])?"), _R),
-    # SNMPv3 USM keys — EOS/IOS `snmp-server user U G v3 auth sha KEY priv aes KEY`
-    # and Junos `authentication-password "..."` / `privacy-password "..."`.
+    # SNMPv3 USM keys — EOS/IOS `snmp-server user U G v3 auth sha KEY priv aes KEY`, NX-OS
+    # `auth sha-256 0xKEY priv aes-128 0xKEY` / `priv 0xKEY` and Junos `authentication-password "..."`.
     ("snmpv3-auth-priv-key",
-     re.compile(r'\b(auth\s+(?:md5|sha\d*)|priv\s+(?:des|3des|aes\d*)(?:\s+\d+)?)\s+(?!<REDACTED>)\S+',
-                re.IGNORECASE),
+     re.compile(rf'\b(auth[ \t]+(?:md5|sha(?:-?\d+)?)|priv[ \t]+(?:des|3des|aes(?:-?\d+)?)(?:[ \t]+\d+)?)'
+                rf'[ \t]+{_TOK}', re.IGNORECASE),
+     r'\1 <REDACTED>'),
+    # `priv` with no cipher name (NX-OS) is a key only on a `snmp-server user` line: in `snmp-server group
+    # G v3 priv read V` it is the security level.
+    ("snmpv3-user-priv-key",
+     re.compile(r'\b(snmp-server[ \t]+user[ \t]+[^\n]{0,200}?[ \t]priv)[ \t]+'
+                rf'(?!(?:des|3des|aes(?:-?\d+)?)(?![^\s;])){_TOK}', re.IGNORECASE),
      r'\1 <REDACTED>'),
     ("junos-snmpv3-password",
-     re.compile(r'\b(authentication-password|privacy-password)\s+(?!"?<REDACTED)(?:"[^"]*"|\S+)',
+     re.compile(r'\b(authentication-password|privacy-password)[ \t]+(?!"?<REDACTED)(?:"[^"\n]*"|\S+)',
                 re.IGNORECASE),
      r'\1 "<REDACTED>"'),
     # ── Generic encrypted blobs ──────────────────────────────────────────
@@ -142,25 +242,73 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("line-password",
      re.compile(rf"(?m)^([ \t]*(?:password|secret)(?:[ \t]+{_TYPE})?)[ \t]+{_TOK}(?=[ \t\r]*$)",
                 re.IGNORECASE), _R),
-    ("ospf-isis-keys",
-     _kw(r"(?<!ntp[ ])\bauthentication-key(?:[ \t]+[0-9])?|\bmessage-digest-key[ \t]+\d{1,3}[ \t]+md5"
-         r"(?:[ \t]+[0-9])?", quoted=True), _R),
-    ("ntp-authentication-key",
-     _kw(r"\bntp[ \t]+authentication-key[ \t]+\d{1,5}[ \t]+(?:md5|sha1|sha256|cmac-aes-128)"), _R),
     ("crypto-isakmp-key", _kw(r"\bcrypto[ \t]+isakmp[ \t]+key(?:[ \t]+[0-9])?"), _R),
     ("ikev2-pre-shared-key",
      _kw(r"\bpre-shared-key[ \t]+(?:(?:local|remote)(?:[ \t]+[0-9])?"
          r"|address[ \t]+\S{1,64}[ \t]+key(?:[ \t]+[0-9])?)"), _R),
+    # Keyring `pre-shared-key [0|6] <secret>`, ASA `ikev1|ikev2 ... pre-shared-key <secret>` and IKEv2
+    # profile `pre-share key <secret>`: the secret ends the line (keeps "pre-shared-key mismatch on ..."),
+    # and the Junos / PAN-OS / `local|remote|address` forms keep their own rules.
+    ("pre-shared-key-bare",
+     re.compile(rf"(?m)\b((?:pre-shared-key(?![ \t]+(?:local|remote|address|ascii-text|hexadecimal|key)"
+                rf"(?![^\s;]))|pre-share[ \t]+key)(?:[ \t]+[0-9])?)[ \t]+(?!{_NOT_SECRET}){_TOK}"
+                r"(?=[ \t\r]*$)", re.IGNORECASE), _R),
+    ("nhrp-authentication", _kw(r"\b(?:ip|ipv6)[ \t]+nhrp[ \t]+authentication", eol=True), _R),
     ("key-string", _kw(r"\bkey-string(?:[ \t]+[0-9])?"), _R),
     ("snmp-server-host-community",
      re.compile(r"\b(snmp-server[ \t]+host[ \t]+\S{1,64}(?:[ \t]+vrf[ \t]+\S{1,32})?(?:[ \t]+(?:traps|informs))?"
-                r"(?:[ \t]+version[ \t]+(?:1|2c|3(?:[ \t]+(?:auth|noauth|priv))?))?)"
+                r"(?:[ \t]+version[ \t]+(?:1|2c|3(?:[ \t]+(?:auth|noauth|priv))?))?(?:[ \t]+community)?)"
                 rf"[ \t]+(?!(?:vrf|traps|informs|version)[ \t]){_TOK}", re.IGNORECASE), _R),
     # Junos: quoted or bare values; output is always quoted.
     ("junos-secret-values",
      re.compile(rf"\b(pre-shared-key[ \t]+(?:ascii-text|hexadecimal)|encrypted-password"
                 rf"|plain-text-password(?:-value)?|simple-password|md5[ \t]+\d{{1,3}}[ \t]+key)[ \t]+{_QTOK}",
                 re.IGNORECASE), r'\1 "<REDACTED>"'),
+    # ── Wireless, Nokia SR Linux, AAA blocks, IS-IS / RIP / FHRP / MSDP, SNMP communities ───────────
+    # WPA pre-shared keys: IOS-XE `security wpa psk set-key ascii|hex [type] KEY`, AireOS `... akm psk
+    # set-key ascii <type> KEY <wlan-id>`, autonomous AP `wpa-psk ascii [type] KEY`.
+    ("wpa-psk",
+     _kw(r"\b(?:psk[ \t]+set-key|wpa-psk)[ \t]+(?:ascii|hex)(?:[ \t]+[0-9])?", quoted=True), _R),
+    ("srl-secret-key", _kw(r"(?<![\w-])secret-key", quoted=True), _R),
+    ("srl-community-entry",
+     re.compile(rf"((?<![\w-])community-entry[ \t]+\S{{1,64}}(?:[ \t]*\{{)?[ \t\r\n]{{0,40}}"
+                rf"(?<![\w-])community)[ \t]+{_QTOK}", re.IGNORECASE), _R),
+    # Block-form AAA key (IOS-XE `radius server X` / `tacacs server X`, indented ` key [type] SECRET`, or
+    # echoed in a `logged command:key ...` log line). A key-chain ` key 7` is an id, so an untyped
+    # all-digit value stays; `{` is Junos `key 1 {`.
+    ("aaa-block-key",
+     re.compile(rf"(?m)((?:^[ \t]+|(?<=command:)[ \t]*)key[ \t]+(?:[0-9]|plaintext|ciphertext))[ \t]+"
+                rf"(?![{{}}]){_TOK}(?=[ \t\r]*$)", re.IGNORECASE), _R),
+    ("aaa-block-key-untyped",
+     re.compile(rf"(?m)((?:^[ \t]+|(?<=command:)[ \t]*)key)[ \t]+(?![{{}}])(?!\d{{1,5}}[ \t\r]*$)"
+                rf"{_TOK}(?=[ \t\r]*$)", re.IGNORECASE), _R),
+    ("server-private-key",
+     _kw(r"\bserver-private[ \t]+\S{1,64}[ \t]+(?:[^\n]{0,100}?[ \t])?key"
+         r"(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
+    ("isis-authentication-key",
+     _kw(r"\bisis[ \t]+authentication[ \t]+(?:[^\n]{0,100}?[ \t])?key"
+         r"(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
+    ("shared-key", _kw(r"(?<![\w-])shared-key(?:[ \t]+(?:[0-9]|plaintext|ciphertext))?"), _R),
+    # SONiC `tacacs|radius passkey KEY`, `config tacacs add IP --key KEY`; the secret ends the line.
+    ("passkey", _kw(r"(?<![\w-])passkey(?:[ \t]+[0-9])?", eol=True), _R),
+    ("sonic-aaa-add-key",
+     _kw(r"\b(?:tacacs|radius)[ \t]+add[ \t]+[^\n]{0,150}?[ \t](?:--key|-k)"), _R),
+    # Clear-text IS-IS, RIP, HSRP/VRRP/GLBP and MSDP passwords; trailing options (level-2, ...) stay.
+    ("isis-password", _kw(r"\b(?:isis[ \t]+password|area-password|domain-password)"), _R),
+    ("rip-authentication-string", _kw(r"\brip[ \t]+authentication[ \t]+string"), _R),
+    ("fhrp-authentication-text", _kw(r"\bauthentication[ \t]+text", eol=True), _R),
+    ("hsrp-authentication-bare",
+     _kw(r"\bstandby[ \t]+(?:\d{1,4}[ \t]+)?authentication"
+         r"(?![ \t]+(?:text|md5|key-chain|key-string)(?![^\s;]))", eol=True), _R),
+    ("msdp-password", _kw(r"\bmsdp[ \t]+password[ \t]+(?:peer[ \t]+)?\S{1,64}(?:[ \t]+[0-9])?"), _R),
+    # SNMP communities that are not `snmp-server community` or a Junos block: Junos set format, SONiC
+    # `snmp community add`, NVUE / net-snmp keywords. BGP `community NAME members ...` is untouched.
+    ("snmp-community-set",
+     _kw(r"(?<![\w-])snmp[ \t]+community(?:[ \t]+(?:add|del))?"
+         r"(?![ \t]+(?:<|(?:strings?|names?)(?![^\s;])))", quoted=True), _R),
+    ("snmp-community-keyword",
+     _kw(r"(?<![\w-])(?:readonly-community|read-write-community|rocommunity6?|rwcommunity6?"
+         r"|trapcommunity)", quoted=True), _R),
     # ── Tokens, headers, URLs, key=value pairs ───────────────────────────
     ("http-authorization",
      re.compile(r"""\b(authorization["']?[ \t]*[:=][ \t]*["']?(?:(?:bearer|basic|token|negotiate)[ \t]+)?)"""
@@ -181,16 +329,25 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
      re.compile(r'(?<![A-Za-z0-9])("(?:' + _CRED_NAMES + r')"[ \t]*:[ \t]*)"(?!<REDACTED>")[^"\n]*"',
                 re.IGNORECASE),
      r'\1"<REDACTED>"'),
+    # `name: value` (YAML, HTTP headers, `k: v` logs, prefixed JSON keys); a quoted value keeps its quotes.
+    ("credential-colon",
+     re.compile(rf"""(?<![A-Za-z0-9])((?:{_CRED_NAMES})["']?[ \t]*:[ \t]*)"""
+                rf"""(?!["']?<REDACTED)(?!{_NOT_SECRET})(?:(")[^"\n]*"|(')[^'\n]*'|[^\s"'&;,]+)""",
+                re.IGNORECASE),
+     lambda m: f"{m.group(1)}{m.group(2) or m.group(3) or ''}<REDACTED>{m.group(2) or m.group(3) or ''}"),
+    # A JWT must start a run of token characters (`(?<![A-Za-z0-9_-])`, not `\b`): its segments are unbounded,
+    # and with `\b` every `eyJ` inside a long `eyJ-eyJ-...` run restarted a scan of the rest of the run.
     ("cloud-api-token",
-     re.compile(r"\b(?:(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|AIPA)[A-Z0-9]{16}"
+     re.compile(r"(?:\b(?:(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|AIPA)[A-Z0-9]{16}"
                 r"|gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{22,255}"
                 r"|xox[abposr]-[A-Za-z0-9-]{10,200}|AIza[0-9A-Za-z_-]{35}"
-                r"|sk-(?:ant-|proj-)[A-Za-z0-9_-]{20,200}|sk-[A-Za-z0-9]{32,200}"
-                r"|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})(?![A-Za-z0-9_-])"),
+                r"|sk-(?:ant-|proj-)[A-Za-z0-9_-]{20,200}|sk-[A-Za-z0-9]{32,200})"
+                r"|(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
+                r"(?![A-Za-z0-9_-])"),
      "<REDACTED-TOKEN>"),
-    # Modular-crypt hashes ($1$ md5, $5$/$6$ sha, $8$/$9$ Cisco, $y$ yescrypt, ...) anywhere.
+    # Modular-crypt hashes ($1$ md5, $5$/$6$ sha, $8$/$9$ Cisco, $y$ yescrypt, $aes1$ SR Linux, ...) anywhere.
     ("crypt-hash",
-     re.compile(r"(?<![\w$])\$(?:1|5|6|7|8|9|y|2[abxy])\$[A-Za-z0-9./$=,+-]{6,}"),
+     re.compile(r"(?<![\w$])\$(?:aes1?|1|5|6|7|8|9|y|2[abxy])\$[A-Za-z0-9./$=,+-]{6,}"),
      "<REDACTED-HASH>"),
 ]
 
@@ -274,7 +431,10 @@ _PII_RULES: list = [
     # Chassis / module serial numbers (asset identifiers). The value must
     # contain a digit so `serial console` / `interface Serial0/0` survive.
     ("serial-number",
-     re.compile(r'(?i)\b(serial[ _-]?(?:number|num|no)?|s/n)(\s*[:=#]?\s*)(?=[A-Za-z0-9-]*\d)[A-Za-z0-9][A-Za-z0-9-]{4,}\b'),
+     # Each whitespace run is bounded (`\s*[:=#]?\s*` split a long run of spaces k ways and rescanned the
+     # value for each), and so is the digit lookahead.
+     re.compile(r'(?i)\b(serial[ _-]?(?:number|num|no)?|s/n)((?:\s{0,8}[:=#])?\s{0,8})'
+                r'(?=[A-Za-z0-9-]{0,63}\d)[A-Za-z0-9][A-Za-z0-9-]{4,}\b'),
      r'\1\2<REDACTED-SERIAL>'),
 ]
 
