@@ -304,7 +304,8 @@ def _build_server():
           - kibana:  {"index_pattern": "network_devices-*"}
           - splunk:  {"search": "index=network"}
           - loki:    {"query": "{job=\"network\"}"}
-          - syslog:  {"port": "5514", "proto": "udp"}
+          - syslog:  {"port": "5514", "proto": "udp"} (file paths such as `spool` and `tls_*` are
+                     operator-set: a spool must sit in the operator's data directory, TLS files are refused)
           - solarwinds: {"mode": "swis"}
         """
         if not _write_enabled():
@@ -325,7 +326,7 @@ def _build_server():
             extra=clean_extra,
             verify_tls=verify_tls,
         )
-        source_manager.add(cfg)
+        source_manager.add(cfg, trusted=False)
         return {"ok": True, "id": source_id, **({"ignored_options": ignored} if ignored else {})}
 
     @tool(open_world=True)
@@ -632,6 +633,7 @@ def _build_server():
             "root_cause": root_causes[0]["root_cause"] if root_causes else None,
             "suppressed_symptoms": root_causes[0]["suppressed_symptoms"] if root_causes else [],
             "cytoscape_elements": [el for h in hypotheses for el in h.to_cytoscape_elements()],
+            **({"truncated": True, "dropped": engine.dropped_events} if engine.dropped_events else {}),
         }
 
     # ── remediation & itsm ───────────────────────────────────────────────────
