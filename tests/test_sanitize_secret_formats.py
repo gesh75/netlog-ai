@@ -121,6 +121,12 @@ FORMATS: list[tuple[str, str, str]] = [
     ("snmpv3-auth-eol-then-username", "snmp-server user u g v3 auth sha\nusername bob password Hunter2Pw9",
      "Hunter2Pw9"),
     ("junos-snmpv3-eol-then-username", "authentication-password\nusername bob password Hunter2Pw9", "Hunter2Pw9"),
+    # Wireless PSKs.
+    ("wpa-psk-ascii0", "security wpa psk set-key ascii 0 MyWifiPSK2024x", "MyWifiPSK2024x"),
+    ("wpa-psk-hex0", "security wpa psk set-key hex 0 " + "0123456789abcdef" * 4, "0123456789abcdef0123456789abcdef"),
+    ("wpa-psk-aireos", "config wlan security wpa akm psk set-key ascii 1 AireosPskKeyX 3", "AireosPskKeyX"),
+    ("wpa-psk-autonomous-ap", "wpa-psk ascii 7 0822455D0A16", "0822455D0A16"),
+    ("kv-psk", "psk=EqPskValueX1 ssid=corp", "EqPskValueX1"),
 ]
 
 

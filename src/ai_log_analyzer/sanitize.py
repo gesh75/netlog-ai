@@ -41,7 +41,7 @@ _TOK = r'(?!"?<REDACTED)[^\s;]+(?![^\s;])(?![ \t]+(?:[^\s<]+[ \t]+){0,3}<REDACTE
 _QTOK = r'(?:"(?!<REDACTED>")[^"\n]*"|' + _TOK + ")"
 _R = r"\1 <REDACTED>"
 _CRED_NAMES = (r"api[_-]?key|secret[_-]?(?:access[_-]?)?key|client[_-]?secret|token|passwd|password"
-               r"|passphrase|private[_-]?key|secret")
+               r"|passphrase|private[_-]?key|secret|psk")
 
 # A digest name after a key id (`message-digest-key 7 md5 K`, `ntp authentication-key 7 sha1 K`) and the
 # word that may sit between it and the key: an encryption type (digit, IOS-XR clear/encrypted, Aruba
@@ -172,6 +172,11 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
      re.compile(rf"\b(pre-shared-key[ \t]+(?:ascii-text|hexadecimal)|encrypted-password"
                 rf"|plain-text-password(?:-value)?|simple-password|md5[ \t]+\d{{1,3}}[ \t]+key)[ \t]+{_QTOK}",
                 re.IGNORECASE), r'\1 "<REDACTED>"'),
+    # ── Wireless, Nokia SR Linux, AAA blocks, IS-IS / RIP / FHRP / MSDP, SNMP communities ───────────
+    # WPA pre-shared keys: IOS-XE `security wpa psk set-key ascii|hex [type] KEY`, AireOS `... akm psk
+    # set-key ascii <type> KEY <wlan-id>`, autonomous AP `wpa-psk ascii [type] KEY`.
+    ("wpa-psk",
+     _kw(r"\b(?:psk[ \t]+set-key|wpa-psk)[ \t]+(?:ascii|hex)(?:[ \t]+[0-9])?", quoted=True), _R),
     # ── Tokens, headers, URLs, key=value pairs ───────────────────────────
     ("http-authorization",
      re.compile(r"""\b(authorization["']?[ \t]*[:=][ \t]*["']?(?:(?:bearer|basic|token|negotiate)[ \t]+)?)"""
