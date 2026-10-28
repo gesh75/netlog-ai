@@ -117,6 +117,15 @@ EXACT: list[tuple[str, str]] = [
      f"nv set service snmp-server readonly-community {R} access any"),
     ("rocommunity X1y2Z3 default", f"rocommunity {R} default"),
     ("config snmp community add X1y2Z3 RO", f"config snmp community add {R} RO"),
+    # IS-IS, RIP, FHRP and MSDP passwords keep their trailing options.
+    ("isis password X1y2Z3 level-2", f"isis password {R} level-2"),
+    ("area-password X1y2Z3 authenticate snp validate", f"area-password {R} authenticate snp validate"),
+    ("domain-password X1y2Z3 authenticate snp validate", f"domain-password {R} authenticate snp validate"),
+    ("ip rip authentication string X1y2Z3", f"ip rip authentication string {R}"),
+    ("standby 1 authentication text X1y2Z3", f"standby 1 authentication text {R}"),
+    ("vrrp 1 authentication text X1y2Z3", f"vrrp 1 authentication text {R}"),
+    ("standby 1 authentication md5 key-string 7 X1y2Z3", f"standby 1 authentication md5 key-string 7 {R}"),
+    ("ip msdp password peer 192.0.2.1 X1y2Z3", f"ip msdp password peer 192.0.2.1 {R}"),
 ]
 
 
@@ -158,8 +167,15 @@ BENIGN = [
     "secret-manager: enabled",
     "Password: ",
     "Password policy: minimum length 12",
+    "isis authentication mode md5",
     "isis authentication key-chain KC",
+    "ip rip authentication mode text",
+    "ip rip authentication key-chain KC",
+    "standby 1 authentication md5 key-chain KC",
+    "standby 1 ip 192.0.2.1",
     "no ip nhrp authentication",
+    "no isis password",
+    "BGP session reset: authentication failure",
     # FortiOS / PAN-OS statements with no secret
     "set status enable",
     "set password-expire 90",

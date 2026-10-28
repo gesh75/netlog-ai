@@ -35,7 +35,9 @@ TEMPLATES = [
     "radius server R\n key 0 {s}\n", "server-private 192.0.2.1 key {s}",
     "nv set system aaa tacacs server 1 secret {s}", "tacacs passkey {s}",
     "set snmp community {s} authorization read-only", "community {s};",
-    "snmp\n community {s}\n  authorization x", "rocommunity {s} default",
+    "snmp\n community {s}\n  authorization x", "rocommunity {s} default", "isis password {s} level-2",
+    "standby 1 authentication text {s}", "ip msdp password peer 192.0.2.1 {s}",
+    "ip rip authentication string {s}",
 ]
 SECRET = st.text(alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", min_size=12, max_size=40)
 

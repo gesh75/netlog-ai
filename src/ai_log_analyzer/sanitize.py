@@ -293,6 +293,14 @@ _RULES: list[tuple[str, Any, Any]] = [
     ("passkey", _kw(r"(?<![\w-])passkey(?:[ \t]+[0-9])?", eol=True), _R),
     ("sonic-aaa-add-key",
      _kw(r"\b(?:tacacs|radius)[ \t]+add[ \t]+[^\n]{0,150}?[ \t](?:--key|-k)"), _R),
+    # Clear-text IS-IS, RIP, HSRP/VRRP/GLBP and MSDP passwords; trailing options (level-2, ...) stay.
+    ("isis-password", _kw(r"\b(?:isis[ \t]+password|area-password|domain-password)"), _R),
+    ("rip-authentication-string", _kw(r"\brip[ \t]+authentication[ \t]+string"), _R),
+    ("fhrp-authentication-text", _kw(r"\bauthentication[ \t]+text", eol=True), _R),
+    ("hsrp-authentication-bare",
+     _kw(r"\bstandby[ \t]+(?:\d{1,4}[ \t]+)?authentication"
+         r"(?![ \t]+(?:text|md5|key-chain|key-string)(?![^\s;]))", eol=True), _R),
+    ("msdp-password", _kw(r"\bmsdp[ \t]+password[ \t]+(?:peer[ \t]+)?\S{1,64}(?:[ \t]+[0-9])?"), _R),
     # SNMP communities that are not `snmp-server community` or a Junos block: Junos set format, SONiC
     # `snmp community add`, NVUE / net-snmp keywords. BGP `community NAME members ...` is untouched.
     ("snmp-community-set",
