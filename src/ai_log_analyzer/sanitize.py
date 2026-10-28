@@ -48,6 +48,9 @@ _CRED_NAMES = (r"api[_-]?key|secret[_-]?(?:access[_-]?)?key|client[_-]?secret|to
 # plaintext/ciphertext). A key id is never the secret, so a rule for `key 7 ...` must not treat it as one.
 _ALG = r"(?:md5|sha-?[0-9]{0,3}|(?:hmac|cmac)-[a-z0-9-]{3,20})"
 _KTYPE = r"(?:[0-9]|clear|encrypted|plaintext|ciphertext)"
+# Words that follow `password:` / `pre-shared-key` in log prose ("pre-shared-key mismatch"), not secrets.
+_NOT_SECRET = (r"(?:required|incorrect|invalid|expired|missing|failed|mismatch(?:ed)?|none|null|true|false"
+               r"|unset)(?![^\s\"'&;,])")
 
 
 def _kw(prefix: str, *, typed: bool = False, eol: bool = False, quoted: bool = False) -> re.Pattern[str]:
@@ -162,6 +165,14 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("ikev2-pre-shared-key",
      _kw(r"\bpre-shared-key[ \t]+(?:(?:local|remote)(?:[ \t]+[0-9])?"
          r"|address[ \t]+\S{1,64}[ \t]+key(?:[ \t]+[0-9])?)"), _R),
+    # Keyring `pre-shared-key [0|6] <secret>`, ASA `ikev1|ikev2 ... pre-shared-key <secret>` and IKEv2
+    # profile `pre-share key <secret>`: the secret ends the line (keeps "pre-shared-key mismatch on ..."),
+    # and the Junos / PAN-OS / `local|remote|address` forms keep their own rules.
+    ("pre-shared-key-bare",
+     re.compile(rf"(?m)\b((?:pre-shared-key(?![ \t]+(?:local|remote|address|ascii-text|hexadecimal|key)"
+                rf"(?![^\s;]))|pre-share[ \t]+key)(?:[ \t]+[0-9])?)[ \t]+(?!{_NOT_SECRET}){_TOK}"
+                r"(?=[ \t\r]*$)", re.IGNORECASE), _R),
+    ("nhrp-authentication", _kw(r"\b(?:ip|ipv6)[ \t]+nhrp[ \t]+authentication", eol=True), _R),
     ("key-string", _kw(r"\bkey-string(?:[ \t]+[0-9])?"), _R),
     ("snmp-server-host-community",
      re.compile(r"\b(snmp-server[ \t]+host[ \t]+\S{1,64}(?:[ \t]+vrf[ \t]+\S{1,32})?(?:[ \t]+(?:traps|informs))?"

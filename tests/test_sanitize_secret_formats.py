@@ -139,6 +139,12 @@ FORMATS: list[tuple[str, str, str]] = [
     ("aes1-hash-anywhere", "value $aes1$AQDhashPart0123456789=$HashSecondPartAbCd0123456789==",
      "HashSecondPartAbCd0123456789"),
     ("aes-hash-anywhere", "value $aes$HashAesPlainPart0123456789", "HashAesPlainPart0123456789"),
+    # IKEv2 keyring / ASA / DMVPN.
+    ("psk-bare", "pre-shared-key BareIkePskX1", "BareIkePskX1"),
+    ("psk-type6", "pre-shared-key 6 AesTypeSixBlobX1", "AesTypeSixBlobX1"),
+    ("psk-asa-ikev1", "ikev1 pre-shared-key AsaIkev1PskX", "AsaIkev1PskX"),
+    ("psk-asa-ikev2", "ikev2 remote-authentication pre-shared-key AsaIkev2PskX", "AsaIkev2PskX"),
+    ("nhrp-authentication", "ip nhrp authentication NhrpKey1", "NhrpKey1"),
     ("kv-psk", "psk=EqPskValueX1 ssid=corp", "EqPskValueX1"),
 ]
 

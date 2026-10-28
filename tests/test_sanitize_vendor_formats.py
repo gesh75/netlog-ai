@@ -52,6 +52,15 @@ EXACT: list[tuple[str, str]] = [
     ('set / system snmp access-group G community-entry E1 community "X1y2Z3"',
      f"set / system snmp access-group G community-entry E1 community {R}"),
     ("hash $aes1$AQDabcdef0123456789=$GhIjKlMnOp0123456789== end", "hash <REDACTED-HASH> end"),
+    # IKEv2 / ASA / DMVPN.
+    ("pre-shared-key MyVpnSecret", f"pre-shared-key {R}"),
+    ("pre-shared-key 6 AesBlobX1", f"pre-shared-key 6 {R}"),
+    ("ikev1 pre-shared-key X1y2Z3", f"ikev1 pre-shared-key {R}"),
+    ("pre-shared-key local 0 X1y2Z3", f"pre-shared-key local 0 {R}"),
+    ("pre-shared-key address 192.0.2.9 key X1y2Z3", f"pre-shared-key address 192.0.2.9 key {R}"),
+    ('pre-shared-key ascii-text "X1y2Z3";', f'pre-shared-key ascii-text "{R}";'),
+    ("pre-shared-key hexadecimal 0123456789abcdef0123;", f'pre-shared-key hexadecimal "{R}";'),
+    ("ip nhrp authentication NhrpKey1", f"ip nhrp authentication {R}"),
 ]
 
 
@@ -73,6 +82,10 @@ BENIGN = [
     "no ip ospf message-digest-key 7",
     "ntp trusted-key 7",
     "ntp authentication-key 7",
+    # prose and logs
+    "pre-shared-key authentication enabled for peer 192.0.2.1",
+    "IKE: using pre-shared-key on both peers",
+    "no ip nhrp authentication",
     # wireless without a key
     "security wpa psk set-key",
     "wlan corp 1 corp\n security wpa akm psk",
