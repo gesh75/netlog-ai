@@ -177,6 +177,10 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     # set-key ascii <type> KEY <wlan-id>`, autonomous AP `wpa-psk ascii [type] KEY`.
     ("wpa-psk",
      _kw(r"\b(?:psk[ \t]+set-key|wpa-psk)[ \t]+(?:ascii|hex)(?:[ \t]+[0-9])?", quoted=True), _R),
+    ("srl-secret-key", _kw(r"(?<![\w-])secret-key", quoted=True), _R),
+    ("srl-community-entry",
+     re.compile(rf"((?<![\w-])community-entry[ \t]+\S{{1,64}}(?:[ \t]*\{{)?[ \t\r\n]{{0,40}}"
+                rf"(?<![\w-])community)[ \t]+{_QTOK}", re.IGNORECASE), _R),
     # ── Tokens, headers, URLs, key=value pairs ───────────────────────────
     ("http-authorization",
      re.compile(r"""\b(authorization["']?[ \t]*[:=][ \t]*["']?(?:(?:bearer|basic|token|negotiate)[ \t]+)?)"""
@@ -204,9 +208,9 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
                 r"|sk-(?:ant-|proj-)[A-Za-z0-9_-]{20,200}|sk-[A-Za-z0-9]{32,200}"
                 r"|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})(?![A-Za-z0-9_-])"),
      "<REDACTED-TOKEN>"),
-    # Modular-crypt hashes ($1$ md5, $5$/$6$ sha, $8$/$9$ Cisco, $y$ yescrypt, ...) anywhere.
+    # Modular-crypt hashes ($1$ md5, $5$/$6$ sha, $8$/$9$ Cisco, $y$ yescrypt, $aes1$ SR Linux, ...) anywhere.
     ("crypt-hash",
-     re.compile(r"(?<![\w$])\$(?:1|5|6|7|8|9|y|2[abxy])\$[A-Za-z0-9./$=,+-]{6,}"),
+     re.compile(r"(?<![\w$])\$(?:aes1?|1|5|6|7|8|9|y|2[abxy])\$[A-Za-z0-9./$=,+-]{6,}"),
      "<REDACTED-HASH>"),
 ]
 

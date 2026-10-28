@@ -42,6 +42,16 @@ EXACT: list[tuple[str, str]] = [
     ("security wpa psk set-key hex 0 0123456789abcdef", f"security wpa psk set-key hex 0 {R}"),
     ("config wlan security wpa akm psk set-key ascii 1 MyWifiPSK 3", f"config wlan security wpa akm psk set-key ascii 1 {R} 3"),
     ("psk=MyWifiPSK&x=1", f"psk={R}&x=1"),
+    # Nokia SR Linux.
+    ('secret-key "X1y2Z3"', f"secret-key {R}"),
+    ("secret-key X1y2Z3", f"secret-key {R}"),
+    ("secret-key $aes1$AQDabcdef0123456789=$GhIjKlMnOp0123456789==", f"secret-key {R}"),
+    ('set / system aaa server-group G server 192.0.2.1 tacacs secret-key "X1y2Z3"',
+     f"set / system aaa server-group G server 192.0.2.1 tacacs secret-key {R}"),
+    ("community-entry E1 {\n    community X1y2Z3\n}", f"community-entry E1 {{\n    community {R}\n}}"),
+    ('set / system snmp access-group G community-entry E1 community "X1y2Z3"',
+     f"set / system snmp access-group G community-entry E1 community {R}"),
+    ("hash $aes1$AQDabcdef0123456789=$GhIjKlMnOp0123456789== end", "hash <REDACTED-HASH> end"),
 ]
 
 
