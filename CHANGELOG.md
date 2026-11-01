@@ -6,6 +6,13 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Security
+
+- **Web:** the SSE live tail no longer accepts the API token in the URL (`?token=`), where request-line
+  logs (dev server, reverse proxy) recorded it. The dashboard now reads the stream with `fetch()` and
+  sends the token as `Authorization: Bearer`, like every other `/api/*` call. Clients that passed
+  `?token=` must send the header instead.
+
 ## [2.2.0] - 2026-10-25
 
 **Hardening release.** Security, privacy, reliability and correctness fixes from a full review of v2.1.0
