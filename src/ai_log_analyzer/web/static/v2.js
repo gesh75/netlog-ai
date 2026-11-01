@@ -5,7 +5,7 @@
 // audit log. Zero-build vanilla JS; every dynamic string goes through
 // textContent (via app.js's el()) so nothing from the API is parsed as HTML.
 //
-// Loaded BEFORE app.js: the fetch/EventSource wrappers below must be in place
+// Loaded BEFORE app.js: the fetch wrapper below must be in place
 // before app.js makes its first /api call. Helpers from app.js ($, el, clear,
 // codeBlock, sevBadge, toast) are only used inside functions that run later.
 
@@ -51,19 +51,6 @@ const NV2 = (() => {
     }
     return resp;
   };
-
-  // EventSource cannot send headers: the live tail accepts ?token= instead.
-  const OrigES = window.EventSource;
-  if (OrigES) {
-    window.EventSource = class extends OrigES {
-      constructor(url, cfg) {
-        const tok = token();
-        let u = String(url);
-        if (tok && isApi(u)) u += `${u.includes("?") ? "&" : "?"}token=${encodeURIComponent(tok)}`;
-        super(u, cfg);
-      }
-    };
-  }
 
   // ── small helpers ─────────────────────────────────────────────────────────
   const chipText = (id, text) => {

@@ -321,14 +321,13 @@ def _check_auth_config() -> bool:
     return enabled
 
 
-def current_principal(allow_query_token: bool = False) -> rbac.Principal | None:
+def current_principal() -> rbac.Principal | None:
     """The authenticated principal for this request.
 
-    Tokens come from headers. ``?token=`` is accepted only where a browser
-    cannot set headers (the SSE live tail), since URLs end up in proxy logs.
+    Tokens come from headers only, never the query string: URLs end up in
+    proxy and access logs.
     """
-    token = _token_supplied() or (request.args.get("token", "") if allow_query_token else "")
-    return rbac.authenticate(token, API_TOKEN)
+    return rbac.authenticate(_token_supplied(), API_TOKEN)
 
 
 def require_role(role: str, audit_action: str | None = None,
@@ -376,9 +375,9 @@ def require_role(role: str, audit_action: str | None = None,
     return deco
 
 
-def _audit_auth_failure(allow_query_token: bool = False) -> None:
+def _audit_auth_failure() -> None:
     """Audit a 401 (rate-limited per source address: anyone can generate these)."""
-    supplied = bool(_token_supplied() or (allow_query_token and request.args.get("token")))
+    supplied = bool(_token_supplied())
     audit.record_throttled(
         "authn.failed", key=_remote(), target=request.path, outcome="unauthorized",
         actor=audit.Actor("unknown", "none", _remote()),
@@ -1252,12 +1251,13 @@ def create_app() -> Flask:
         """Server-Sent Events stream of classified events from a syslog source.
 
         Zero-dependency real time: EventSource in the browser, chunked
-        response here — no websocket stack. EventSource cannot set request
-        headers, so on tokened deployments pass ?token=<API token>.
+        response here — no websocket stack. The token goes in a header like
+        every other route (the dashboard reads the stream with fetch(), since
+        EventSource cannot set headers); it is never accepted in the URL.
         Optional ?min_severity=critical|high|medium|low filters server-side.
         """
-        if rbac.auth_enabled(API_TOKEN) and current_principal(allow_query_token=True) is None:
-            _audit_auth_failure(allow_query_token=True)
+        if rbac.auth_enabled(API_TOKEN) and current_principal() is None:
+            _audit_auth_failure()
             abort(401)   # any role may watch the live tail
         src = source_manager.get(source_id)
         if src is None:
