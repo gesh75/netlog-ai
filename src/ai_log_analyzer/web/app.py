@@ -4,11 +4,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Auto-load env from (in priority order): local .env, ~/.env, sibling network-tool .env.
+# Auto-load env from (in priority order): local .env, ~/.env, sibling lab-tool .env.
 # Loaded BEFORE any other ai_log_analyzer imports so llm.py picks up the keys.
 try:
     from dotenv import load_dotenv
-    _here = Path(__file__).resolve().parents[3]  # AI_Log_Analyzer/
+    _here = Path(__file__).resolve().parents[3]
     _candidates = [
         _here / ".env",
         Path.home() / ".env",
@@ -671,11 +671,11 @@ def create_app() -> Flask:
             "devices": network_tool.list_devices(),
         })
 
-    # ── Real-config samples (Junos / EOS production gear — sanitized) ─────
+    # ── Synthetic demo samples (Junos / EOS) ──────────────────────────────
     @app.route("/api/samples", methods=["GET"])
     @require_role("viewer")
     def api_samples():
-        """List available sanitized real-device sample configs (no server paths)."""
+        """List available synthetic demo sample configs (no server paths)."""
         manifest_path = SAMPLES_DIR / "_manifest.json"
         if not manifest_path.is_file():
             return jsonify({"samples": []})
@@ -1111,13 +1111,13 @@ def create_app() -> Flask:
         webhooks.notify_analysis(result_dict, source)
         return jsonify(result_dict)
 
-    # ── Live CLI execution: network-tool SSH first, docker-exec fallback ──
+    # ── Live CLI execution: lab network-tool SSH first, docker-exec fallback ──
     @app.route("/api/run", methods=["POST"])
     @require_role("admin", "run.command", _body_fields("hostname", "command", "raw"))
     def api_run():
         """Execute a CLI command on a lab device.
 
-        Path 1: POST through network-tool SSH proxy at :5757.
+        Path 1: POST through the lab network-tool SSH proxy at :5757.
         Path 2 (fallback): `docker exec <container>` directly — used for FRR
         lab containers when SSH proxy is unavailable or errors out.
         """
@@ -1148,7 +1148,7 @@ def create_app() -> Flask:
 
         return jsonify({
             "error": "Could not execute — SSH proxy down and no docker-exec fallback for this host",
-            "hint": ("Fix network-tool SSH key path, or use a known lab container name with "
+            "hint": ("Fix the lab network-tool SSH key path, or use a known lab container name with "
                      "DOCKER_EXEC_FALLBACK=true"),
         }), 503
 
@@ -1193,15 +1193,15 @@ def create_app() -> Flask:
 
         running_config = config_override
         if not running_config:
-            # fetch_running_config() tries network-tool first, then falls
+            # fetch_running_config() tries the lab network tool first, then falls
             # back to `docker exec` for FRR lab containers. Don't 503 here
             # just because the SSH proxy is down — let the FRR fallback run.
             running_config = network_tool.fetch_running_config(hostname, platform=platform)
             if not running_config:
                 return jsonify({
                     "error": f"Could not fetch running config from {hostname}",
-                    "hint": ("Provide 'running_config' in the body, or start "
-                             "network-tool at :5757 / use a FRR lab container."),
+                    "hint": ("Provide 'running_config' in the body, or start the "
+                             "lab network tool at :5757 / use a FRR lab container."),
                 }), 502
 
         if not llm.get_state()["enabled"]:

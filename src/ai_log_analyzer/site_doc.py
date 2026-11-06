@@ -1274,7 +1274,7 @@ def _appendices(profiles: list[DeviceProfile]) -> list[str]:
     out.append("### Appendix D: Tooling & Data Provenance")
     out.append("")
     out.append("- AI Log Analyzer (this tool)")
-    out.append("- Sanitized config bundle: `sites/AI_Log_Analyzer/sites/`")
+    out.append("- Sanitized config bundle: `sites/`")
     out.append("- LLM provider: configurable runtime (Ollama / Docker Model Runner / Anthropic)")
     out.append("- Compliance engine: 9 built-in rules (SSHv2, telnet-banned, NTP-redundancy, etc.)")
     return out

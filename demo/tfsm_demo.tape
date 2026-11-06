@@ -1,6 +1,6 @@
 # VHS tape — records netlog-ai's new tfsm_fire auto-detect parser in action.
 #
-# Run:  cd sites/netlog-ai && vhs demo/tfsm_demo.tape
+# Run:  vhs demo/tfsm_demo.tape
 #
 # Produces:
 #   demo/tfsm_demo.mp4   — 1280×800, ~45s, suitable for LinkedIn/YouTube

@@ -1,4 +1,4 @@
-"""Build a netlog-ai site bundle from the local docker-based lab FRR lab.
+"""Build a netlog-ai site bundle from a local docker-based FRR lab.
 
 Reads the 10 frr.conf files under network-lab/configs/, sanitizes them, and
 writes sites/lab-mesh/ with one .txt per device + manifest.json.
@@ -6,7 +6,7 @@ writes sites/lab-mesh/ with one .txt per device + manifest.json.
 Mapping mirrors network-lab/docker-compose.yml container_name -> ./configs/<dir>.
 
 Usage:
-    python scripts/import_dcn_lab.py
+    python scripts/import_lab_mesh.py
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ def main() -> int:
     SITES_DIR.mkdir(parents=True, exist_ok=True)
     manifest_devices: list[dict] = []
 
-    print(f"Importing {len(FABRIC)} lab lab nodes -> {SITES_DIR}")
+    print(f"Importing {len(FABRIC)} lab-mesh nodes -> {SITES_DIR}")
     for node in FABRIC:
         src = LAB_CONFIGS_DIR / node.config_dir / "frr.conf"
         if not src.is_file():

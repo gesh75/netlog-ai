@@ -1,0 +1,69 @@
+! Synthetic Arista EOS switch sample — fully fictional, for netlog-ai demos only.
+! device: lab-sw-02 (DCS-7050, EOS-4.30)
+!
+hostname lab-sw-02
+ip domain-name example.com
+ip name-server 10.0.0.10
+!
+enable password sha512 $6$REDACTED$REDACTED
+!
+username netadmin privilege 15 role network-admin nopassword
+username netadmin ssh-key ssh-rsa REDACTED admin@example.com
+username labops privilege 1 role network-operator nopassword
+username labops ssh-key ssh-ed25519 REDACTED audit@example.com
+!
+spanning-tree mode mstp
+!
+ntp server 10.0.0.10 prefer
+ntp server 10.0.0.11
+!
+snmp-server community REDACTED ro 10.0.0.0/24
+snmp-server location lab
+snmp-server host 10.0.0.50 version 2c REDACTED
+!
+logging host 10.0.0.50
+!
+vlan 10
+   name users
+!
+vlan 20
+   name servers
+!
+interface Management1
+   ip address 10.0.0.42/24
+!
+interface Ethernet1
+   description uplink to lab-rt-02
+   switchport mode trunk
+   switchport trunk allowed vlan 10,20
+!
+interface Ethernet2
+   description access users
+   switchport mode access
+   switchport access vlan 10
+   spanning-tree portfast
+!
+interface Ethernet3
+   description access servers
+   switchport mode access
+   switchport access vlan 20
+!
+interface Vlan10
+   ip address 10.0.10.253/24
+!
+interface Vlan20
+   ip address 10.0.20.253/24
+!
+ip routing
+!
+router bgp 64512
+   router-id 10.0.0.42
+   neighbor 10.0.255.2 remote-as 64512
+   neighbor 10.0.255.2 description lab-rt-02 iBGP
+   !
+   address-family ipv4
+      neighbor 10.0.255.2 activate
+      network 10.0.10.0/24
+      network 10.0.20.0/24
+!
+end

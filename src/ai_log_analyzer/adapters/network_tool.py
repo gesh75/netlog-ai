@@ -1,4 +1,4 @@
-"""network-tool adapter — bridges to the SSH proxy at localhost:5757.
+"""Lab network-tool adapter — bridges to the SSH proxy at localhost:5757.
 
 The network tool exposes:
   POST /api/run       — body {hostname, raw} → SSH-exec output
@@ -7,8 +7,7 @@ This adapter wraps that with a small typed interface so the analyzer can run
 CLI commands live against the lab containers.
 
 Includes a `docker exec` fallback for FRR lab containers — used when the
-network-tool SSH proxy is unavailable or has a config issue (e.g. missing
-SSH key path).
+SSH proxy is unavailable or has a config issue (e.g. missing SSH key path).
 """
 from __future__ import annotations
 
@@ -44,7 +43,7 @@ class CommandResult:
 
 
 def is_available(timeout: float = 2.0) -> bool:
-    """Probe the network-tool — returns True if the backend is reachable."""
+    """Probe the lab network tool — returns True if the backend is reachable."""
     try:
         r = requests.get(f"{NETWORK_TOOL_URL.rstrip('/')}/api/devices", timeout=timeout)
         return r.status_code == 200
@@ -112,7 +111,7 @@ def fetch_running_config(hostname: str, platform: str = "frr", timeout: float = 
     """Fetch the running-config for a device.
 
     Strategy:
-      1. Try the network-tool SSH proxy at :5757
+      1. Try the lab network-tool SSH proxy at :5757
       2. If platform is FRR and (1) fails, fall back to `docker exec <container> vtysh ...`
     """
     cmd_map = {
@@ -175,7 +174,7 @@ def parse_output(result: CommandResult, filter_hint: str | None = None,
 
 
 def container_run(container: str, command: list[str], timeout: float = 30.0) -> CommandResult:
-    """Run a command inside a docker container directly. Bypasses network-tool.
+    """Run a command inside a docker container directly. Bypasses the lab network tool.
 
     `command` is a list of argv tokens (no shell). Safe by construction.
 

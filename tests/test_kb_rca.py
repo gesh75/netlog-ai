@@ -1,4 +1,4 @@
-"""Tests for lab _AI_KB RCA enrichment merged into kb.py (Item 2)."""
+"""Tests for RCA enrichment merged into kb.py."""
 from __future__ import annotations
 
 import pytest
@@ -51,8 +51,8 @@ def test_hardware_chassis_subpattern_matches() -> None:
 
 
 @pytest.mark.unit
-def test_rca_block_has_dcn_fields() -> None:
-    """BGP routing entry must expose all 6 lab RCA fields, with non-empty lists."""
+def test_rca_block_has_required_fields() -> None:
+    """BGP routing entry must expose all 6 RCA fields, with non-empty lists."""
     e = kb.lookup("routing", "bgp peer down")
     assert "rca" in e, "BGP entry must have an 'rca' block"
     rca = e["rca"]

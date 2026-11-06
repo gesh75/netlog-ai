@@ -1,0 +1,144 @@
+# Synthetic Juniper MX sample — fully fictional, for netlog-ai demos only.
+version 21.4R3;
+system {
+    host-name lab-rt-01;
+    domain-name example.com;
+    time-zone UTC;
+    root-authentication {
+        encrypted-password "$6$REDACTED$REDACTED";
+    }
+    login {
+        user netadmin {
+            uid 2000;
+            class super-user;
+            authentication {
+                ssh-rsa "ssh-rsa REDACTED admin@example.com";
+            }
+        }
+    }
+    services {
+        ssh {
+            root-login deny;
+        }
+        netconf {
+            ssh;
+        }
+    }
+    syslog {
+        host 10.0.0.50 any info;
+    }
+    ntp {
+        server 10.0.0.10;
+    }
+}
+interfaces {
+    et-0/0/0 {
+        description "core uplink-a";
+        mtu 9216;
+        unit 0 {
+            family inet {
+                address 10.0.10.1/30;
+            }
+        }
+    }
+    et-0/0/1 {
+        description "core uplink-b";
+        mtu 9216;
+        unit 0 {
+            family inet {
+                address 10.0.10.5/30;
+            }
+        }
+    }
+    ge-1/0/0 {
+        description "edge downlink";
+        unit 0 {
+            family inet {
+                address 10.0.20.1/30;
+            }
+        }
+    }
+    ge-1/0/1 {
+        description "documentation WAN";
+        unit 0 {
+            family inet {
+                address 203.0.113.2/30;
+            }
+        }
+    }
+    lo0 {
+        unit 0 {
+            family inet {
+                address 10.0.255.1/32;
+            }
+        }
+    }
+    fxp0 {
+        unit 0 {
+            family inet {
+                address 10.0.0.31/24;
+            }
+        }
+    }
+}
+routing-options {
+    autonomous-system 64512;
+    router-id 10.0.255.1;
+}
+protocols {
+    ospf {
+        area 0.0.0.0 {
+            interface et-0/0/0.0 {
+                hello-interval 5;
+                dead-interval 20;
+            }
+            interface et-0/0/1.0;
+            interface lo0.0 {
+                passive;
+            }
+        }
+    }
+    bgp {
+        group core-ibgp {
+            type internal;
+            local-address 10.0.255.1;
+            neighbor 10.0.255.2 {
+                description "lab-rt-02 iBGP";
+            }
+        }
+        group edge-ebgp {
+            type external;
+            peer-as 64515;
+            neighbor 203.0.113.1 {
+                description "lab transit C";
+                authentication-key "REDACTED";
+            }
+        }
+    }
+    lldp {
+        interface all;
+    }
+}
+policy-options {
+    policy-statement advertise-lab {
+        term rfc5737 {
+            from {
+                route-filter 192.0.2.0/24 exact;
+                route-filter 198.51.100.0/24 exact;
+                route-filter 203.0.113.0/24 exact;
+            }
+            then accept;
+        }
+        term reject-rest {
+            then reject;
+        }
+    }
+}
+snmp {
+    community REDACTED {
+        authorization read-only;
+        clients {
+            10.0.0.0/24;
+        }
+    }
+}

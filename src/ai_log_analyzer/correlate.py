@@ -1,8 +1,7 @@
 """Cross-source device correlation.
 
-Generalizes the lab "device appears in Kibana AND LibreNMS" intersection
-(log-intelligence/app.py:1778-1815) to N netlog-ai sources. A device that
-surfaces actionable (>= medium) events from >=2 distinct sources is `confirmed`
+A device that surfaces actionable (>= medium) events from >=2 distinct sources
+(for example Kibana and LibreNMS both reporting the same host) is `confirmed`
 (corroborated by independent telemetry); a device seen in exactly 1 source is
 `suspected` (single-source, may be noise).
 """

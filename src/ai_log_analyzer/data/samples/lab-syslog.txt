@@ -1,0 +1,8 @@
+# Synthetic demo syslog — fully fictional, RFC 5737 / RFC 1918 / private ASNs.
+# Not a device config; shipped so the sample corpus exercises classification.
+Oct 22 10:00:00 lab-rt-01 rpd[2145]: BGP peer 192.0.2.1 (External AS 64513) down
+Oct 22 10:00:01 lab-rt-01 rpd[2145]: RPD_BGP_NEIGHBOR_STATE_CHANGED: BGP peer 192.0.2.1 (External AS 64513) changed state from Established to Idle
+Oct 22 10:00:05 lab-rt-01 rpd[2145]: OSPF neighbor 10.0.10.2 (ge-0/0/0.0) down
+Oct 22 10:00:08 lab-fw-01 kernel[0]: Interface ge-0/0/0 down
+Oct 22 10:00:12 lab-sw-01 dcd[412]: Link-down on ge-0/0/1
+Oct 22 10:00:20 lab-rt-02 Bgp: %BGP-5-ADJCHANGE: neighbor 198.51.100.5 Down - hold timer expired

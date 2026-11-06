@@ -1,4 +1,4 @@
-"""Tests for the network-tool adapter (network-tool bridge)."""
+"""Tests for the lab network-tool adapter."""
 from unittest.mock import MagicMock, patch
 
 import pytest

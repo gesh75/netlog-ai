@@ -6,8 +6,8 @@ so llm.py's module-level _state picks up ANTHROPIC_API_KEY, OLLAMA_MODEL, etc.
 Env search order:
     1. <project>/.env              — lab-local override
     2. ~/.env                      — user-wide secrets
-    3. ../network-tool/.env    — sibling tool (reuse existing lab key)
-    4. ../log-intelligence/.env — sibling intelligence tool
+    3. ../network-tool/.env        — sibling lab network tool (reuse existing lab key)
+    4. ../log-intelligence/.env    — sibling intelligence tool
 
 Set AI_LOG_ANALYZER_DEBUG=1 to trace which .env files were loaded.
 """

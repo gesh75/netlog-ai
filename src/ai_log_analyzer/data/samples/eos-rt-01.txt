@@ -1,0 +1,80 @@
+! Synthetic Arista EOS router sample — fully fictional, for netlog-ai demos only.
+! device: lab-rt-02 (DCS-7280, EOS-4.29)
+!
+hostname lab-rt-02
+ip domain-name example.com
+ip name-server 10.0.0.10
+ip name-server 10.0.0.11
+!
+enable password sha512 $6$REDACTED$REDACTED
+aaa root secret sha512 $6$REDACTED$REDACTED
+!
+username netadmin privilege 15 role network-admin nopassword
+username netadmin ssh-key ssh-rsa REDACTED admin@example.com
+username labops privilege 1 role network-operator nopassword
+username labops ssh-key ssh-ed25519 REDACTED audit@example.com
+!
+service routing protocols model multi-agent
+ip routing
+!
+logging host 10.0.0.50
+logging source-interface Loopback0
+!
+ntp server 10.0.0.10 prefer
+ntp server 10.0.0.11
+!
+snmp-server community REDACTED ro 10.0.0.0/24
+snmp-server location lab
+snmp-server host 10.0.0.50 version 2c REDACTED
+!
+interface Loopback0
+   ip address 10.0.255.2/32
+!
+interface Management1
+   ip address 10.0.0.32/24
+!
+interface Ethernet1
+   description core uplink
+   no switchport
+   mtu 9214
+   ip address 10.0.10.2/30
+!
+interface Ethernet2
+   description documentation WAN
+   no switchport
+   ip address 192.0.2.6/30
+!
+interface Ethernet3
+   description lab peer
+   no switchport
+   ip address 198.51.100.6/30
+!
+ip prefix-list LAB-ORIGINS seq 10 permit 192.0.2.0/24
+ip prefix-list LAB-ORIGINS seq 20 permit 198.51.100.0/24
+ip prefix-list LAB-ORIGINS seq 30 permit 203.0.113.0/24
+!
+route-map LAB-ADV permit 10
+   match ip address prefix-list LAB-ORIGINS
+!
+router bgp 64512
+   router-id 10.0.255.2
+   bgp log-neighbor-changes
+   neighbor 10.0.10.1 remote-as 64512
+   neighbor 10.0.10.1 description lab-rt-01 iBGP
+   neighbor 10.0.10.1 update-source Loopback0
+   neighbor 192.0.2.5 remote-as 64513
+   neighbor 192.0.2.5 description lab transit A
+   neighbor 192.0.2.5 password REDACTED
+   neighbor 198.51.100.5 remote-as 64514
+   neighbor 198.51.100.5 description lab transit B
+   !
+   address-family ipv4
+      network 192.0.2.0/24
+      network 10.0.255.2/32
+      neighbor 10.0.10.1 activate
+      neighbor 192.0.2.5 activate
+      neighbor 192.0.2.5 route-map LAB-ADV out
+      neighbor 198.51.100.5 activate
+      neighbor 198.51.100.5 route-map LAB-ADV out
+!
+end

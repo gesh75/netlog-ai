@@ -1,0 +1,62 @@
+[
+  {
+    "id": "junos-fw-01",
+    "file": "junos-fw-01.txt",
+    "platform": "junos",
+    "function": "firewall (Juniper SRX)",
+    "redacted": 6,
+    "by_rule": {
+      "synthetic-placeholder": 6
+    },
+    "orig_bytes": 3259,
+    "sanitized_bytes": 3259
+  },
+  {
+    "id": "junos-rt-01",
+    "file": "junos-rt-01.txt",
+    "platform": "junos",
+    "function": "router (Juniper MX)",
+    "redacted": 5,
+    "by_rule": {
+      "synthetic-placeholder": 5
+    },
+    "orig_bytes": 2969,
+    "sanitized_bytes": 2969
+  },
+  {
+    "id": "junos-sw-01",
+    "file": "junos-sw-01.txt",
+    "platform": "junos",
+    "function": "switch (Juniper EX)",
+    "redacted": 4,
+    "by_rule": {
+      "synthetic-placeholder": 4
+    },
+    "orig_bytes": 2103,
+    "sanitized_bytes": 2103
+  },
+  {
+    "id": "eos-rt-01",
+    "file": "eos-rt-01.txt",
+    "platform": "eos",
+    "function": "router (Arista EOS)",
+    "redacted": 9,
+    "by_rule": {
+      "synthetic-placeholder": 9
+    },
+    "orig_bytes": 2203,
+    "sanitized_bytes": 2203
+  },
+  {
+    "id": "eos-sw-01",
+    "file": "eos-sw-01.txt",
+    "platform": "eos",
+    "function": "switch (Arista EOS)",
+    "redacted": 6,
+    "by_rule": {
+      "synthetic-placeholder": 6
+    },
+    "orig_bytes": 1537,
+    "sanitized_bytes": 1537
+  }
+]

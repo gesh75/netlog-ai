@@ -9,7 +9,7 @@ Each entry follows the 5-phase incident workflow:
 
 Every action carries platform-specific CLI variants (FRR/Junos/EOS) so the UI
 can render the right command for the device being inspected and execute it
-against the network-tool's SSH proxy.
+against the lab network-tool SSH proxy.
 """
 from __future__ import annotations
 
@@ -947,7 +947,7 @@ _KERNEL_PANIC = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# VPN / IPsec tunnel failure  (lab _AI_KB "vpn" category port)
+# VPN / IPsec tunnel failure
 # ─────────────────────────────────────────────────────────────────────────────
 _VPN_DOWN = {
     "match": r"ike|ipsec|vpn|tunnel",
@@ -1074,7 +1074,7 @@ _VPN_DOWN = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Gateway redundancy — VRRP/HSRP failover  (lab _AI_KB "redundancy" port)
+# Gateway redundancy — VRRP/HSRP failover
 # ─────────────────────────────────────────────────────────────────────────────
 _REDUNDANCY = {
     "match": r"vrrp|hsrp|failover|master.*change",
@@ -1194,7 +1194,7 @@ _REDUNDANCY = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FPC / line card error  (lab _AI_KB "hardware.fpc" sub-entry port)
+# FPC / line card error
 # ─────────────────────────────────────────────────────────────────────────────
 _FPC_ERR = {
     "match": r"fpc.*(?:offline|crash|error|halt|restart)|line.?card",
@@ -1325,7 +1325,7 @@ _FPC_ERR = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chassis environmental alarm  (lab _AI_KB "hardware.chassis" sub-entry port)
+# Chassis environmental alarm
 # ─────────────────────────────────────────────────────────────────────────────
 _CHASSIS_ENV = {
     "match": r"chassis.*alarm|power.*fail|fan.*fail|psu|temperature",

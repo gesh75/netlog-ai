@@ -3,7 +3,7 @@
 #
 # Pipeline:  asciinema rec → .cast file → agg renders frames → ffmpeg → .webm + .gif
 #
-# Run:  cd sites/netlog-ai && bash demo/record_tfsm_demo.sh
+# Run:  bash demo/record_tfsm_demo.sh
 
 set -euo pipefail
 

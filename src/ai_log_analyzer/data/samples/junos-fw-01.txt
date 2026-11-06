@@ -1,0 +1,157 @@
+# Synthetic Juniper SRX sample — fully fictional, for netlog-ai demos only.
+version 21.4R3;
+system {
+    host-name lab-fw-01;
+    domain-name example.com;
+    time-zone UTC;
+    root-authentication {
+        encrypted-password "$6$REDACTED$REDACTED";
+    }
+    login {
+        user netadmin {
+            uid 2000;
+            class super-user;
+            authentication {
+                ssh-rsa "ssh-rsa REDACTED admin@example.com";
+            }
+        }
+        user labops {
+            uid 2001;
+            class read-only;
+            authentication {
+                ssh-ed25519 "ssh-ed25519 REDACTED audit@example.com";
+            }
+        }
+    }
+    services {
+        ssh {
+            root-login deny;
+            protocol-version v2;
+        }
+        netconf {
+            ssh;
+        }
+    }
+    syslog {
+        host 10.0.0.50 {
+            any info;
+        }
+    }
+    ntp {
+        server 10.0.0.10 prefer;
+        server 10.0.0.11;
+    }
+    name-server {
+        10.0.0.10;
+        10.0.0.11;
+    }
+}
+interfaces {
+    ge-0/0/0 {
+        description "WAN upstream A";
+        unit 0 {
+            family inet {
+                address 192.0.2.2/30;
+            }
+        }
+    }
+    ge-0/0/1 {
+        description "WAN upstream B";
+        unit 0 {
+            family inet {
+                address 198.51.100.2/30;
+            }
+        }
+    }
+    ge-0/0/2 {
+        description "LAN trust";
+        unit 0 {
+            family inet {
+                address 10.0.1.1/24;
+            }
+        }
+    }
+    ge-0/0/3 {
+        description "LAN dmz";
+        unit 0 {
+            family inet {
+                address 10.0.2.1/24;
+            }
+        }
+    }
+    fxp0 {
+        unit 0 {
+            family inet {
+                address 10.0.0.21/24;
+            }
+        }
+    }
+}
+routing-options {
+    autonomous-system 64512;
+    router-id 192.0.2.2;
+    static {
+        route 0.0.0.0/0 next-hop 192.0.2.1;
+    }
+}
+protocols {
+    bgp {
+        group upstream-a {
+            type external;
+            peer-as 64513;
+            neighbor 192.0.2.1 {
+                description "lab transit A";
+                authentication-key "REDACTED";
+            }
+        }
+        group upstream-b {
+            type external;
+            peer-as 64514;
+            neighbor 198.51.100.1 {
+                description "lab transit B";
+            }
+        }
+    }
+}
+security {
+    zones {
+        security-zone untrust {
+            interfaces {
+                ge-0/0/0.0;
+                ge-0/0/1.0;
+            }
+        }
+        security-zone trust {
+            interfaces {
+                ge-0/0/2.0;
+            }
+        }
+        security-zone dmz {
+            interfaces {
+                ge-0/0/3.0;
+            }
+        }
+    }
+    policies {
+        from-zone trust to-zone untrust {
+            policy permit-outbound {
+                match {
+                    source-address any;
+                    destination-address any;
+                    application any;
+                }
+                then {
+                    permit;
+                }
+            }
+        }
+    }
+}
+snmp {
+    community REDACTED {
+        authorization read-only;
+        clients {
+            10.0.0.0/24;
+        }
+    }
+}

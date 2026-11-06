@@ -12,6 +12,12 @@ loose semantic versioning.
   logs (dev server, reverse proxy) recorded it. The dashboard now reads the stream with `fetch()` and
   sends the token as `Authorization: Bearer`, like every other `/api/*` call. Clients that passed
   `?token=` must send the header instead.
+- **Public tree:** bundled device samples under `src/ai_log_analyzer/data/samples/` are now small
+  synthetic Junos/EOS configs (RFC 5737 documentation prefixes, RFC 1918, private ASNs). Internal
+  lab-tool names were neutralized (`NETWORK_TOOL_URL`; sibling `.env` paths are `network-tool` /
+  `log-intelligence`). The FRR multi-POP demo site is `lab-mesh`. Removed the closed-source port
+  notes page. A history-rewrite helper lives at `scripts/maintenance/purge_history.sh` (not run
+  by this change).
 
 ## [2.2.0] - 2026-10-25
 
@@ -678,11 +684,11 @@ First PyPI release: `pip install netlog-ai`. Headline features: cross-source cor
 - `tests/test_sources.py` no longer depends on test execution order
   (registry registration is now a per-test fixture). Suite: 237 → 246 tests.
 
-### Added — lab AI Intelligence port (cross-source correlation + per-device triage)
+### Added — correlation, triage, and expanded KB
 
-Four capabilities harvested from the legacy lab AI Intelligence tool and re-targeted
-to netlog-ai's `LogEvent` / `SourceManager` model. Each is exposed three ways: a Python
-library function, an **MCP tool**, and a **web GUI** surface in the **Device** tab.
+Four capabilities added to netlog-ai's `LogEvent` / `SourceManager` model. Each is
+exposed three ways: a Python library function, an **MCP tool**, and a **web GUI**
+surface in the **Device** tab.
 
 - **Cross-source correlation** — `correlate.py` · MCP tool `correlate_sources` ·
   `POST /api/correlate` · Device-tab "🔗 Cross-Source Correlation".
@@ -698,7 +704,7 @@ library function, an **MCP tool**, and a **web GUI** surface in the **Device** t
   BGP errors collapse to one pattern). The `sshd` verdict only fires on real error-grade
   events, so healthy login-only devices are not mislabelled.
 - **Richer root-cause knowledge base** — `kb.py`.
-  Merged the lab `_AI_KB` content (root cause / risk / resolution steps / Junos + EOS CLI)
+  Merged additional RCA content (root cause / risk / resolution steps / Junos + EOS CLI)
   additively into the existing phased entries, plus new `vpn`, `redundancy`, `fpc`, and
   `chassis` categories. Backward compatible — existing KB consumers and tests unaffected.
 - **Expanded classifier patterns** — `classifier.py`.
@@ -729,8 +735,8 @@ library function, an **MCP tool**, and a **web GUI** surface in the **Device** t
 
 ### Reference
 
-- New capabilities and both MCP tools are documented in
-  [`README.md`](README.md), with the connector / MCP /
+- New capabilities and both MCP tools are documented in the README
+  (correlation / triage / expanded KB), with the connector / MCP /
   HTTP surface in [`docs/CONNECTORS.md`](docs/CONNECTORS.md).
 
 ## [0.1.0]

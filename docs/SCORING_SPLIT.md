@@ -65,7 +65,7 @@ as "topology is fine, ops layer is missing."
 | Site | Fabric | Ops | Composite | Tier |
 |---|---|---|---|---|
 | clab-clos-evpn | 80 | 0  | 28 | Tier 2 |
-| lab-mesh        | 80 | 18 | 15 | Tier 1 |
+| lab-mesh       | 80 | 18 | 15 | Tier 1 |
 | lab-alpha      | 80 | 18 | 32 | Tier 1 |
 | lab-bravo      | 80 | 18 | 15 | Tier 1 |
 
