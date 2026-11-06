@@ -1,0 +1,12 @@
+literal:isivkov==>labadmin
+literal:Ilya.Sivkov==>labadmin
+literal:DCN_AI_Intelligence==>log-intelligence
+literal:DCN_Network_Tool==>network-tool
+literal:DCN_TOOL_URL==>NETWORK_TOOL_URL
+literal:DCN-LAB==>LAB-MESH
+literal:dcn-lab==>lab-mesh
+literal:04_Scripts_Tools==>sites
+literal:IXPEER==>LABPEER
+literal:IX_PEER==>LAB_PEER
+regex:\bDCN_AI\b==>legacy
+regex:\bDCN\b==>lab

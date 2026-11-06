@@ -4,70 +4,59 @@
     "file": "junos-fw-01.txt",
     "platform": "junos",
     "function": "firewall (Juniper SRX)",
-    "redacted": 29,
+    "redacted": 6,
     "by_rule": {
-      "junos-encrypted-password": 6,
-      "junos-quoted-encrypted": 4,
-      "junos-authentication-key": 4,
-      "openssh-host-key": 15
+      "synthetic-placeholder": 6
     },
-    "orig_bytes": 97457,
-    "sanitized_bytes": 93758
+    "orig_bytes": 3259,
+    "sanitized_bytes": 3259
   },
   {
     "id": "junos-rt-01",
     "file": "junos-rt-01.txt",
     "platform": "junos",
     "function": "router (Juniper MX)",
-    "redacted": 41,
+    "redacted": 5,
     "by_rule": {
-      "junos-encrypted-password": 12,
-      "junos-quoted-encrypted": 4,
-      "junos-authentication-key": 10,
-      "openssh-host-key": 15
+      "synthetic-placeholder": 5
     },
-    "orig_bytes": 226205,
-    "sanitized_bytes": 222323
+    "orig_bytes": 2969,
+    "sanitized_bytes": 2969
   },
   {
     "id": "junos-sw-01",
     "file": "junos-sw-01.txt",
     "platform": "junos",
     "function": "switch (Juniper EX)",
-    "redacted": 29,
+    "redacted": 4,
     "by_rule": {
-      "junos-encrypted-password": 6,
-      "junos-quoted-encrypted": 4,
-      "junos-authentication-key": 4,
-      "openssh-host-key": 15
+      "synthetic-placeholder": 4
     },
-    "orig_bytes": 54793,
-    "sanitized_bytes": 51094
+    "orig_bytes": 2103,
+    "sanitized_bytes": 2103
   },
   {
     "id": "eos-rt-01",
     "file": "eos-rt-01.txt",
     "platform": "eos",
     "function": "router (Arista EOS)",
-    "redacted": 15,
+    "redacted": 9,
     "by_rule": {
-      "eos-secret-7": 2,
-      "eos-bgp-password": 2,
-      "openssh-host-key": 11
+      "synthetic-placeholder": 9
     },
-    "orig_bytes": 91354,
-    "sanitized_bytes": 89156
+    "orig_bytes": 2203,
+    "sanitized_bytes": 2203
   },
   {
     "id": "eos-sw-01",
     "file": "eos-sw-01.txt",
     "platform": "eos",
     "function": "switch (Arista EOS)",
-    "redacted": 9,
+    "redacted": 6,
     "by_rule": {
-      "openssh-host-key": 9
+      "synthetic-placeholder": 6
     },
-    "orig_bytes": 14987,
-    "sanitized_bytes": 13145
+    "orig_bytes": 1537,
+    "sanitized_bytes": 1537
   }
 ]

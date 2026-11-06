@@ -1,9 +1,8 @@
 """Per-device deep triage.
 
-Ports DCN api_device_deep() (DCN_AI_Intelligence/app.py:2412) error-pattern
-normalization (strip hex addrs / IPs / PIDs, then frequency-dedup) and the
-verdict + health-score chain — re-targeted from Kibana hits to netlog-ai
-LogEvents for a single host.
+Error-pattern normalization (strip hex addrs / IPs / PIDs, then frequency-dedup)
+and the verdict + health-score chain, targeted at netlog-ai LogEvents for a
+single host.
 """
 from __future__ import annotations
 
@@ -13,10 +12,10 @@ from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent
 
-# Raw-severity buckets considered error-grade for pattern dedup (DCN parity).
+# Raw-severity buckets considered error-grade for pattern dedup.
 _ERROR_SEVS: frozenset[str] = frozenset({"err", "error", "crit", "emerg", "alert"})
 
-# Normalization passes (order matters; DCN app.py:2501-2503).
+# Normalization passes (order matters).
 _HEX_RE: re.Pattern[str] = re.compile(r"\b0x[0-9a-fA-F]+\b")
 _PID_RE: re.Pattern[str] = re.compile(r"\[\d+\]")
 _IP_RE: re.Pattern[str]  = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
@@ -24,7 +23,7 @@ _IP_RE: re.Pattern[str]  = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
 
 def normalize_pattern(message: str) -> str:
     """Collapse a log message to a dedup key: 0x.. -> 0xADDR, [123] -> [N],
-    a.b.c.d -> IP, then truncate to 120 chars. (DCN app.py:2501-2504)."""
+    a.b.c.d -> IP, then truncate to 120 chars."""
     key = _HEX_RE.sub("0xADDR", message or "")
     key = _PID_RE.sub("[N]", key)
     key = _IP_RE.sub("IP", key)
@@ -82,7 +81,7 @@ class DeviceTriage:
 def triage_device(hostname: str, events: list[LogEvent]) -> DeviceTriage:
     """Analyze one host's LogEvents into a triage verdict.
 
-    Uses ``ev.severity_raw`` for the DCN-style raw histogram + error dedup, and
+    Uses ``ev.severity_raw`` for the raw histogram + error dedup, and
     ``ev.appname`` as the process. Pure: does not mutate ``events``. Empty input
     yields verdict 'No events found', score 100, issue_type 'info'.
     """
@@ -128,7 +127,7 @@ def triage_device(hostname: str, events: list[LogEvent]) -> DeviceTriage:
 
     top_process: str = processes[0]["process"] if processes else "unknown"
 
-    # ── Error pattern deduplication (DCN app.py:2496-2511) ──────────────────
+    # ── Error pattern deduplication ─────────────────────────────────────────
     pattern_acc: dict[str, dict[str, Any]] = {}
     error_apps: set[str] = set()
     for ev in events:
@@ -154,7 +153,7 @@ def triage_device(hostname: str, events: list[LogEvent]) -> DeviceTriage:
         reverse=True,
     )[:20]
 
-    # ── Health score (DCN app.py:2524-2528) ─────────────────────────────────
+    # ── Health score ────────────────────────────────────────────────────────
     crit_count = (
         sev_dist.get("crit", 0)
         + sev_dist.get("emerg", 0)
@@ -169,7 +168,7 @@ def triage_device(hostname: str, events: list[LogEvent]) -> DeviceTriage:
     score -= min(warn_count // 500 * 2, 10)
     score = max(0, score)
 
-    # ── Verdict chain (DCN app.py:2530-2560) — evaluated in exact order ─────
+    # ── Verdict chain — evaluated in exact order ────────────────────────────
     top_pat: str = patterns[0]["pattern"].lower() if patterns else ""
 
     if (

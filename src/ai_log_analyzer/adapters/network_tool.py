@@ -1,4 +1,4 @@
-"""DCN_Network_Tool adapter — bridges to the SSH proxy at localhost:5757.
+"""Lab network-tool adapter — bridges to the SSH proxy at localhost:5757.
 
 The network tool exposes:
   POST /api/run       — body {hostname, raw} → SSH-exec output
@@ -7,8 +7,7 @@ This adapter wraps that with a small typed interface so the analyzer can run
 CLI commands live against the lab containers.
 
 Includes a `docker exec` fallback for FRR lab containers — used when the
-DCN_Network_Tool SSH proxy is unavailable or has a config issue (e.g. missing
-SSH key path).
+SSH proxy is unavailable or has a config issue (e.g. missing SSH key path).
 """
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ from dataclasses import dataclass
 
 import requests
 
-DCN_TOOL_URL = os.environ.get("DCN_TOOL_URL", "http://localhost:5757")
+NETWORK_TOOL_URL = os.environ.get("NETWORK_TOOL_URL", "http://localhost:5757")
 # Off by default: the docker-exec fallback runs commands inside lab containers via the host's Docker
 # socket, so it is opt-in (DOCKER_EXEC_FALLBACK=true).
 DOCKER_EXEC_FALLBACK = os.environ.get("DOCKER_EXEC_FALLBACK", "false").lower() == "true"
@@ -44,9 +43,9 @@ class CommandResult:
 
 
 def is_available(timeout: float = 2.0) -> bool:
-    """Probe the DCN_Network_Tool — returns True if the backend is reachable."""
+    """Probe the lab network tool — returns True if the backend is reachable."""
     try:
-        r = requests.get(f"{DCN_TOOL_URL.rstrip('/')}/api/devices", timeout=timeout)
+        r = requests.get(f"{NETWORK_TOOL_URL.rstrip('/')}/api/devices", timeout=timeout)
         return r.status_code == 200
     except requests.RequestException:
         return False
@@ -55,7 +54,7 @@ def is_available(timeout: float = 2.0) -> bool:
 def list_devices(timeout: float = 5.0) -> list[dict]:
     """Return the device inventory exposed by the network tool."""
     try:
-        r = requests.get(f"{DCN_TOOL_URL.rstrip('/')}/api/devices", timeout=timeout)
+        r = requests.get(f"{NETWORK_TOOL_URL.rstrip('/')}/api/devices", timeout=timeout)
         if r.status_code == 200:
             data = r.json()
             # Network-tool returns either a list or {devices: [...]}
@@ -75,7 +74,7 @@ def run_command(hostname: str, command: str, timeout: float = 30.0) -> CommandRe
                              output="", error="Empty command")
     try:
         r = requests.post(
-            f"{DCN_TOOL_URL.rstrip('/')}/api/run",
+            f"{NETWORK_TOOL_URL.rstrip('/')}/api/run",
             json={"hostname": hostname, "raw": command},
             timeout=timeout,
         )
@@ -112,7 +111,7 @@ def fetch_running_config(hostname: str, platform: str = "frr", timeout: float = 
     """Fetch the running-config for a device.
 
     Strategy:
-      1. Try the DCN_Network_Tool SSH proxy at :5757
+      1. Try the lab network-tool SSH proxy at :5757
       2. If platform is FRR and (1) fails, fall back to `docker exec <container> vtysh ...`
     """
     cmd_map = {
@@ -175,7 +174,7 @@ def parse_output(result: CommandResult, filter_hint: str | None = None,
 
 
 def container_run(container: str, command: list[str], timeout: float = 30.0) -> CommandResult:
-    """Run a command inside a docker container directly. Bypasses DCN_Network_Tool.
+    """Run a command inside a docker container directly. Bypasses the lab network tool.
 
     `command` is a list of argv tokens (no shell). Safe by construction.
 

@@ -540,7 +540,7 @@ def _layers_for_edge(edge: Edge, src: Node | None, dst: Node | None) -> list[str
 def apply_manifest_metadata(topo: Topology, manifest: dict) -> Topology:
     """Enrich nodes with `tier`, `pop`, `rack`, `asn` from the bundle manifest.
 
-    Different bundles annotate their devices differently — DCN-LAB uses
+    Different bundles annotate their devices differently — LAB-MESH uses
     `role` (core/edge/dist) + `pop`, CLAB-CLOS-EVPN uses `role` (spine/leaf)
     + `rack`. We normalize both into the same Node fields so the renderer
     has a single contract.

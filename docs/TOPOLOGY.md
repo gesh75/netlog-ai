@@ -47,7 +47,7 @@ position; **Reset Layout** clears the pins and reruns ELK from scratch.
 
 When a manifest declares POPs/regions per device, `Group by POP` wraps each
 POP in a compound rectangle and uses `box` packing at the root with
-`layered DOWN` inside each POP — so DCN-LAB shows DE-FRA · UK-LON · NL-AMS ·
+`layered DOWN` inside each POP — so LAB-MESH shows DE-FRA · UK-LON · NL-AMS ·
 EU-CDG · US-NYC as side-by-side clusters.
 
 Tier hierarchy (top→bottom) is honored via ELK partitioning:

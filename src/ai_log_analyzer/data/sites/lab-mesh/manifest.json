@@ -1,5 +1,5 @@
 {
-  "site": "DCN-LAB",
+  "site": "LAB-MESH",
   "vendor": "frr",
   "topology": "Multi-region FRR lab \u2014 5 core + 3 edge + 2 dist across DE-FRA/UK-LON/NL-AMS/US-NYC, eBGP full mesh + OSPF area 0",
   "fabric": "multi-region-ebgp",

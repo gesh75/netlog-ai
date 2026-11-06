@@ -323,7 +323,7 @@ Four **fully synthetic** site bundles ship in `sites/` so you can exercise every
 | `lab-alpha` | 5 (2 SRX HA pair + 1 MX router + 2 EOS switches) | Junos + EOS | Cross-vendor edge, chassis-cluster, MLAG |
 | `lab-bravo` | 6 (1 SRX firewall + 2 MX spines + 3 EX leaves) | Junos | Spine/leaf fabric, iBGP full mesh |
 | `clab-clos-evpn` | 9 (3 spines + 6 leaves) | **Nokia SRL + Arista cEOS + FRR** | Mixed-vendor Clos EVPN-VXLAN fabric, L2/L3 VNIs, route reflectors |
-| `dcn-lab` | 10 (5 cores + 3 edges + 2 dists) | FRR | Multi-POP backbone (DE-FRA · UK-LON · NL-AMS · US-NYC), eBGP + OSPF area 0 |
+| `lab-mesh` | 10 (5 cores + 3 edges + 2 dists) | FRR | Multi-POP backbone (DE-FRA · UK-LON · NL-AMS · US-NYC), eBGP + OSPF area 0 |
 
 Each bundle includes intentional configuration gaps (missing BFD, no LLDP on some access switches, IoT VLAN without an L3 interface) so the analyzer's deep-analysis pipeline produces concrete, actionable findings.
 
@@ -379,16 +379,12 @@ See [`docs/TFSM_AUTO_PARSER.md`](docs/TFSM_AUTO_PARSER.md) for the API, scoring 
 and filter-hint reference. The full WebM video is [`demo/tfsm_demo.webm`](demo/tfsm_demo.webm)
 (19s, 311 KB) and the recording is reproducible via [`demo/record_tfsm_demo.sh`](demo/record_tfsm_demo.sh).
 
-## DCN AI port — correlation, triage, and expanded KB (2026-06-02)
-
-Four capabilities backfilled from the closed-source DCN AI Intelligence Center:
+## Correlation, triage, and expanded KB (2026-06-02)
 
 - **Multi-source correlation** — `correlate_sources` MCP tool classifies events from every registered source and tags each device `confirmed` (seen in ≥ 2 independent sources) or `suspected` (1 source only). Eliminates single-source noise before escalation.
 - **Richer RCA KB** — every KB entry (`bgp`, `ospf`, `interface`, `lag`, `hardware`, `compliance`, `security`, `system`) now carries a structured `rca` block: numbered root-cause list, risk sentence, ordered resolution steps, and copy-pastable Junos / EOS CLI commands. Two new categories added: `vpn` (IKE/IPsec failure) and `redundancy` (VRRP/HSRP failover); `hardware` extended with `fpc` (line-card errors) and `chassis` (PSU/fan/temperature alarms).
 - **Expanded classifier patterns** — `inetd|xinetd|ftpd` added as a low-severity `system` pattern, positioned after all high-severity patterns so first-match-wins is preserved. Three new unit tests confirm matching and priority ordering.
 - **Per-device triage** — `analyze_device` MCP tool pulls one hostname's events from all sources, returns a severity histogram, process breakdown, frequency-deduped error patterns, a KB verdict (e.g. `ROUTING`, `HARDWARE`), and a 0–100 health score.
-
-Full details and usage examples: [`docs/PORTED_FROM_DCN_AI.md`](docs/PORTED_FROM_DCN_AI.md).
 
 ## LOGS pipeline hardening (2026-05-27)
 

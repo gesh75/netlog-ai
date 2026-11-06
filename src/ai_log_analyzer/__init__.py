@@ -6,8 +6,8 @@ so llm.py's module-level _state picks up ANTHROPIC_API_KEY, OLLAMA_MODEL, etc.
 Env search order:
     1. <project>/.env              — lab-local override
     2. ~/.env                      — user-wide secrets
-    3. ../DCN_Network_Tool/.env    — sibling tool (reuse existing lab key)
-    4. ../DCN_AI_Intelligence/.env — sibling intelligence tool
+    3. ../network-tool/.env        — sibling lab network tool (reuse existing lab key)
+    4. ../log-intelligence/.env    — sibling intelligence tool
 
 Set AI_LOG_ANALYZER_DEBUG=1 to trace which .env files were loaded.
 """
@@ -54,8 +54,8 @@ def _load_env_files() -> None:
         candidates: tuple[Path, ...] = (
             proj_dir / ".env",
             Path.home() / ".env",
-            root_dir / "DCN_Network_Tool" / ".env",
-            root_dir / "DCN_AI_Intelligence" / ".env",
+            root_dir / "network-tool" / ".env",
+            root_dir / "log-intelligence" / ".env",
         )
 
         loaded: list[str] = []

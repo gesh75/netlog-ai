@@ -27,7 +27,20 @@ TEMPLATES = [
     "Authorization: Basic {s}", "GET /x?api_key={s}&n=1", "token={s}", "password={s}", "passwd={s}",
     "secret={s}", '{{"password": "{s}"}}', "https://user:{s}@git.example.net/r.git", " password {s}",
 ]
-SECRET = st.text(alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", min_size=12, max_size=40)
+def _secret_not_in_redacted_template(secret: str) -> bool:
+    """Drop draws that are a substring of the post-redaction template.
+
+    Otherwise a secret like ``Authorizatio`` false-fails against
+    ``Authorization: Bearer <REDACTED>`` even though the payload was redacted.
+    """
+    return all(secret not in tmpl.format(s="<REDACTED>") for tmpl in TEMPLATES)
+
+
+SECRET = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    min_size=12,
+    max_size=40,
+).filter(_secret_not_in_redacted_template)
 
 WORDS = st.sampled_from([
     "password", "secret", "key", "0", "7", "9", "enable", "username", "neighbor", "10.0.0.1", "8.8.8.8",

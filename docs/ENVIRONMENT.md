@@ -18,8 +18,8 @@ environment always wins; `.env` never overrides it):
 
 1. `<project>/.env`
 2. `~/.env`
-3. `../DCN_Network_Tool/.env`
-4. `../DCN_AI_Intelligence/.env`
+3. `../network-tool/.env`
+4. `../log-intelligence/.env`
 
 Because `~/.env` and sibling-project files are read, a stray file there can change behavior.
 Set `AI_LOG_ANALYZER_DEBUG=1` to print which files were loaded.
@@ -174,7 +174,7 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `SERVICENOW_TOKEN` | unset | ServiceNow bearer token (instead of user/password). **Secret.** |
 | `NETBOX_URL` | unset | NetBox base URL. Enrichment is enabled only when both `NETBOX_URL` and `NETBOX_TOKEN` are set. |
 | `NETBOX_TOKEN` | unset | NetBox API token (read-only token recommended). **Secret.** |
-| `DCN_TOOL_URL` | `http://localhost:5757` | Base URL of the network tool the FRR/device adapter calls. **Security:** server-side request; keep it on loopback or a trusted management network. |
+| `NETWORK_TOOL_URL` | `http://localhost:5757` | Base URL of the lab network tool the FRR/device adapter calls. **Security:** server-side request; keep it on loopback or a trusted management network. |
 | `DOCKER_EXEC_FALLBACK` | `true` | When the tool API is unreachable, the FRR adapter falls back to `docker exec` against lab containers. **Security:** this runs commands through the local Docker daemon (equivalent to host-level privilege). Set `false` on any shared or production host. |
 | `NET_USER` | `admin` | Username embedded as an environment lookup in generated runbook scripts (read by the generated script, not by netlog-ai itself). |
 | `NET_PASS` | unset | Device password read by generated runbook scripts. **Secret.** Never hardcode it into the generated file. |
