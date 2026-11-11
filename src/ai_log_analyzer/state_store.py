@@ -120,12 +120,28 @@ _MIGRATIONS = {
 
 _BUSY_TIMEOUT_MS = 10_000
 _SYNC_MODES = frozenset({"OFF", "NORMAL", "FULL", "EXTRA"})
+_DEFAULT_JOURNAL_SIZE_LIMIT = 64 * 1024 * 1024   # WAL file cap during a syslog storm
+_CHECKPOINT_EVERY_APPENDS = 50                    # passive WAL checkpoint cadence in spool_append
+_CHECKPOINT_MODES = frozenset({"PASSIVE", "FULL", "RESTART", "TRUNCATE"})
 
 
 def _sync_mode() -> str:
     """``AI_LOG_ANALYZER_SQLITE_SYNC``: NORMAL (default), FULL (fsync every commit), EXTRA or OFF."""
     mode = os.environ.get("AI_LOG_ANALYZER_SQLITE_SYNC", "").strip().upper()
     return mode if mode in _SYNC_MODES else "NORMAL"
+
+
+def journal_size_limit() -> int:
+    """``AI_LOG_ANALYZER_SQLITE_JOURNAL_SIZE_LIMIT`` in bytes (default 64 MiB).
+
+    Caps the WAL file: once the limit is reached SQLite checkpoints on the
+    next write instead of letting the file grow without bound during a storm.
+    """
+    try:
+        return max(0, int(os.environ.get("AI_LOG_ANALYZER_SQLITE_JOURNAL_SIZE_LIMIT", "") or 0)
+                   or _DEFAULT_JOURNAL_SIZE_LIMIT)
+    except ValueError:
+        return _DEFAULT_JOURNAL_SIZE_LIMIT
 
 
 class LeaseLost(RuntimeError):
@@ -182,6 +198,7 @@ class StateDB:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._prune_counter: dict[str, int] = {}
+        self._append_since_checkpoint = 0
         conn = self.conn()
         conn.executescript(_SCHEMA)
         for table, columns in _MIGRATIONS.items():
@@ -221,6 +238,7 @@ class StateDB:
             _LIVE_CONNS.add(conn)
             conn.execute("PRAGMA journal_mode=WAL").fetchall()
             conn.execute(f"PRAGMA synchronous={_sync_mode()}")
+            conn.execute(f"PRAGMA journal_size_limit={journal_size_limit()}")
             conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
             self._local.conn = conn
             self._local.pid = pid
@@ -243,6 +261,29 @@ class StateDB:
 
     def journal_mode(self) -> str:
         return str(self.conn().execute("PRAGMA journal_mode").fetchone()[0]).lower()
+
+    def checkpoint(self, mode: str = "PASSIVE") -> dict[str, int]:
+        """Run ``PRAGMA wal_checkpoint(mode)``; returns busy/log/checkpointed page counts.
+
+        PASSIVE never blocks a writer (it checkpoints only what it can);
+        TRUNCATE resets the WAL file to zero bytes once every reader is done.
+        """
+        mode = mode.upper()
+        if mode not in _CHECKPOINT_MODES:
+            raise ValueError(f"unknown checkpoint mode {mode!r} (expected one of {sorted(_CHECKPOINT_MODES)})")
+        busy, log_pages, done = self.conn().execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+        return {"busy": int(busy), "log": int(log_pages), "checkpointed": int(done)}
+
+    def _maybe_checkpoint(self) -> None:
+        """Passive checkpoint every ``_CHECKPOINT_EVERY_APPENDS`` spool appends (best effort)."""
+        self._append_since_checkpoint += 1
+        if self._append_since_checkpoint < _CHECKPOINT_EVERY_APPENDS:
+            return
+        self._append_since_checkpoint = 0
+        try:
+            self.checkpoint("PASSIVE")
+        except sqlite3.Error:
+            log.debug("periodic WAL checkpoint failed", exc_info=True)
 
     # ── kv ──────────────────────────────────────────────────────────────────
     def kv_set(self, namespace: str, key: str, value: Any) -> None:
@@ -345,6 +386,7 @@ class StateDB:
                 pending = 0
             self._prune_counter[source] = pending
             c.execute("UPDATE spool_meta SET rows=? WHERE source=?", (total, source))
+        self._maybe_checkpoint()
         return len(rows)
 
     @staticmethod
