@@ -110,7 +110,6 @@ files = ["src"]
 module = [
     "ai_log_analyzer.causal",
     "ai_log_analyzer.correlate",
-    "ai_log_analyzer.judge",
     "ai_log_analyzer.llm",
     "ai_log_analyzer.mcp_server.server",
     "ai_log_analyzer.servicenow_sync",

@@ -321,12 +321,12 @@ class _StubLLM:
     def __init__(self) -> None:
         self.prompts: list[str] = []
 
-    def __call__(self, system: str, prompt: str, max_tokens: int) -> str:
-        self.prompts.append(prompt)
-        tokens = list(dict.fromkeys(_TOKEN_RE.findall(prompt)))[:6]
-        if "5-phase incident playbook" not in prompt:
+    def __call__(self, system_prompt: str, user_prompt: str, max_tokens: int) -> str:
+        self.prompts.append(user_prompt)
+        tokens = list(dict.fromkeys(_TOKEN_RE.findall(user_prompt)))[:6]
+        if "5-phase incident playbook" not in user_prompt:
             return "\n".join(f"- Stub summary references {t}" for t in tokens) or "- Stub summary"
-        cite = " [S1]" if "[S1]" in prompt else ""
+        cite = " [S1]" if "[S1]" in user_prompt else ""
         return json.dumps({
             "root_cause": f"Stub RCA involving {' '.join(tokens) or 'no entities'}{cite}",
             "risk": "Stub risk statement",
@@ -380,7 +380,11 @@ def _stub_llm(stub: _StubLLM):
     finally:
         llm._state.clear()
         llm._state.update(saved_state)
-        llm._PROVIDERS["claude"] = saved_claude
+        if saved_claude is not None:
+            llm._PROVIDERS["claude"] = saved_claude
+        elif "claude" in llm._PROVIDERS:
+            # It was absent before the stub ran: restore absence, not None.
+            del llm._PROVIDERS["claude"]
         llm._query_claude = saved_query_claude
         llm._sync_shared_state = saved_sync
 
