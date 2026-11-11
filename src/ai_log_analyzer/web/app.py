@@ -26,7 +26,7 @@ import itertools
 from collections.abc import Callable
 from functools import wraps
 
-from flask import Flask, abort, jsonify, make_response, request
+from flask import Flask, abort, jsonify, request
 from flask_cors import CORS
 
 # Re-exported for tests (and only for tests): test modules reach these
@@ -45,9 +45,15 @@ from ai_log_analyzer.classifier import LogEvent
 # Kept as a web.app attribute: tests patch ai_log_analyzer.web.app
 # .correlate_from_manager and the incidents blueprint calls it via web_app.*.
 from ai_log_analyzer.correlate import correlate_from_manager  # noqa: F401
-from ai_log_analyzer.deep_report import load_site_topology, run_deep_report
-from ai_log_analyzer.device_triage import triage_from_manager
-from ai_log_analyzer.servicenow_sync import ServiceNowClient
+from ai_log_analyzer.deep_report import load_site_topology
+
+# Kept as a web.app attribute: tests patch ai_log_analyzer.web.app
+# .triage_from_manager and the triage blueprint calls it via web_app.*.
+from ai_log_analyzer.device_triage import triage_from_manager  # noqa: F401
+
+# Same for ServiceNowClient: tests monkeypatch web_app.ServiceNowClient and
+# the remediation blueprint constructs it via web_app.* at request time.
+from ai_log_analyzer.servicenow_sync import ServiceNowClient  # noqa: F401
 from ai_log_analyzer.sources import SourceError, registry
 from ai_log_analyzer.sources.manager import manager as source_manager
 
@@ -554,323 +560,23 @@ def create_app() -> Flask:
             response.headers["Cache-Control"] = "no-cache"
         return response
 
-    @app.route("/api/triage", methods=["POST"])
-    @require_role("operator")
-    def api_triage():
-        """Per-device deep triage: verdict + health score + severity histogram
-        + top processes + deduped error patterns for one host. Thin wrapper
-        over triage_from_manager(); never raises for a single bad source."""
-        body = request.get_json(silent=True) or {}
-        hostname = (body.get("hostname") or "").strip()
-        if not hostname:
-            return jsonify({"ok": False, "error": "hostname required"}), 400
-        raw_ids = body.get("source_ids")
-        source_ids = [str(s) for s in raw_ids] if isinstance(raw_ids, list) else None
-        result = triage_from_manager(
-            hostname,
-            source_ids,
-            since_seconds=int(body.get("since_seconds", 86_400)),
-            limit=int(body.get("limit", 5000)),
-        )
-        return jsonify(result)
-
-    @app.route("/api/remediation", methods=["POST"])
-    @require_role("operator")
-    def api_remediation():
-        """Generate vendor-safe remediation plan with automatic rollback timer."""
-        from ai_log_analyzer.remediation import (
-            RemediationActionType,
-            RemediationGenerator,
-            SafetyViolationError,
-            VendorOS,
-        )
-
-        body = request.get_json(silent=True) or {}
-        device = (body.get("device") or "").strip()
-        vendor_str = (body.get("vendor") or "").strip().lower()
-        if not device or not vendor_str:
-            return jsonify({"ok": False, "error": "device and vendor are required"}), 400
-
-        try:
-            vendor = VendorOS(vendor_str)
-        except ValueError:
-            return jsonify({
-                "ok": False,
-                "error": f"unknown vendor {vendor_str!r}",
-                "supported_vendors": [v.value for v in VendorOS],
-            }), 400
-
-        action = (body.get("action") or body.get("action_type") or "drain").strip().lower()
-        interface = (body.get("interface") or "").strip()
-        bgp_neighbor_ip = body.get("bgp_neighbor_ip")
-        rollback_minutes = body.get("rollback_minutes")
-        if rollback_minutes is not None:
-            try:
-                rollback_minutes = int(rollback_minutes)
-            except (ValueError, TypeError):
-                return jsonify({"ok": False, "error": "rollback_minutes must be an integer"}), 400
-
-        rationale = (body.get("rationale") or "").strip()
-        commands = body.get("commands") or []
-        pre_checks = body.get("pre_checks") or []
-        post_checks = body.get("post_checks") or []
-
-        gen = RemediationGenerator()
-        try:
-            if action in ("drain", RemediationActionType.GRACEFUL_LINK_DRAIN.value):
-                plan = gen.build_graceful_link_drain(
-                    device=device,
-                    vendor=vendor,
-                    interface=interface or "Ethernet1",
-                    bgp_neighbor_ip=bgp_neighbor_ip,
-                    rollback_minutes=rollback_minutes,
-                    rationale=rationale or "Drain traffic gracefully prior to physical maintenance.",
-                )
-            elif action in ("copp", "qos", RemediationActionType.QOS_COPP_CONTROL_PLANE_BOOST.value):
-                plan = gen.build_qos_copp_remediation(
-                    device=device,
-                    vendor=vendor,
-                    interface=interface or "Ethernet1",
-                    rollback_minutes=rollback_minutes,
-                    rationale=rationale or "Prioritize BFD/BGP control plane traffic.",
-                )
-            elif action in ("custom", RemediationActionType.CUSTOM_SAFE_CONFIG.value):
-                if not commands:
-                    return jsonify({"ok": False, "error": "commands list required for custom action"}), 400
-                plan = gen.build_custom_safe_plan(
-                    device=device,
-                    vendor=vendor,
-                    commands=commands,
-                    pre_checks=pre_checks,
-                    post_checks=post_checks,
-                    rationale=rationale or "Custom safe configuration plan.",
-                    rollback_minutes=rollback_minutes,
-                )
-            else:
-                return jsonify({"ok": False, "error": f"unsupported action {action!r}"}), 400
-        except SafetyViolationError as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 400
-
-        out = {"ok": True, "plan": plan.to_dict(), "markdown_card": plan.to_markdown_card()}
-        export = (body.get("export") or "").strip().lower()
-        if export:
-            from ai_log_analyzer.remediation_export import ExportUnsupportedError, export_plan
-            try:
-                out["export"] = {"format": export, "content": export_plan(plan, export)}
-            except (ExportUnsupportedError, SafetyViolationError) as exc:
-                return jsonify({"ok": False, "error": str(exc), "plan": plan.to_dict()}), 400
-        return jsonify(out)
-
-    @app.route("/api/itsm/enrich", methods=["POST"])
-    @require_role("operator", "itsm.enrich", _body_fields("system", "dry_run", "site", "device"))
-    def api_itsm_enrich():
-        """Format or dispatch two-way ITSM enrichment to Jira or ServiceNow."""
-        from ai_log_analyzer.itsm import (
-            IncidentEnrichmentPayload,
-            JiraITSMClient,
-            ServiceNowITSMClient,
-        )
-        from ai_log_analyzer.remediation import (
-            RemediationActionType,
-            RemediationPlan,
-            VendorOS,
-        )
-
-        body = request.get_json(silent=True) or {}
-        system = (body.get("system") or "").strip().lower()
-        if system not in ("jira", "servicenow"):
-            return jsonify({"ok": False, "error": "system must be 'jira' or 'servicenow'"}), 400
-
-        device = (body.get("device") or "").strip()
-        vendor = (body.get("vendor") or "").strip()
-        root_cause = (body.get("root_cause_summary") or body.get("root_cause") or "").strip()
-        if not (device and vendor and root_cause):
-            return jsonify({"ok": False, "error": "device, vendor, and root_cause_summary required"}), 400
-
-        site = (body.get("site") or "default").strip()
-        layer = (body.get("layer") or "L1_PHYSICAL").strip()
-        interface = (body.get("interface") or "").strip()
-        confidence = float(body.get("confidence", 0.95))
-        rollback_minutes = int(body.get("rollback_minutes", 5))
-        pre_checks = body.get("pre_checks") or []
-        config_commands = body.get("config_commands") or []
-        post_checks = body.get("post_checks") or []
-        suppressed_count = int(body.get("suppressed_symptoms_count", 0))
-        affected_devices = body.get("affected_devices") or [device]
-        affected_vnis = [int(v) for v in (body.get("affected_vnis") or [])]
-        telemetry_summary = body.get("telemetry_summary") or None
-        plan_id = (body.get("plan_id") or "").strip()
-        dry_run = _parse_bool(body.get("dry_run", True), default=True)
-
-        plan = None
-        if plan_id or config_commands:
-            try:
-                vos = VendorOS(vendor.lower().strip())
-            except ValueError:
-                vos = VendorOS.ARISTA_EOS
-            plan = RemediationPlan(
-                plan_id=plan_id or f"REM-{device.upper()}",
-                device=device,
-                vendor=vos,
-                action_type=RemediationActionType.GRACEFUL_LINK_DRAIN,
-                rollback_minutes=rollback_minutes,
-                rationale=root_cause,
-                pre_checks=pre_checks,
-                config_commands=config_commands,
-                commit_with_timer_commands=[],
-                post_checks=post_checks,
-                confirm_commit_commands=[],
-                manual_rollback_commands=[],
-            )
-
-        payload = IncidentEnrichmentPayload(
-            site=site,
-            root_device=device,
-            root_layer=layer,
-            root_interface=interface or None,
-            summary_title=root_cause,
-            rca_rationale=f"Diagnosed root cause on {device}: {root_cause}",
-            confidence=confidence,
-            affected_devices=affected_devices,
-            affected_vnis=affected_vnis,
-            suppressed_symptom_count=suppressed_count,
-            telemetry_summary=telemetry_summary,
-            remediation_plan=plan,
-        )
-
-        if dry_run:
-            return jsonify({
-                "ok": True,
-                "dry_run": True,
-                "system": system,
-                "fingerprint": payload.fingerprint,
-                "markdown_card": payload.to_markdown_body(),
-                "jira_payload": payload.to_jira_issue_fields(body.get("project_key", "NET")),
-                "servicenow_payload": payload.to_servicenow_record(),
-            })
-
-        # Live dispatch
-        try:
-            if system == "jira":
-                env_url = (os.environ.get("JIRA_URL") or os.environ.get("JIRA_BASE_URL") or "").strip()
-                base_url = (body.get("instance_url") or env_url).strip()
-                # A body-supplied URL other than the configured one never inherits the
-                # server's stored credentials (they would be sent to the caller's host).
-                env_creds = base_url.rstrip("/") == env_url.rstrip("/")
-                email = (body.get("email") or (os.environ.get("JIRA_EMAIL") if env_creds else "") or "").strip()
-                token = (body.get("api_token") or (os.environ.get("JIRA_API_TOKEN") if env_creds else "") or "").strip()
-                project = (body.get("project_key") or os.environ.get("JIRA_PROJECT_KEY") or "NET").strip()
-                if not (base_url and email and token):
-                    return jsonify({"ok": False, "error": "missing Jira credentials (instance_url, email, api_token)"}), 400
-                client = JiraITSMClient(base_url, email, token, project_key=project)
-                res = client.enrich_incident(payload)
-                return jsonify({"ok": True, "dry_run": False, "system": "jira", "result": res})
-            else:
-                env_url = (os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL") or "").strip()
-                instance_url = (body.get("instance_url") or env_url).strip()
-                env_creds = instance_url.rstrip("/") == env_url.rstrip("/")   # see the Jira branch
-                user = (body.get("username") or (os.environ.get("SERVICENOW_USER") or os.environ.get("SNOW_USER")
-                                                 if env_creds else "") or "").strip()
-                pwd = (body.get("password") or (os.environ.get("SERVICENOW_PASSWORD") or os.environ.get("SNOW_PASSWORD")
-                                                if env_creds else "") or "").strip()
-                if not (instance_url and user and pwd):
-                    return jsonify({"ok": False, "error": "missing ServiceNow credentials (instance_url, username, password)"}), 400
-                client = ServiceNowITSMClient(instance_url, user, pwd)
-                res = client.enrich_incident(payload)
-                return jsonify({"ok": True, "dry_run": False, "system": "servicenow", "result": res})
-        except Exception as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 502
-
-    @app.route("/api/itsm/servicenow/sync", methods=["POST"])
-    @require_role("operator", "itsm.servicenow.sync", _body_fields("dry_run", "instance_url"))
-    def api_servicenow_sync():
-        """Preview or upsert one ServiceNow incident. Defaults to dry-run."""
-        body = request.get_json(silent=True) or {}
-        instance = str(body.get("instance_url") or "").strip()
-        dry_run = _parse_bool(body.get("dry_run", True), default=True) or not instance
-        topology, error = _topology_from_body(body)
-        if error:
-            return jsonify({"error": error}), 400
-        bundle = run_deep_report(
-            log_text=str(body.get("log_text") or body.get("text") or ""),
-            topology=topology,
-            changes=body.get("changes") or [],
-            config_before=str(body.get("config_before") or ""),
-            config_after=str(body.get("config_after") or ""),
-        )
-        try:
-            client = ServiceNowClient(
-                instance_url=instance,
-                username=str(body.get("username") or ""),
-                password=str(body.get("password") or ""),
-                bearer_token=str(body.get("bearer_token") or ""),
-                # Admin-controlled only: a request body must never relax the SSRF guard.
-                allow_private=_parse_bool(os.environ.get("AI_LOG_ANALYZER_ITSM_ALLOW_PRIVATE"), default=False),
-            )
-            result = client.sync_incident(
-                bundle.summary,
-                blast_radius=bundle.blast,
-                change_report=bundle.changes,
-                flap_report=bundle.flap,
-                dry_run=dry_run,
-            )
-        except (SourceError, ValueError) as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 400
-        return jsonify(result.to_dict())
-
-    # ── Streaming triage worker ───────────────────────────────────────────
-    def _worker_or_400():
-        from ai_log_analyzer.triage_worker import get_worker
-        worker = get_worker()
-        if worker is None:
-            abort(make_response(jsonify({"error": "streaming triage needs AI_LOG_ANALYZER_STATE_DB "
-                                                  "(the syslog spool)"}), 400))
-        return worker
-
-    @app.route("/api/triage/stream/status", methods=["GET"])
-    @require_role("viewer")
-    def api_triage_stream_status():
-        from ai_log_analyzer.triage_worker import get_worker
-        worker = get_worker(create=False)
-        if worker is None:
-            from ai_log_analyzer.state_store import get_state_db
-            return jsonify({"running": False, "configured": get_state_db() is not None})
-        try:
-            limit = max(1, min(int(request.args.get("limit") or 50), 500))
-        except ValueError:
-            return jsonify({"error": "limit must be an integer"}), 400
-        tickets = worker.db.triage_all(limit=limit)
-        return jsonify({**worker.status(), "tickets": tickets})
-
-    @app.route("/api/triage/stream/start", methods=["POST"])
-    @require_role("admin", "triage.worker.start")
-    def api_triage_stream_start():
-        worker = _worker_or_400()
-        return jsonify({"ok": True, "started": worker.start(), **worker.status()})
-
-    @app.route("/api/triage/stream/stop", methods=["POST"])
-    @require_role("admin", "triage.worker.stop")
-    def api_triage_stream_stop():
-        worker = _worker_or_400()
-        worker.stop()
-        return jsonify({"ok": True, **worker.status()})
-
-    @app.route("/api/triage/stream/tick", methods=["POST"])
-    @require_role("admin", "triage.worker.tick")
-    def api_triage_stream_tick():
-        """Run one triage tick now (useful for cron-style deployments)."""
-        return jsonify(_worker_or_400().run_once())
-
-
-
-
-
     # ── Blueprints ────────────────────────────────────────────────────────
     # Route handlers live in ai_log_analyzer.web.blueprints (one module
     # per area). Imported here, inside the factory, so the blueprint
     # modules can import the shared helpers from this module without a
     # circular import at package import time.
-    from ai_log_analyzer.web.blueprints import admin, analysis, auth, core, incidents, rag, sites, sources
+    from ai_log_analyzer.web.blueprints import (
+        admin,
+        analysis,
+        auth,
+        core,
+        incidents,
+        rag,
+        remediation,
+        sites,
+        sources,
+        triage,
+    )
     from ai_log_analyzer.web.blueprints import llm as llm_bp
     app.register_blueprint(admin.bp)
     app.register_blueprint(analysis.bp)
@@ -879,8 +585,10 @@ def create_app() -> Flask:
     app.register_blueprint(incidents.bp)
     app.register_blueprint(llm_bp.bp)
     app.register_blueprint(rag.bp)
+    app.register_blueprint(remediation.bp)
     app.register_blueprint(sites.bp)
     app.register_blueprint(sources.bp)
+    app.register_blueprint(triage.bp)
 
     if _parse_bool(os.environ.get("AI_LOG_ANALYZER_TRIAGE_WORKER"), default=False):
         from ai_log_analyzer.triage_worker import get_worker
