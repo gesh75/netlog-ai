@@ -1,4 +1,4 @@
-"""SNMP trap receiver — UDP 162, SNMPv1/v2c/v3 (v2.3.0 feature 1).
+"""SNMP trap receiver — UDP 162, SNMPv1/v2c/v3.
 
 Listens for traps on UDP (default ``0.0.0.0:162``) and feeds them into the
 same pipeline as syslog: each trap is rendered as a syslog-like line
