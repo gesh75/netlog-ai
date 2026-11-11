@@ -9,6 +9,11 @@ module builds that evidence base without any external service or package:
   state DB or in ``AI_LOG_ANALYZER_RAG_DB``.
 * **Ranking:** Okapi BM25 (k1=1.2, b=0.75) computed in Python over the
   postings, with a boost for documents about the affected devices.
+  When a local Ollama embedding model is reachable (``nomic-embed-text``
+  by default, see ``embeddings.py``), document vectors are stored in
+  ``rag_embeddings`` and a search blends BM25 with cosine similarity
+  (hybrid score, ``AI_LOG_ANALYZER_RAG_HYBRID_ALPHA``). Without Ollama
+  the ranking is exactly the BM25 ranking above — nothing else changes.
 * **Tokenizer:** network-aware. Interface names are canonicalized
   (``GigabitEthernet0/1`` and ``Gi0/1`` both index as ``gi0/1``); IP
   addresses, ASNs and Junos interface names stay whole tokens, so a BGP
@@ -52,6 +57,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ai_log_analyzer.embeddings import (
+    Embedder,
+    cosine,
+    default_embedder,
+    hybrid_alpha,
+    hybrid_fuse,
+    pack_vector,
+    unpack_vector,
+)
 from ai_log_analyzer.sanitize import sanitize
 
 log = logging.getLogger(__name__)
@@ -85,6 +99,12 @@ CREATE TABLE IF NOT EXISTS rag_sources (
     golden      TEXT,
     fingerprint TEXT NOT NULL,
     indexed_at  REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rag_embeddings (
+    doc_id  INTEGER PRIMARY KEY,
+    model   TEXT NOT NULL,
+    dim     INTEGER NOT NULL,
+    vec     BLOB NOT NULL
 );
 """
 
@@ -434,13 +454,70 @@ def citation_for(kind: str, ref: str, title: str, host: str, meta: Mapping[str, 
 
 
 class RagIndex:
-    """BM25 index persisted in SQLite (see module docstring)."""
+    """BM25 index persisted in SQLite (see module docstring).
 
-    def __init__(self, db: Any) -> None:   # db: state_store.StateDB
+    ``embedder``: an ``Embedder`` for hybrid search, ``False`` to force
+    keyword-only, or ``None`` (default) to build one from the
+    environment. Embedding is best-effort everywhere: a missing Ollama
+    only ever means the BM25 ranking, never an error.
+    """
+
+    def __init__(self, db: Any, embedder: Embedder | bool | None = None) -> None:   # db: state_store.StateDB
         self.db = db
         db.conn().executescript(_SCHEMA)
         self._refresh_lock = threading.Lock()
         self._last_refresh = 0.0
+        self.embedder: Embedder | None = None if embedder is False else (
+            embedder if isinstance(embedder, Embedder) else default_embedder())
+        self.last_search_mode: str = "keyword"
+
+    @staticmethod
+    def _embed_text(doc: Doc) -> str:
+        return f"{doc.title}\n{doc.body}\n{doc.host}"
+
+    def _embed_docs(self, docs: list[tuple[int, str]]) -> int:
+        """Best-effort: store vectors for ``(doc_id, text)`` pairs. Returns how many were stored."""
+        emb = self.embedder
+        if emb is None or not docs or not emb.is_available():
+            return 0
+        embedded = 0
+        for off in range(0, len(docs), emb.batch_size):
+            part = docs[off:off + emb.batch_size]
+            vectors = emb.embed([text for _, text in part])
+            if vectors is None:   # Ollama went away mid-index: keep what we have
+                return embedded
+            with self.db.write() as c:
+                for (doc_id, _), vec in zip(part, vectors):
+                    c.execute("INSERT OR REPLACE INTO rag_embeddings(doc_id, model, dim, vec) "
+                              "VALUES (?, ?, ?, ?)", (doc_id, emb.model, len(vec), pack_vector(vec)))
+            embedded += len(part)
+        return embedded
+
+    def embed_missing(self, *, limit: int = 1000) -> dict[str, Any]:
+        """Embed every document that has no vector for the current model.
+
+        Vectors from a previous model are dropped first (a model change
+        re-embeds the index). Best-effort: returns ``{"embedded": n,
+        "model": ..., "available": bool}`` and never raises for Ollama
+        trouble — ``available: False`` just means keyword-only search.
+        """
+        emb = self.embedder
+        if emb is None:
+            return {"embedded": 0, "model": None, "available": False}
+        if not emb.is_available():
+            return {"embedded": 0, "model": emb.model, "available": False}
+        try:
+            with self.db.write() as c:
+                c.execute("DELETE FROM rag_embeddings WHERE model != ?", (emb.model,))
+            rows = self.db.conn().execute(
+                "SELECT d.id, d.title, d.body, d.host FROM rag_docs d "
+                "LEFT JOIN rag_embeddings e ON e.doc_id = d.id "
+                "WHERE e.doc_id IS NULL LIMIT ?", (limit,)).fetchall()
+            n = self._embed_docs([(r[0], f"{r[1]}\n{r[2]}\n{r[3] or ''}") for r in rows])
+            return {"embedded": n, "model": emb.model, "available": True}
+        except Exception as exc:  # sqlite trouble must never break a reindex
+            log.warning("RAG embed_missing failed: %s", exc)
+            return {"embedded": 0, "model": emb.model, "available": False}
 
     # ── write ───────────────────────────────────────────────────────────────
     @staticmethod
@@ -456,7 +533,10 @@ class RagIndex:
         return rows
 
     @staticmethod
-    def _insert(c: Any, source_key: str, rows: list[tuple[Doc, Counter, int, str]], now: float) -> None:
+    def _insert(c: Any, source_key: str, rows: list[tuple[Doc, Counter, int, str]], now: float
+                ) -> list[tuple[int, str]]:
+        """Insert the documents; returns ``(doc_id, embed_text)`` for embedding."""
+        inserted: list[tuple[int, str]] = []
         for d, tf, length, digest in rows:
             cur = c.execute(
                 "INSERT INTO rag_docs(source_key, kind, ref, host, title, body, meta, length, digest, "
@@ -465,10 +545,14 @@ class RagIndex:
                  json.dumps(d.meta, default=str), length, digest, now))
             c.executemany("INSERT INTO rag_postings(term, doc_id, tf) VALUES (?, ?, ?)",
                           [(t, cur.lastrowid, n) for t, n in tf.items()])
+            if cur.lastrowid is not None:
+                inserted.append((cur.lastrowid, RagIndex._embed_text(d)))
+        return inserted
 
     @staticmethod
     def _delete_ids(c: Any, ids: list[int]) -> None:
         if ids:
+            c.executemany("DELETE FROM rag_embeddings WHERE doc_id=?", [(i,) for i in ids])
             c.executemany("DELETE FROM rag_postings WHERE doc_id=?", [(i,) for i in ids])
             c.executemany("DELETE FROM rag_docs WHERE id=?", [(i,) for i in ids])
 
@@ -478,7 +562,8 @@ class RagIndex:
         with self.db.write() as c:
             self._delete_ids(c, [r[0] for r in c.execute(
                 "SELECT id FROM rag_docs WHERE source_key=?", (source_key,))])
-            self._insert(c, source_key, rows, time.time())
+            inserted = self._insert(c, source_key, rows, time.time())
+        self._embed_docs(inserted)
         return len(rows)
 
     def upsert(self, source_key: str, docs: Iterable[Doc], *, drop_refs: Iterable[str] = ()) -> int:
@@ -493,7 +578,8 @@ class RagIndex:
                     f"SELECT id FROM rag_docs WHERE source_key=? AND ref IN ({','.join('?' * len(part))})",
                     [source_key, *part]))
             self._delete_ids(c, ids)
-            self._insert(c, source_key, rows, time.time())
+            inserted = self._insert(c, source_key, rows, time.time())
+        self._embed_docs(inserted)
         return len(rows)
 
     def source_digests(self, source_key: str) -> dict[str, str]:
@@ -502,6 +588,7 @@ class RagIndex:
 
     def clear(self) -> None:
         with self.db.write() as c:
+            c.execute("DELETE FROM rag_embeddings")
             c.execute("DELETE FROM rag_postings")
             c.execute("DELETE FROM rag_docs")
             c.execute("DELETE FROM rag_sources")
@@ -550,17 +637,31 @@ class RagIndex:
         conn = self.db.conn()
         by_kind = dict(conn.execute("SELECT kind, COUNT(*) FROM rag_docs GROUP BY kind").fetchall())
         sources = [r[0] for r in conn.execute("SELECT DISTINCT source_key FROM rag_docs ORDER BY 1")]
-        return {"documents": sum(by_kind.values()), "by_kind": by_kind, "sources": sources}
+        out: dict[str, Any] = {"documents": sum(by_kind.values()), "by_kind": by_kind, "sources": sources}
+        emb = self.embedder
+        if emb is None:
+            out["embeddings"] = {"enabled": False, "model": None, "available": False,
+                                 "embedded_docs": 0, "documents": out["documents"]}
+        else:
+            out["embeddings"] = {
+                "enabled": True, "model": emb.model, "available": emb.is_available(),
+                "embedded_docs": conn.execute(
+                    "SELECT COUNT(*) FROM rag_embeddings WHERE model=?", (emb.model,)).fetchone()[0],
+                "documents": out["documents"]}
+        return out
 
     def search(self, query: str, k: int = 5, *, kinds: Iterable[str] | None = None,
                hosts: Iterable[str] | None = None, host_only_kinds: Iterable[str] = (),
                host_boost: float = 1.0) -> list[dict[str, Any]]:
-        """Top-``k`` BM25 hits for ``query``.
+        """Top-``k`` hits for ``query`` — BM25, or hybrid BM25+vector when embeddings are available.
 
         ``hosts`` boosts documents about those devices; for kinds listed in
         ``host_only_kinds`` (e.g. config, drift) documents about other
         devices are dropped, since citing an unrelated device's config is
-        noise, not evidence.
+        noise, not evidence. ``last_search_mode`` records whether this call
+        ranked ``"hybrid"`` or ``"keyword"``; each hit carries its
+        ``bm25_score`` and ``vector_score`` (``None`` when that signal did
+        not match the document).
         """
         q_terms = list(dict.fromkeys(tokenize(query)))[:64]
         if not q_terms:
@@ -570,48 +671,79 @@ class RagIndex:
         n_docs, avgdl = conn.execute("SELECT COUNT(*), AVG(length) FROM rag_docs").fetchone()
         if not n_docs:
             return []
+        self.last_search_mode = "keyword"
         avgdl = float(avgdl or 1.0)
-        marks = ",".join("?" * len(q_terms))
-        df = dict(conn.execute(
-            f"SELECT term, COUNT(*) FROM rag_postings WHERE term IN ({marks}) GROUP BY term", q_terms).fetchall())
-        if not df:
-            return []
-        terms = list(df)
-        if n_docs >= _HIGH_DF_MIN_DOCS:   # near-ubiquitous terms add cost, not signal
-            terms = [t for t in terms if df[t] <= _HIGH_DF_RATIO * n_docs] or terms
-        postings: list[tuple[str, int, int]] = []
-        for term in terms:
-            postings.extend((term, doc_id, tf) for doc_id, tf in conn.execute(
-                "SELECT doc_id, tf FROM rag_postings WHERE term=? ORDER BY tf DESC LIMIT ?",
-                (term, _MAX_POSTINGS_PER_TERM)))
-        doc_ids = {doc_id for _, doc_id, _ in postings}
         kind_set = set(kinds) if kinds else None
         host_set = {_short(h) for h in hosts or () if h}
         host_only = set(host_only_kinds)
-        meta_rows: dict[int, tuple] = {}
-        ids = list(doc_ids)
-        for off in range(0, len(ids), 900):
-            part = ids[off:off + 900]
-            for row in conn.execute(
-                    f"SELECT id, kind, host, length FROM rag_docs WHERE id IN ({','.join('?' * len(part))})",
-                    part):
-                meta_rows[row[0]] = row
+        # ── BM25 ────────────────────────────────────────────────────────────
         scores: dict[int, float] = {}
-        for term, doc_id, tf in postings:
-            row = meta_rows.get(doc_id)
-            if row is None:
-                continue
-            _, kind, host, length = row
-            if kind_set is not None and kind not in kind_set:
-                continue
-            if kind in host_only and host_set and host not in host_set:
-                continue
-            idf = math.log(1 + (n_docs - df[term] + 0.5) / (df[term] + 0.5))
-            scores[doc_id] = scores.get(doc_id, 0.0) + idf * tf * (_K1 + 1) / (tf + _K1 * (1 - _B + _B * length / avgdl))
-        if host_set:
-            for doc_id in scores:
-                if meta_rows[doc_id][2] in host_set:
-                    scores[doc_id] *= 1 + host_boost
+        marks = ",".join("?" * len(q_terms))
+        df = dict(conn.execute(
+            f"SELECT term, COUNT(*) FROM rag_postings WHERE term IN ({marks}) GROUP BY term", q_terms).fetchall())
+        if df:
+            terms = list(df)
+            if n_docs >= _HIGH_DF_MIN_DOCS:   # near-ubiquitous terms add cost, not signal
+                terms = [t for t in terms if df[t] <= _HIGH_DF_RATIO * n_docs] or terms
+            postings: list[tuple[str, int, int]] = []
+            for term in terms:
+                postings.extend((term, doc_id, tf) for doc_id, tf in conn.execute(
+                    "SELECT doc_id, tf FROM rag_postings WHERE term=? ORDER BY tf DESC LIMIT ?",
+                    (term, _MAX_POSTINGS_PER_TERM)))
+            doc_ids = {doc_id for _, doc_id, _ in postings}
+            meta_rows: dict[int, tuple] = {}
+            ids = list(doc_ids)
+            for off in range(0, len(ids), 900):
+                part = ids[off:off + 900]
+                for row in conn.execute(
+                        f"SELECT id, kind, host, length FROM rag_docs WHERE id IN ({','.join('?' * len(part))})",
+                        part):
+                    meta_rows[row[0]] = row
+            for term, doc_id, tf in postings:
+                row = meta_rows.get(doc_id)
+                if row is None:
+                    continue
+                _, kind, host, length = row
+                if kind_set is not None and kind not in kind_set:
+                    continue
+                if kind in host_only and host_set and host not in host_set:
+                    continue
+                idf = math.log(1 + (n_docs - df[term] + 0.5) / (df[term] + 0.5))
+                scores[doc_id] = scores.get(doc_id, 0.0) + idf * tf * (_K1 + 1) / (tf + _K1 * (1 - _B + _B * length / avgdl))
+            if host_set:
+                for doc_id in scores:
+                    if meta_rows[doc_id][2] in host_set:
+                        scores[doc_id] *= 1 + host_boost
+        bm25_scores = dict(scores)
+        # ── vector signal (only when Ollama is reachable) ───────────────────
+        # A query with no keyword overlap can still match by meaning — that
+        # is the point of the hybrid ranking. Any Ollama trouble leaves the
+        # BM25 scores above untouched (keyword-only mode).
+        vector_scores: dict[int, float] = {}
+        emb = self.embedder
+        if emb is not None and emb.is_available():
+            try:
+                q_vec = emb.embed_one(query)
+            except Exception as exc:  # an embedder must never break a search
+                log.warning("RAG query embedding failed: %s", exc)
+                q_vec = None
+            if q_vec is not None:
+                for doc_id, kind, host, blob in conn.execute(
+                        "SELECT d.id, d.kind, d.host, e.vec FROM rag_docs d "
+                        "JOIN rag_embeddings e ON e.doc_id = d.id WHERE e.model = ?", (emb.model,)):
+                    if kind_set is not None and kind not in kind_set:
+                        continue
+                    if kind in host_only and host_set and host not in host_set:
+                        continue
+                    sim = cosine(q_vec, unpack_vector(blob))
+                    if host_set and host in host_set:
+                        sim *= 1 + host_boost
+                    vector_scores[doc_id] = sim
+                if vector_scores:
+                    self.last_search_mode = "hybrid"
+                    scores = hybrid_fuse(scores, vector_scores, hybrid_alpha())
+        if not scores:
+            return []
         # Same order as Counter.most_common: score desc, ties in insertion order.
         top = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:k]
         if not top:
@@ -624,7 +756,11 @@ class RagIndex:
             _, kind, ref, host, title, body, meta = rows[doc_id]
             meta_d = json.loads(meta or "{}")
             hits.append({"kind": kind, "ref": ref, "host": host, "title": title,
-                         "score": round(score, 3), "meta": meta_d,
+                         "score": round(score, 3),
+                         "bm25_score": round(bm25_scores.get(doc_id, 0.0), 3),
+                         "vector_score": (round(vector_scores[doc_id], 3)
+                                          if doc_id in vector_scores else None),
+                         "meta": meta_d,
                          "snippet": _snippet(body, q_terms),
                          "citation": citation_for(kind, ref, title, host, meta_d)})
         return hits
@@ -888,6 +1024,9 @@ def build_default_index(index: RagIndex, *, sites_dir: str | Path | None = None,
         from ai_log_analyzer.memory import get_store
         store = get_store()
     report["incidents"] = sync_incidents(index, store)
+    # Best-effort: embed new documents when Ollama is reachable; a missing
+    # Ollama leaves the BM25 index fully usable (keyword-only search).
+    report["embeddings"] = index.embed_missing()
     report["stats"] = index.stats()
     return report
 
@@ -977,7 +1116,8 @@ def check_citations(text: str, evidence: list[dict[str, Any]]) -> dict[str, list
 
 def public_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Evidence as attached to playbooks and API responses."""
-    keep = ("id", "kind", "ref", "host", "title", "citation", "snippet", "score")
+    keep = ("id", "kind", "ref", "host", "title", "citation", "snippet", "score",
+            "bm25_score", "vector_score")
     out = []
     for e in evidence:
         rec = {k: e.get(k) for k in keep}
