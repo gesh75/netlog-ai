@@ -16,6 +16,18 @@ loose semantic versioning.
   syslog — no parallel pipeline. `authPriv` traps are rejected explicitly and
   counted. See `docs/OPERATIONS.md` ("SNMP trap receiver").
 
+- **Grafana dashboard (v2.3.0 feature 4):** `grafana/netlog-ai.json` over the
+  P4 `/api/metrics` Prometheus endpoint (`job="netlog-ai"`): ingest rate
+  (EPS), spool depth, dropped datagrams, LLM latency/errors, analysis time,
+  uptime and build info, with template variables for source and LLM
+  provider and panel thresholds (spool warn 25k / crit 45k rows, drops red
+  above 0). Every query uses only metric names the endpoint exposes —
+  `tests/test_grafana_dashboard.py` cross-checks them against
+  `metrics.render()`. Import steps and suggested Grafana Alerting rules in
+  `grafana/README.md` and `docs/OPERATIONS.md`. No live Grafana was
+  available in the sandbox to prove an import; the JSON is validated
+  mechanically (parses, all PromQL names exposed).
+
 - **OpenAI LLM provider (v2.3.0 feature 3):** `LLM_PROVIDER=openai` with `OPENAI_API_KEY`
   (default model `gpt-4o-mini`, override with `OPENAI_MODEL`; `OPENAI_URL` defaults to
   `https://api.openai.com/v1`). Same OpenAI-compatible chat-completions wire shape as

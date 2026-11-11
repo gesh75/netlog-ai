@@ -383,6 +383,18 @@ Add a case by dropping a JSON file with `logs`, optional `configs` / `golden` /
       # With RBAC on, add: authorization: {credentials: "<viewer-token>"}
   ```
 
+* **Grafana dashboard** (`grafana/netlog-ai.json`, details in `grafana/README.md`):
+  ingest rate (EPS), spool depth, dropped datagrams, LLM latency/errors,
+  analysis time, uptime and build info — all from the scrape above (the
+  dashboard expects `job="netlog-ai"`). Import: Grafana → Dashboards →
+  New → Import → paste/upload the JSON → pick the Prometheus datasource
+  when asked (`${DS_PROMETHEUS}`). Panels with no data yet (e.g. no LLM
+  calls since process start) stay empty rather than erroring. Thresholds
+  are in the panels (spool warn 25k / crit 45k rows, drops red above 0,
+  LLM error rate warn 5% / crit 20%, analysis warn 10 s / crit 60 s);
+  alert rules belong in Grafana Alerting, not in the dashboard JSON —
+  three suggested expressions are in `grafana/README.md`.
+
 * **Incident cards:** one per suppression root (platform, device unreachable, transport) and per cross-vendor cluster that no root explains.
   * Each card shows the shared peer IPs, ASNs, tunnels, VRFs, /30–/31 subnets and interfaces.
   * The suppressed downstream alerts are behind an expandable section.
