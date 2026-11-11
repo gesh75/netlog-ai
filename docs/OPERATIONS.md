@@ -87,6 +87,64 @@ restore refuses to overwrite and exits 1. Verify after a restore with
   rejected_sender, rejected_conn_limit, dropped_oversize and
   active_connections.
 
+## SNMP trap receiver **(new in 2.3.0)**
+
+Listens for SNMP traps on UDP (default `0.0.0.0:162`) and feeds them into
+the **same pipeline as syslog** — no parallel path. Each trap is parsed
+(stdlib BER decoder in `src/ai_log_analyzer/sources/snmp_proto.py`) and
+rendered as one syslog-like line, e.g.
+`2026-11-11T13:00:00Z 10.0.0.5 snmpd: SNMPv2c trap linkDown
+(1.3.6.1.6.3.1.1.5.3) sysUpTime=12345 ifIndex.2=2
+ifDescr.2=GigabitEthernet0/1`, then written to the shared durable spool by
+the same `SpoolSink` the syslog listener uses. From there the classifier,
+the streaming triage worker, Live Tail, the dashboard spool view and
+`/api/metrics` all see traps exactly like syslog lines: the spool source
+is the source id, `fetch`/`fetch_new` work the same way, and drop counters
+feed the same backpressure feed (audit action `snmp_backpressure`).
+
+| `extra` key / env | Default | Meaning |
+|---|---|---|
+| `bind`, `port` | `0.0.0.0`, `162` | listen address. Port 162 is privileged: run as root, grant `CAP_NET_BIND_SERVICE`, or listen on an unprivileged port and redirect 162 to it |
+| `community` / `AI_LOG_ANALYZER_SNMP_COMMUNITY` | `public` | accepted SNMPv2c/v1 community strings, comma-separated; anything else is rejected and counted (`rejected_auth`) |
+| `v3_users` / `AI_LOG_ANALYZER_SNMP_V3_USERS` | — | USM users, one per `;`: `name:auth_proto:auth_pass`; `name` alone means noAuthNoPriv. `auth_proto` is `md5`, `sha`/`sha1`, `sha224`, `sha256`, `sha384` or `sha512` |
+| `allow` / `AI_LOG_ANALYZER_SNMP_ALLOW` | (all) | comma-separated sender IPs / CIDRs; others are dropped and counted |
+| `rcvbuf` / `AI_LOG_ANALYZER_SNMP_RCVBUF` | 4 MiB | `SO_RCVBUF`; the kernel may cap it at `net.core.rmem_max` |
+| `spool` / `AI_LOG_ANALYZER_SNMP_SPOOL` | `AI_LOG_ANALYZER_STATE_DB` | durable spool DB |
+| `buffer_size` | 50 000 | lines kept per source (ring or spool rows) |
+
+* **Versions:** SNMPv1 trap PDUs (generic traps map to
+  `1.3.6.1.6.3.1.1.5.(generic+1)`, enterprise-specific to
+  `<enterprise>.0.<specific>`), SNMPv2c, and SNMPv3/USM `noAuthNoPriv` and
+  `authNoPriv` (RFC 3414 key localisation, HMAC verified over the whole
+  message). **Not supported: `authPriv`** (encrypted traps) — they are
+  rejected explicitly and counted (`dropped_unsupported`), so a device
+  configured for privacy shows up in the counters instead of vanishing
+  silently. Configure such a device for `authNoPriv` or v2c.
+* **Enable it** (environment; the web UI's Sources tab accepts the same
+  fields via `POST /api/sources`):
+  ```sh
+  NETLOG_SOURCE_traps_TYPE=snmp
+  NETLOG_SOURCE_traps_URL=udp://0.0.0.0:162
+  NETLOG_SOURCE_traps_BIND=0.0.0.0
+  NETLOG_SOURCE_traps_PORT=162
+  NETLOG_SOURCE_traps_COMMUNITY=public
+  # NETLOG_SOURCE_traps_V3_USERS=trapuser:sha256:change-me
+  ```
+* **Test it** from a device or a workstation with `snmptrap` (net-snmp):
+  ```sh
+  snmptrap -v 2c -c public 127.0.0.1:162 "" 1.3.6.1.6.3.1.1.5.3 \
+    1.3.6.1.2.1.2.2.1.1.2 i 2 1.3.6.1.2.1.2.2.1.2.2 s "GigabitEthernet0/1"
+  ```
+  then check the spool (`/api/status/overview` shows the `traps` source
+  depth; Live Tail in the Logs tab lists `snmp` sources alongside `syslog`).
+* **Health:** `SnmpTrapSource.stats()` reports `received`, `traps`,
+  `rejected_auth`, `parse_errors`, `dropped_unsupported`, `udp_drops` and
+  the spool counters; `/api/metrics` exposes them as
+  `netlog_ingested_datagrams_total{source="traps"}` and
+  `netlog_dropped_datagrams_total{source="traps",reason="..."}`. A second
+  worker whose bind fails with EADDRINUSE becomes a *reader* of the shared
+  spool, exactly like the syslog listener.
+
 ## Topology-aware suppression
 
 `AnalysisResult.suppression` groups dependent alerts under their root. Root

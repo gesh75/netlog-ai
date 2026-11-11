@@ -3047,12 +3047,12 @@ async function loadTailSources() {
   try {
     const data = await fetchJSON("/api/sources");
     clear(sel);
-    (data.sources || []).filter((s) => s.type === "syslog").forEach((s) => {
+    (data.sources || []).filter((s) => s.type === "syslog" || s.type === "snmp").forEach((s) => {
       sel.appendChild(el("option", { text: s.id }));
       sel.lastChild.value = s.id;
     });
     if (!sel.options.length) {
-      sel.appendChild(el("option", { text: "(no syslog sources registered)" }));
+      sel.appendChild(el("option", { text: "(no syslog / SNMP sources registered)" }));
       sel.lastChild.value = "";
     }
   } catch { /* sources API unavailable — leave empty */ }

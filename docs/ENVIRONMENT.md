@@ -101,6 +101,7 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `AI_LOG_ANALYZER_SQLITE_SYNC` | SQLite default | **(new in 2.2.0)** SQLite `synchronous` level (`OFF`, `NORMAL`, `FULL`) for the state DB; trade durability against write speed. |
 | `AI_LOG_ANALYZER_SQLITE_JOURNAL_SIZE_LIMIT` | 64 MiB | **(new in 2.3.0)** WAL file cap in bytes for the state DB; once reached, SQLite checkpoints on the next write instead of growing the WAL without bound during a syslog storm. |
 | `AI_LOG_ANALYZER_SYSLOG_SPOOL` | the state DB | Separate syslog spool DB. |
+| `AI_LOG_ANALYZER_SNMP_SPOOL` | the state DB | **(new in 2.3.0)** Separate SNMP trap spool DB. |
 | `AI_LOG_ANALYZER_INCIDENT_STORE` | unset | Incident journal: a `*.jsonl` path, or a `*.db`/`*.sqlite` path. Falls back to the state DB. Local only, bounded. |
 | `AI_LOG_ANALYZER_AUDIT_DB` | the state DB | Audit log database. Auditing is on when this or the state DB is set. |
 | `AI_LOG_ANALYZER_RAG_DB` | the state DB | Retrieval (BM25) index database. |
@@ -150,6 +151,10 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `NETLOG_SOURCE_<id>_<KEY>` | unset | Defines a log source. A source needs `TYPE` and `URL`. Other keys: `API_TOKEN`, `USERNAME`, `PASSWORD`, `COOKIES` (`k=v;k=v`), `AUTH_METHODS` (default `api_token,basic,cookie`), `VERIFY_TLS` (default `true`; only the literal `false` disables), `TIMEOUT_SECONDS` (default `30`), plus type-specific keys (for example `INDEX_PATTERN`, `PORT`, `BIND`, `ALLOW`, `SPOOL`, `RCVBUF`, `MODE`). See [CONNECTORS.md](CONNECTORS.md). **Security:** the URL is fetched server-side; point it only at systems you operate. |
 | `AI_LOG_ANALYZER_SYSLOG_ALLOW` | unset (allow all) | Syslog sender allow-list (IPs or CIDRs). **Security:** set this on any listener reachable from untrusted networks. |
 | `AI_LOG_ANALYZER_SYSLOG_RCVBUF` | `4194304` | UDP socket receive buffer in bytes. |
+| `AI_LOG_ANALYZER_SNMP_COMMUNITY` | `public` | **(new in 2.3.0)** Accepted SNMPv2c/v1 community strings, comma-separated. Traps with any other community are rejected and counted. |
+| `AI_LOG_ANALYZER_SNMP_V3_USERS` | unset | **(new in 2.3.0)** SNMPv3 USM users, one per `;`: `name:auth_proto:auth_pass` — `name` alone means noAuthNoPriv; `auth_proto` is `md5`, `sha`/`sha1`, `sha224`, `sha256`, `sha384` or `sha512`. **Secret** (passphrases). |
+| `AI_LOG_ANALYZER_SNMP_ALLOW` | unset (allow all) | **(new in 2.3.0)** SNMP trap sender allow-list (IPs or CIDRs). **Security:** set this on any listener reachable from untrusted networks. |
+| `AI_LOG_ANALYZER_SNMP_RCVBUF` | `4194304` | **(new in 2.3.0)** UDP socket receive buffer in bytes. |
 | `NETLOG_DEMO_SYSLOG_PORT` | `5514` | UDP port for the `demo` command's built-in syslog listener (loopback only). |
 | `SOLARWINDS_URL` | unset | SolarWinds Orion SWIS or Observability endpoint; presence enables the native source. |
 | `SOLARWINDS_USERNAME` | unset | Basic-auth user. |
