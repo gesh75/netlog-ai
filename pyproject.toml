@@ -109,6 +109,5 @@ files = ["src"]
 [[tool.mypy.overrides]]
 module = [
     "ai_log_analyzer.llm",
-    "ai_log_analyzer.stability",
 ]
 ignore_errors = true

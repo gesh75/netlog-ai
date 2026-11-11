@@ -124,18 +124,18 @@ class StabilityTracker:
 
         entity = _DOWN_DESCRIPTIONS.get(e.description)
         if entity is not None:
-            entity = self._entity(st, entity, e)
-            st.downs[entity] = st.downs.get(entity, 0) + 1
-            if st.last_state.get(entity) == "up":
-                st.transitions[entity] = st.transitions.get(entity, 0) + 1
-            st.last_state[entity] = "down"
+            entity_key = self._entity(st, entity, e)
+            st.downs[entity_key] = st.downs.get(entity_key, 0) + 1
+            if st.last_state.get(entity_key) == "up":
+                st.transitions[entity_key] = st.transitions.get(entity_key, 0) + 1
+            st.last_state[entity_key] = "down"
         else:
             entity = _UP_DESCRIPTIONS.get(e.description)
             if entity is not None:
-                entity = self._entity(st, entity, e)
-                if st.last_state.get(entity) == "down":
-                    st.transitions[entity] = st.transitions.get(entity, 0) + 1
-                st.last_state[entity] = "up"
+                entity_key = self._entity(st, entity, e)
+                if st.last_state.get(entity_key) == "down":
+                    st.transitions[entity_key] = st.transitions.get(entity_key, 0) + 1
+                st.last_state[entity_key] = "up"
 
         # Minute-granularity bucket; arrival-order fallback for blank stamps.
         ts = e.timestamp or ""
@@ -216,7 +216,7 @@ class StabilityTracker:
             trend = self._trend(st)
             score = self._score(st, flaps, burst)
             flapped = {k: n for k, n in st.transitions.items() if n >= 2}   # at least one round trip
-            worst_cls, worst_id = max(flapped, key=flapped.get) if flapped else ("", "")
+            worst_cls, worst_id = max(flapped, key=lambda k: flapped[k]) if flapped else ("", "")
             devices.append({
                 "hostname": host,
                 "score": score,
