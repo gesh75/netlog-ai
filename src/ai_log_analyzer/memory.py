@@ -162,7 +162,7 @@ class IncidentStore:
                 key = (str(host), category)
                 counts[key] = counts.get(key, 0) + 1
                 last[key] = str(record.get("generated_at") or "")
-        rows = [
+        rows: list[dict[str, Any]] = [
             {"hostname": host, "category": category, "count": count, "last_seen": last[(host, category)]}
             for (host, category), count in counts.items()
             if count >= 2
