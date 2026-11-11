@@ -48,6 +48,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from ai_log_analyzer import metrics
 from ai_log_analyzer.dedup import deduplicate_logs, is_dedup_enabled
 from ai_log_analyzer.sanitize import sanitize
 from ai_log_analyzer.sanitize_vault import SanitizeVault
@@ -613,12 +614,15 @@ def _query(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
             "truncated": truncated,
             "ok": False,
         }
+        _call_started = time.perf_counter()
         try:
             text = fn(system, prompt, max_tokens)
         except Exception as exc:  # a buggy provider must not take the chain down
             logger.warning("LLM provider %s raised %s", name, type(exc).__name__)
             _record_error(name, f"Unexpected {type(exc).__name__}: {str(exc)[:150]}")
             text = None
+        # P4: one latency/error counter per provider call, for /api/metrics.
+        metrics.observe_llm_call(name, time.perf_counter() - _call_started, bool(text))
         _breaker_record(fn, name, bool(text))
         try:
             _audit_call(name, prompt, max_tokens, redactions, len(vault), bool(text))

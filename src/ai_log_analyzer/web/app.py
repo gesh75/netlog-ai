@@ -571,6 +571,7 @@ def create_app() -> Flask:
         auth,
         core,
         incidents,
+        metrics,
         rag,
         remediation,
         sites,
@@ -584,6 +585,7 @@ def create_app() -> Flask:
     app.register_blueprint(core.bp)
     app.register_blueprint(incidents.bp)
     app.register_blueprint(llm_bp.bp)
+    app.register_blueprint(metrics.bp)
     app.register_blueprint(rag.bp)
     app.register_blueprint(remediation.bp)
     app.register_blueprint(sites.bp)

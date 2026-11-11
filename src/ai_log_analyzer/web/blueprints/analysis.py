@@ -8,12 +8,13 @@ keep working.
 from __future__ import annotations
 
 import itertools
+import time
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
 
 import ai_log_analyzer.web.app as web_app
-from ai_log_analyzer import llm, webhooks
+from ai_log_analyzer import llm, metrics, webhooks
 from ai_log_analyzer.adapters import frr, network_tool
 from ai_log_analyzer.adapters.file import parse_lines
 from ai_log_analyzer.analyzer import analyze, optimize_config
@@ -166,7 +167,11 @@ def api_analyze():
         return jsonify({"error": "No events ingested from source"}), 404
     events = itertools.chain([first], event_iter)
 
+    _analyze_started = time.perf_counter()
     result = analyze(events, use_llm=use_llm, dedup=dedup, evpn_causal=evpn_causal)
+    # P4: completed-run wall time, for /api/metrics. Only runs that reach
+    # the analyzer count; early 4xx exits above are not analysis runs.
+    metrics.observe_analysis(time.perf_counter() - _analyze_started)
     result_dict = _scrub_analysis(result.to_dict())
     webhooks.notify_analysis(result_dict, source)
     return jsonify(result_dict)
