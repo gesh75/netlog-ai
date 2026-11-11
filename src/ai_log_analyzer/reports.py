@@ -305,7 +305,7 @@ def to_pdf(html_text: str) -> bytes | None:
             proc = subprocess.run(
                 [chrome, "--headless", "--disable-gpu", "--no-sandbox",
                  f"--print-to-pdf={outpath}", f"file://{inpath}"],
-                capture_output=True, timeout=60,
+                capture_output=True, text=True, timeout=60,
             )
             if proc.returncode == 0 and Path(outpath).is_file():
                 data = Path(outpath).read_bytes()

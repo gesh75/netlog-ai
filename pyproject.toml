@@ -120,7 +120,6 @@ module = [
     "ai_log_analyzer.mcp_server.server",
     "ai_log_analyzer.memory",
     "ai_log_analyzer.rag",
-    "ai_log_analyzer.reports",
     "ai_log_analyzer.servicenow_sync",
     "ai_log_analyzer.site_diagram",
     "ai_log_analyzer.sources.syslog",
