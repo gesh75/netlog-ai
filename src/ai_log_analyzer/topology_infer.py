@@ -413,14 +413,14 @@ def extract_facts(hostname: str, platform: str, config_text: str) -> DeviceFacts
     router_id = ""
     ospf_router_id = ""
     for rx in (_OSPF_ROUTER_ID_FRR, _OSPF_ROUTER_ID_EOS):
-        m = rx.search(config_text)
-        if m:
-            ospf_router_id = m.group("rid")
+        sm = rx.search(config_text)
+        if sm:
+            ospf_router_id = sm.group("rid")
             break
     if not ospf_router_id:
-        m = _OSPF_ROUTER_ID_JUN.search(config_text)
-        if m:
-            ospf_router_id = m.group("rid")
+        sm = _OSPF_ROUTER_ID_JUN.search(config_text)
+        if sm:
+            ospf_router_id = sm.group("rid")
     # Best-effort device router-id: prefer explicit OSPF RID, else any loopback IP.
     router_id = ospf_router_id
     if not router_id:
@@ -438,13 +438,13 @@ def extract_facts(hostname: str, platform: str, config_text: str) -> DeviceFacts
     vtep_ip = ""
     l2_vnis: list[int] = []
     l3_vnis: list[int] = []
-    m = _VXLAN_SOURCE_EOS.search(config_text)
-    if m:
-        vtep_source_iface = m.group("src")
+    sm = _VXLAN_SOURCE_EOS.search(config_text)
+    if sm:
+        vtep_source_iface = sm.group("src")
     else:
-        m = _VTEP_SOURCE_JUN.search(config_text)
-        if m:
-            vtep_source_iface = m.group("src")
+        sm = _VTEP_SOURCE_JUN.search(config_text)
+        if sm:
+            vtep_source_iface = sm.group("src")
     if vtep_source_iface and vtep_source_iface.lower() in (n.lower() for n in interfaces):
         info = next(v for k, v in interfaces.items() if k.lower() == vtep_source_iface.lower())
         if info.ip:
@@ -459,14 +459,14 @@ def extract_facts(hostname: str, platform: str, config_text: str) -> DeviceFacts
     if not vtep_ip and has_evpn_signal:
         # Try the conventional loopback names per platform; first /32 wins.
         for candidate in ("lo", "Loopback0", "Loopback1", "system0", "lo0"):
-            info = interfaces.get(candidate) or next(
+            cand_info = interfaces.get(candidate) or next(
                 (v for k, v in interfaces.items() if k.lower() == candidate.lower()), None
             )
-            if info and info.ip:
+            if cand_info and cand_info.ip:
                 try:
-                    vtep_ip = str(ipaddress.ip_interface(info.ip).ip)
+                    vtep_ip = str(ipaddress.ip_interface(cand_info.ip).ip)
                     if not vtep_source_iface:
-                        vtep_source_iface = info.name
+                        vtep_source_iface = cand_info.name
                     break
                 except (ipaddress.AddressValueError, ValueError):
                     continue
@@ -513,9 +513,9 @@ def extract_facts(hostname: str, platform: str, config_text: str) -> DeviceFacts
     vrfs: list[str] = []
     for rx in (_VRF_EOS, _VRF_FRR, _VRF_JUNOS):
         for m in rx.finditer(config_text):
-            v = m.group("v").strip().rstrip("{").strip()
-            if v and v.lower() not in _VRF_SKIP and v not in vrfs:
-                vrfs.append(v)
+            vrf_name = m.group("v").strip().rstrip("{").strip()
+            if vrf_name and vrf_name.lower() not in _VRF_SKIP and vrf_name not in vrfs:
+                vrfs.append(vrf_name)
 
     return DeviceFacts(
         hostname=hostname, platform=plat,
@@ -600,7 +600,7 @@ def infer_edges(facts_by_host: dict[str, DeviceFacts]) -> list[InferredEdge]:
     edges: dict[tuple[str, str], InferredEdge] = {}
 
     def upsert(a: str, b: str, rule: str, conf: float, ev: str) -> None:
-        key = tuple(sorted([a, b]))  # type: ignore[assignment]
+        key: tuple[str, str] = (a, b) if a <= b else (b, a)
         if key not in edges or edges[key].confidence < conf:
             edges[key] = InferredEdge(source=key[0], target=key[1],
                                        rule=rule, confidence=conf, evidence=ev)
@@ -672,7 +672,7 @@ def infer_edges(facts_by_host: dict[str, DeviceFacts]) -> list[InferredEdge]:
             if net.prefixlen >= 28 and net.prefixlen <= 31:
                 subnet_owners.setdefault(str(net), set()).add(f.hostname)
 
-    for net, owners in subnet_owners.items():
+    for net_str, owners in subnet_owners.items():
         if len(owners) < 2 or len(owners) > _MAX_SUBNET_OWNERS:
             continue
         owners_l = sorted(owners)
@@ -680,18 +680,18 @@ def infer_edges(facts_by_host: dict[str, DeviceFacts]) -> list[InferredEdge]:
             for j in range(i + 1, len(owners_l)):
                 a, b = owners_l[i], owners_l[j]
                 upsert(a, b, "subnet-co-membership", 0.85,
-                       f"Both on {net} ({net[net.index('/'):]})")
+                       f"Both on {net_str} ({net_str[net_str.index('/'):]})")
 
     # ─── Rule 5: Junos chassis-cluster HA partner inference ──────────────────
     # When two devices share a hostname prefix and one is an "a" / one is "b" /
     # or naming like fw-01 / fw-02 with both having chassis-cluster → HA pair
     for i in range(len(all_facts)):
         for j in range(i + 1, len(all_facts)):
-            a, b = all_facts[i], all_facts[j]
-            if not (a.has_chassis_cluster or b.has_chassis_cluster):
+            fa, fb = all_facts[i], all_facts[j]
+            if not (fa.has_chassis_cluster or fb.has_chassis_cluster):
                 continue
-            if _is_ha_pair(a.hostname, b.hostname):
-                upsert(a.hostname, b.hostname, "ha-pair-naming", 0.9,
+            if _is_ha_pair(fa.hostname, fb.hostname):
+                upsert(fa.hostname, fb.hostname, "ha-pair-naming", 0.9,
                        "Naming + chassis-cluster suggests HA pair")
 
     return list(edges.values())
