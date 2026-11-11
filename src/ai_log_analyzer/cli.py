@@ -396,7 +396,10 @@ def cmd_triage_worker(args: argparse.Namespace) -> int:
     worker.start()
     try:
         while worker.running:
-            worker._thread.join(1.0)
+            thread = worker._thread
+            if thread is None:
+                break
+            thread.join(1.0)
     except KeyboardInterrupt:
         pass
     finally:
