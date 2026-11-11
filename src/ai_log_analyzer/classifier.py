@@ -64,7 +64,7 @@ _KB_PATTERNS: list[tuple[str, str, str, str]] = [
     (r"fortios-(?:wireless|wifi).*(?:4[- ]way handshake failed|invalid 2/4 message|MIC failure)|wireless.*(?:handshake failed|invalid 2/4 message)",
                                                                          "medium",   "wireless",   "Wi-Fi 4-way handshake failure / PSK mismatch"),
     (r"fortios-(?:switch|switch-controller).*(?:port.*down|link.*down|poe.*(?:overload|fault)|flapguard)|switch.*(?:port.*down|flapguard)",
-                                                                         "high",     "switch",     "FortiSwitch port link down or PoE fault"),
+                                                                         "high",     "switching",  "FortiSwitch port link down or PoE fault"),
     (r"fortios-ssl.*(?:mismatched|invalid certificate|untrusted issuer)|ssl.*(?:certificate info is mismatched)",
                                                                          "low",      "security",   "TLS SNI and certificate mismatch"),
     (r"fortios-(?:forward|traffic).*action=ip-conn|Connection Failed.*action=ip-conn",
