@@ -6,6 +6,16 @@ loose semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **SNMP trap receiver (v2.3.0 feature 1):** UDP listener (default `0.0.0.0:162`,
+  kinds `snmp`) for SNMPv1/v2c/v3 traps — stdlib-only BER parser, v2c community
+  check, v3/USM `noAuthNoPriv` and `authNoPriv` (RFC 3414 key localisation,
+  HMAC verified). Traps render as syslog-like lines and feed the **same**
+  durable spool, classifier, triage worker, Live Tail and `/api/metrics` as
+  syslog — no parallel pipeline. `authPriv` traps are rejected explicitly and
+  counted. See `docs/OPERATIONS.md` ("SNMP trap receiver").
+
 ### Security
 
 - **Web:** the SSE live tail no longer accepts the API token in the URL (`?token=`), where request-line
