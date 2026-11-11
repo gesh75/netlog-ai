@@ -39,9 +39,9 @@ def next_commands(result: dict[str, Any], limit: int = _MAX_COMMANDS) -> list[st
     if not item:
         return []
     description = str(item.get("description") or "").lower()
-    for needle, commands in _COMMANDS:
+    for needle, matched in _COMMANDS:
         if needle in description:
-            return [_clean(cmd) for cmd in commands[:limit]]
+            return [_clean(cmd) for cmd in matched[:limit]]
     entry = lookup(str(item.get("category") or ""), description)
     commands: list[str] = []
     for phase in entry.get("phases") or []:
