@@ -370,10 +370,14 @@ def cmd_rag(args: argparse.Namespace) -> int:
         hosts = [h for h in (args.hosts or "").split(",") if h]
         hits = index.search(args.query, k=args.k, hosts=hosts)
         if args.json:
-            print(json.dumps(hits, indent=2))
+            print(json.dumps({"mode": index.last_search_mode, "hits": hits}, indent=2))
         else:
+            print(f"# mode: {index.last_search_mode}")
             for h in hits:
                 print(f"{h['score']:>7.2f}  {h['citation']}")
+        return 0
+    if args.rag_cmd == "embed":
+        print(json.dumps(index.embed_missing(), indent=2))
         return 0
     print(json.dumps(index.stats(), indent=2))
     return 0
@@ -657,6 +661,8 @@ def main() -> None:
     rs.add_argument("--hosts", help="Comma-separated devices to boost")
     rs.add_argument("-k", type=int, default=8)
     rs.add_argument("--json", action="store_true")
+    rsub.add_parser("embed", help="Embed documents missing a vector for the current model "
+                                  "(no-op when Ollama is unreachable)")
     rsub.add_parser("stats", help="Document counts per kind and source")
     rd = rsub.add_parser("drift", help="Diff a running config against its golden config")
     rd.add_argument("running")

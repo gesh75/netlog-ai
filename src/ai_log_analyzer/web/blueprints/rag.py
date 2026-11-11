@@ -40,8 +40,11 @@ def api_rag_search():
         k = min(int(request.args.get("k") or 8), 50)
     except ValueError:
         return jsonify({"error": "k must be an integer"}), 400
-    hits = _rag_or_400().search(q, k=k, kinds=kinds, hosts=hosts)
-    return jsonify({"query": q, "hits": rag.public_evidence(
+    index = _rag_or_400()
+    hits = index.search(q, k=k, kinds=kinds, hosts=hosts)
+    return jsonify({"query": q, "mode": index.last_search_mode,
+                    "embeddings": index.stats()["embeddings"],
+                    "hits": rag.public_evidence(
         [{**h, "id": f"S{i}"} for i, h in enumerate(hits, 1)])})
 
 @bp.route("/api/rag/stats", methods=["GET"])

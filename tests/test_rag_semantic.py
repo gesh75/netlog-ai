@@ -161,3 +161,75 @@ def test_public_evidence_carries_both_scores(db):
     pub = rag.public_evidence([{**hits[0], "id": "S1"}])
     assert pub[0]["bm25_score"] > 0
     assert pub[0]["vector_score"] == pytest.approx(1.0)
+
+
+# ── API + CLI surface ────────────────────────────────────────────────────────
+
+VIEW = "view-tok-0123456789"
+ADMIN = "admin-tok-0123456789"
+
+
+@pytest.fixture
+def api_client(tmp_path, monkeypatch):
+    import ai_log_analyzer.web.app as web_app
+    from ai_log_analyzer.state_store import open_db
+    from ai_log_analyzer.web.app import create_app
+
+    path = tmp_path / "state.db"
+    monkeypatch.setenv("AI_LOG_ANALYZER_STATE_DB", str(path))
+    open_db(path)
+    monkeypatch.setattr(web_app, "API_TOKEN", "")
+    monkeypatch.setenv("AI_LOG_ANALYZER_VIEWER_TOKENS", f"vera:{VIEW}")
+    monkeypatch.setenv("AI_LOG_ANALYZER_ADMIN_TOKENS", f"ada:{ADMIN}")
+    app = create_app()
+    app.config.update(TESTING=True)
+    return app.test_client()
+
+
+def _h(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_api_search_reports_keyword_mode_without_ollama(api_client):
+    r = api_client.post("/api/rag/reindex", json={}, headers=_h(ADMIN))
+    assert r.status_code == 200
+    body = api_client.get("/api/rag/search?q=bgp+neighbor+remote-as&k=3",
+                          headers=_h(VIEW)).get_json()
+    assert body["mode"] == "keyword"  # no Ollama in the test environment
+    assert body["embeddings"]["enabled"] is True
+    assert body["embeddings"]["available"] is False
+    assert body["hits"] and body["hits"][0]["bm25_score"] > 0
+    assert body["hits"][0]["vector_score"] is None
+
+
+def test_api_stats_reports_embedding_coverage(api_client):
+    api_client.post("/api/rag/reindex", json={}, headers=_h(ADMIN))
+    body = api_client.get("/api/rag/stats", headers=_h(VIEW)).get_json()
+    assert body["embeddings"]["documents"] == body["documents"]
+    assert body["embeddings"]["embedded_docs"] == 0  # nothing embedded without Ollama
+
+
+def test_cli_rag_embed_reports_unavailable_without_ollama(db, monkeypatch, capsys):
+    import argparse
+
+    from ai_log_analyzer.cli import cmd_rag
+
+    args = argparse.Namespace(rag_cmd="embed", db=str(db.path))
+    assert cmd_rag(args) == 0
+    assert '"available": false' in capsys.readouterr().out
+
+
+def test_cli_rag_search_json_reports_mode(db, monkeypatch, capsys):
+    import argparse
+
+    from ai_log_analyzer.cli import cmd_rag
+
+    _seed(rag.RagIndex(db, embedder=False))
+    args = argparse.Namespace(rag_cmd="search", db=str(db.path), query="BGP neighbor",
+                              hosts=None, k=3, json=True)
+    assert cmd_rag(args) == 0
+    import json
+
+    body = json.loads(capsys.readouterr().out)
+    assert body["mode"] == "keyword"
+    assert body["hits"] and body["hits"][0]["ref"] == "kb:bgp"
