@@ -207,7 +207,7 @@ def _restamp_yearless(parsed: datetime, ref: datetime) -> datetime:
     for year in (ref.year - 1, ref.year, ref.year + 1):
         candidate = _with_year(parsed, year)
         delta = abs((candidate - ref).total_seconds())
-        if best is None or delta < best_delta:
+        if best_delta is None or delta < best_delta:
             best = candidate
             best_delta = delta
     assert best is not None
@@ -297,7 +297,7 @@ def _same_category_later_storm(
     leftover: list[ClassifiedEvent],
     leftover_cats: set[str],
     missing: list[ClassifiedEvent],
-    stamp_year: int,
+    stamp_year: datetime | int,
 ) -> list[ClassifiedEvent] | None:
     """Floor a later leftover-category storm; skip leftover overflow.
 
@@ -690,13 +690,13 @@ def blast_radius(
         estimated = "Quiet fabric — no ranked actions."
         epicenter = "—"
     else:
-        rooted = bool(root and root.get("hostname"))
-        epicenter = root["hostname"] if rooted else (getattr(top, "devices", None) or ["unknown"])[0]
-        what = (root.get("description") if rooted else "") or getattr(top, "description", "")
+        rooted = root is not None and bool(root.get("hostname"))
+        epicenter = root["hostname"] if root is not None and rooted else (getattr(top, "devices", None) or ["unknown"])[0]
+        what = (root.get("description") if rooted and root is not None else "") or getattr(top, "description", "")
         count = "" if rooted else f" ×{getattr(top, 'count', 1)}"
         estimated = (
             f"{total} device{'s' if total != 1 else ''} in {', '.join(categories[:3]) or 'uncategorized'}. "
-            f"Epicenter {epicenter} ({what.lower()}{count}). {flap_note}."
+            f"Epicenter {epicenter} ({(what or '').lower()}{count}). {flap_note}."
         )
     return {
         "epicenter": epicenter,

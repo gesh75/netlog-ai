@@ -108,7 +108,6 @@ files = ["src"]
 # so new modules start clean.
 [[tool.mypy.overrides]]
 module = [
-    "ai_log_analyzer.causal",
     "ai_log_analyzer.correlate",
     "ai_log_analyzer.llm",
     "ai_log_analyzer.servicenow_sync",
