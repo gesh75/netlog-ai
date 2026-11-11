@@ -287,6 +287,17 @@ Add a case by dropping a JSON file with `logs`, optional `configs` / `golden` /
 | Egress | 🔒 *Local only · no cloud fallback*, ☁ *Cloud fallback enabled*, ☁ *Cloud: provider* | local only |
 | Vault | entities tokenized and secrets redacted on the last LLM call | last call succeeded |
 
+* **Prometheus metrics** (`GET /api/metrics`, `viewer` role; same Bearer token as the other `/api/*` routes): spool depth (`netlog_spool_rows`), dropped datagrams (`netlog_dropped_datagrams_total`), ingest counters (`netlog_ingested_datagrams_total`, `netlog_events_per_second`), LLM calls/latency (`netlog_llm_calls_total`, `netlog_llm_call_seconds_total`) and analysis runs (`netlog_analysis_runs_total`, `netlog_analysis_seconds_total`). A scrape never writes to the state DB and never probes an LLM provider. Example scrape config:
+
+  ```yaml
+  scrape_configs:
+    - job_name: netlog-ai
+      static_configs:
+        - targets: ['127.0.0.1:6060']
+      metrics_path: /api/metrics
+      # With RBAC on, add: authorization: {credentials: "<viewer-token>"}
+  ```
+
 * **Incident cards:** one per suppression root (platform, device unreachable, transport) and per cross-vendor cluster that no root explains.
   * Each card shows the shared peer IPs, ASNs, tunnels, VRFs, /30–/31 subnets and interfaces.
   * The suppressed downstream alerts are behind an expandable section.
