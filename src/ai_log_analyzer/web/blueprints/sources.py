@@ -161,6 +161,51 @@ def api_sources_add():
         return jsonify({"ok": False, "error": f"bad config: {exc}"}), 400
     return jsonify({"ok": True, "id": src_id})
 
+@bp.route("/api/sources/<source_id>", methods=["GET"])
+@require_role("viewer")
+def api_sources_get(source_id: str):
+    """Inspect a registered source: config, health, and recent buffered events."""
+    src = source_manager.get(source_id)
+    if src is None:
+        return jsonify({"ok": False, "error": f"unknown source: {source_id}"}), 404
+
+    matching = [s for s in source_manager.describe() if s["id"] == source_id]
+    desc = _redact_source(matching[0]) if matching else {"id": source_id}
+    health = source_manager.healthcheck(source_id)
+
+    try:
+        limit = min(100, max(1, int(request.args.get("limit") or 25)))
+    except (ValueError, TypeError):
+        limit = 25
+    try:
+        since = int(request.args.get("since") or 3600)
+    except (ValueError, TypeError):
+        since = 3600
+
+    events = []
+    try:
+        events = source_manager.fetch(source_id, since_seconds=since, limit=limit)
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "source": desc,
+        "health": health,
+        "recent_events_count": len(events),
+        "events": [
+            {
+                "timestamp": e.timestamp,
+                "hostname": e.hostname,
+                "appname": e.appname,
+                "severity_raw": e.severity_raw,
+                "message": _scrub_text(e.message),
+            }
+            for e in events
+        ],
+    })
+
+
 @bp.route("/api/sources/<source_id>", methods=["DELETE"])
 @require_role("admin", "config.sources.remove")
 def api_sources_remove(source_id: str):
