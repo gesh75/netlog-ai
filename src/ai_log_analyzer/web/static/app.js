@@ -303,9 +303,11 @@ function syncRunButton() {
   const needsContainer = src === "frr" && selectedContainerCount() === 0;
   const needsConnector = src === "connector" && !($("connector-source") && $("connector-source").value);
   btn.disabled = needsContainer || needsConnector;
-  if (needsContainer) btn.textContent = "Select a container";
-  else if (needsConnector) btn.textContent = "Select a connector";
-  else btn.textContent = "▶ Run Analysis";
+  // Keep aria-label in sync with the visible text (WCAG 2.5.3): the label
+  // must contain the button's visible text, which changes per state.
+  if (needsContainer)      { btn.textContent = "Select a container"; btn.setAttribute("aria-label", "Select a container"); }
+  else if (needsConnector) { btn.textContent = "Select a connector"; btn.setAttribute("aria-label", "Select a connector"); }
+  else                     { btn.textContent = "▶ Run Analysis";     btn.setAttribute("aria-label", "▶ Run Analysis"); }
 }
 
 function refreshChipsCount() {
@@ -405,7 +407,9 @@ function toast(message, kind = "info", duration = 4000) {
   const close = document.createElement("button");
   close.className = "toast-close";
   close.setAttribute("aria-label", "Dismiss notification");
-  close.textContent = "✕";
+  // The ✕ glyph is decorative: hide it from AT so the accessible name
+  // ("Dismiss notification") is not flagged for missing the visible text.
+  close.innerHTML = '<span aria-hidden="true">✕</span>';
   const dismiss = () => {
     if (!t.parentNode) return;
     t.classList.add("leaving");

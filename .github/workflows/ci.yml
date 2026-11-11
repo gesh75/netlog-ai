@@ -73,11 +73,9 @@ jobs:
   a11y:
     # WCAG-AA audit of the dashboard (scripts/audit-a11y.cjs): boots the
     # real web UI, walks 5 UI states, fails on critical/serious axe
-    # violations. ADVISORY (continue-on-error) for now: a local run on
-    # 2026-11-11 found 6 AA blockers (1 critical + 5 serious, incl.
-    # label-content-name-mismatch on the side tabs) — the dashboard does
-    # not pass yet. Once those are fixed, remove continue-on-error so the
-    # gate blocks. See the work plan (P0.5).
+    # violations. BLOCKING since 2026-11-11 (P1): the 6 AA blockers found
+    # on 2026-11-11 (1 critical + 5 serious) were fixed and the audit
+    # reports 0 blockers locally. See the work plan (P1, task 7a).
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -105,8 +103,7 @@ jobs:
             sleep 1
           done
           curl -sf http://localhost:6060/ >/dev/null
-      - name: Accessibility audit (WCAG-AA, advisory)
-        continue-on-error: true
+      - name: Accessibility audit (WCAG-AA)
         run: NODE_PATH=/tmp/a11y/node_modules node scripts/audit-a11y.cjs
 
   build:

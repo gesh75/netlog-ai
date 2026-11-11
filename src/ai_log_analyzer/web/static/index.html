@@ -866,6 +866,7 @@
     background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
   }
   .topo-layer-row > button { width: auto !important; flex: 0 0 auto; }
+  .topo-layer-tabs { display: flex; flex-flow: row wrap; gap: 6px; align-items: center; }
   .topo-chip {
     /* width:auto + flex:0 0 auto overrides the panel-level `button { width:100% }`
        rule so chips stay pill-sized and lay out inline. */
@@ -1303,9 +1304,9 @@
   <aside>
     <!-- Tab navigation -->
     <div class="side-tabs" role="tablist" aria-label="Analyzer sections">
-      <button class="side-tab active" data-tab="logs"   role="tab" aria-selected="true"  aria-controls="tabpanel-logs"   id="tab-logs"   aria-label="Log analysis tab (press 1)"          title="Log analysis (1)">📊 Logs<kbd class="kbd-hint" aria-hidden="true">1</kbd></button>
-      <button class="side-tab"        data-tab="device" role="tab" aria-selected="false" aria-controls="tabpanel-device" id="tab-device" aria-label="Device optimization tab (press 2)"   title="Device optimization (2)">⚙️ Device<kbd class="kbd-hint" aria-hidden="true">2</kbd></button>
-      <button class="side-tab"        data-tab="site"   role="tab" aria-selected="false" aria-controls="tabpanel-site"   id="tab-site"   aria-label="Site intelligence tab (press 3)"     title="Site intelligence (3)">🌐 Site<kbd class="kbd-hint" aria-hidden="true">3</kbd></button>
+      <button class="side-tab active" data-tab="logs"   role="tab" aria-selected="true"  aria-controls="tabpanel-logs"   id="tab-logs"   aria-label="Logs 1 — Log analysis tab"          title="Log analysis (1)">📊 Logs <kbd class="kbd-hint" aria-hidden="true">1</kbd></button>
+      <button class="side-tab"        data-tab="device" role="tab" aria-selected="false" aria-controls="tabpanel-device" id="tab-device" aria-label="Device 2 — Device optimization tab"   title="Device optimization (2)">⚙️ Device <kbd class="kbd-hint" aria-hidden="true">2</kbd></button>
+      <button class="side-tab"        data-tab="site"   role="tab" aria-selected="false" aria-controls="tabpanel-site"   id="tab-site"   aria-label="Site 3 — Site intelligence tab"     title="Site intelligence (3)">🌐 Site <kbd class="kbd-hint" aria-hidden="true">3</kbd></button>
     </div>
 
     <!-- ─── Tab 1: Log Analysis ─── -->
@@ -1368,7 +1369,7 @@
             <label>Containers</label>
             <div class="chip-pick-actions">
               <button type="button" id="chips-all"  aria-label="Select all containers"   title="Select all containers">All</button>
-              <button type="button" id="chips-none" aria-label="Deselect all containers" title="Deselect all containers">None</button>
+              <button type="button" id="chips-none" aria-label="None — Deselect all containers" title="Deselect all containers">None</button>
               <span class="chip-picker-meta" id="chips-count" style="margin-left:auto;align-self:center;">none selected</span>
             </div>
             <div id="chip-picker" class="chip-picker"></div>
@@ -1522,7 +1523,7 @@
 
           <div class="group-label">Actions</div>
           <!-- Primary CTA is "Analyze Whole Site" (most common action); Site-Wide Opt is secondary -->
-          <button id="site-opt-btn"  class="primary"   aria-label="Analyze entire site for cross-device issues">🌐 Analyze Whole Site</button>
+          <button id="site-opt-btn"  class="primary"   aria-label="Analyze Whole Site — analyze entire site for cross-device issues">🌐 Analyze Whole Site</button>
           <button id="site-wide-btn" class="secondary" aria-label="Run strategic site-wide optimization" style="margin-top:6px;">🎯 Site-Wide Optimization</button>
 
           <div class="group-label">Analysis</div>
@@ -1533,7 +1534,7 @@
 
           <div class="group-label" title="Network documentation generated from the config bundle (topology, BGP/OSPF, lifecycle)">Site Documentation</div>
           <div class="btn-row">
-            <button id="sitedoc-md-btn"   class="secondary tiny" aria-label="Download site documentation as Markdown"   title="Site docs · Markdown" style="padding:6px 8px;width:auto;flex:1;">📝 MD</button>
+            <button id="sitedoc-md-btn"   class="secondary tiny" aria-label="MD — Download site documentation as Markdown"   title="Site docs · Markdown" style="padding:6px 8px;width:auto;flex:1;">📝 MD</button>
             <button id="sitedoc-html-btn" class="secondary tiny" aria-label="Download site documentation as HTML"       title="Site docs · HTML"     style="padding:6px 8px;width:auto;flex:1;">🌐 HTML</button>
             <button id="sitedoc-pdf-btn"  class="secondary tiny" aria-label="Download site documentation as PDF"        title="Site docs · PDF"      style="padding:6px 8px;width:auto;flex:1;">📑 PDF</button>
           </div>
@@ -1867,16 +1868,20 @@
     <div class="panel" id="topo-panel" style="display:none;">
       <h2>🗺️ Topology Map</h2>
       <p class="row-msg" style="margin:0 0 8px;">Pick a <strong>layer</strong> below — devices are tiered by role (core → edge → dist → leaf). <strong>Drag</strong> any node to pin it; pins persist per site/layer in your browser. <strong>Reset Layout</strong> recomputes from scratch.</p>
-      <!-- Layer chips — single-select. Order matches LAYER_ORDER in topology.py. -->
-      <div id="topo-layer-chips" class="topo-layer-row" role="tablist" aria-label="Topology layer selector">
-        <button class="topo-chip active" data-layer="physical" role="tab" aria-selected="true"
-                title="L1 / L3 view: interface names, IP addresses, descriptions">PHYSICAL</button>
-        <button class="topo-chip"        data-layer="bgp"      role="tab" aria-selected="false"
-                title="BGP sessions: ASNs, type (iBGP/eBGP), address families, VRF">BGP</button>
-        <button class="topo-chip"        data-layer="ospf"     role="tab" aria-selected="false"
-                title="OSPF adjacencies: area, router-IDs, timers, cost">OSPF</button>
-        <button class="topo-chip"        data-layer="vxlan"    role="tab" aria-selected="false"
-                title="VXLAN overlay: VTEPs, L2/L3 VNIs">VXLAN</button>
+      <!-- Layer chips — single-select. Order matches LAYER_ORDER in topology.py.
+           The four layer chips live in their own tablist: a tablist may only
+           contain tabs, and this row also holds action buttons and toggles. -->
+      <div id="topo-layer-chips" class="topo-layer-row" role="group" aria-label="Topology layer selector">
+        <div class="topo-layer-tabs" role="tablist" aria-label="Topology layers">
+          <button class="topo-chip active" data-layer="physical" role="tab" aria-selected="true"
+                  title="L1 / L3 view: interface names, IP addresses, descriptions">PHYSICAL</button>
+          <button class="topo-chip"        data-layer="bgp"      role="tab" aria-selected="false"
+                  title="BGP sessions: ASNs, type (iBGP/eBGP), address families, VRF">BGP</button>
+          <button class="topo-chip"        data-layer="ospf"     role="tab" aria-selected="false"
+                  title="OSPF adjacencies: area, router-IDs, timers, cost">OSPF</button>
+          <button class="topo-chip"        data-layer="vxlan"    role="tab" aria-selected="false"
+                  title="VXLAN overlay: VTEPs, L2/L3 VNIs">VXLAN</button>
+        </div>
         <span class="topo-legend-sep">·</span>
         <button id="topo-reset-layout" class="tiny secondary" aria-label="Reset layout — clear pinned positions for this site/layer">↺ Reset Layout</button>
         <button id="btn-deep-overlay" class="btn btn-secondary secondary tiny" type="button" aria-pressed="false" title="Highlight SPOF articulation nodes, flap storms, and active ServiceNow changes">Deep AIOps Overlay (SPOF &amp; CHG)</button>
