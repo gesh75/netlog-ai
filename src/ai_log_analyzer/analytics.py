@@ -526,13 +526,13 @@ def _topology_parts(
     topology: TopologyGraph | Mapping[str, Any],
 ) -> tuple[list[str], dict[str, str], list[tuple[str, str]]]:
     if isinstance(topology, Topology):
-        names = [node.id for node in topology.nodes]
-        roles = {node.id: node.role or node.tier for node in topology.nodes}
-        edges = [(edge.source, edge.target) for edge in topology.edges]
+        names: list[str] = [node.id for node in topology.nodes]
+        roles: dict[str, str] = {node.id: node.role or node.tier for node in topology.nodes}
+        edges: list[tuple[str, str]] = [(edge.source, edge.target) for edge in topology.edges]
         return names, roles, edges
     raw_nodes = list(topology.get("nodes") or topology.get("devices") or [])
-    names: list[str] = []
-    roles: dict[str, str] = {}
+    names = []
+    roles = {}
     for node in raw_nodes:
         if isinstance(node, str):
             names.append(node)
@@ -543,7 +543,7 @@ def _topology_parts(
                 names.append(name)
                 roles[name] = str(node.get("role") or node.get("tier") or "")
     raw_edges = list(topology.get("edges") or topology.get("links") or [])
-    edges: list[tuple[str, str]] = []
+    edges = []
     for edge in raw_edges:
         pair = _edge_pair(edge)
         if pair is not None:
