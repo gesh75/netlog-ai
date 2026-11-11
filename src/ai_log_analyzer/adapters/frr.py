@@ -115,6 +115,10 @@ def is_docker_name(name: object) -> bool:
     return isinstance(name, str) and bool(_DOCKER_NAME_RE.fullmatch(name))
 
 
+_LAB_LEAF_NAMES = tuple(f"clab-clos-evpn-leaf{i}" for i in range(1, 7))
+_LAB_SPINE_NAMES = tuple(f"clab-clos-evpn-spine{i}" for i in range(1, 4))
+
+
 def list_lab_containers(
     prefix_filter: tuple[str, ...] = (
         # POP codes from the bundled FRR lab (de-fra-core-01, uk-lon-edge-01, …).
@@ -122,13 +126,12 @@ def list_lab_containers(
         # dev-postgres, demo-db, us-east-cache, user-api on the same host.
         "de-fra-", "uk-lon-", "nl-ams-", "us-nyc-",
     ),
-    name_filter: tuple[str, ...] = (
-        # Nodes in the bundled containerlab multi-vendor fabric.  Do not use
-        # the generic ``clab-`` prefix here: /api/run treats this inventory as
-        # the authorization boundary for its docker-exec fallback.
-        *(f"clab-clos-evpn-leaf{i}" for i in range(1, 7)),
-        *(f"clab-clos-evpn-spine{i}" for i in range(1, 4)),
-    ),
+    # Nodes in the bundled containerlab multi-vendor fabric. Do not use
+    # the generic ``clab-`` prefix here: /api/run treats this inventory as
+    # the authorization boundary for its docker-exec fallback.
+    # (Hoisted to module level: a generator expression in a default value
+    # confuses mypy — "Name 'i' is not defined".)
+    name_filter: tuple[str, ...] = _LAB_LEAF_NAMES + _LAB_SPINE_NAMES,
 ) -> list[str]:
     """Return running containers belonging to the bundled labs."""
     if not shutil.which("docker"):
