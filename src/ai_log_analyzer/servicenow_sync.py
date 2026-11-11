@@ -252,7 +252,8 @@ class ServiceNowClient:
                 f"/api/now/table/incident/{sys_id}",
                 body={"work_notes": payload.get("work_notes", "")},
             )
-            result = updated.get("result") if isinstance(updated.get("result"), dict) else {}
+            updated_result = updated.get("result")
+            result = updated_result if isinstance(updated_result, dict) else {}
             number = str(result.get("number") or rows[0].get("number") or "")
             return ServiceNowSyncResult(
                 dry_run=False,
@@ -263,7 +264,8 @@ class ServiceNowClient:
                 payload=payload,
             )
         created = self._request("POST", "/api/now/table/incident", body=payload)
-        result = created.get("result") if isinstance(created.get("result"), dict) else {}
+        created_result = created.get("result")
+        result = created_result if isinstance(created_result, dict) else {}
         return ServiceNowSyncResult(
             dry_run=False,
             action="created",
@@ -424,9 +426,10 @@ def _parse_when(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
-        parsed = _parse_snow_clock(text)
-        if parsed is None:
+        clock = _parse_snow_clock(text)
+        if clock is None:
             return None
+        parsed = clock
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
@@ -456,11 +459,11 @@ def _summarize_report(report: Any) -> tuple[str, str, list[str]]:
         detail = " ".join(str(line) for line in summary)
     else:
         detail = str(summary or "")
-    devices: list[str] = []
+    action_devices: list[str] = []
     for item in getattr(report, "action_items", []) or []:
-        devices.extend(str(device) for device in getattr(item, "devices", []) or [])
+        action_devices.extend(str(device) for device in getattr(item, "devices", []) or [])
     title = (detail or "Network anomaly")[:160]
-    return title, detail, devices
+    return title, detail, action_devices
 
 
 def _correlation_id(
