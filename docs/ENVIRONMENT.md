@@ -63,7 +63,7 @@ tokenization) are shared across workers through the state DB, API keys never are
 
 | Variable | Default | Purpose / notes |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `ollama` | `ollama`, `local` (Docker Model Runner), `claude`, `claude-only`, `grok`. |
+| `LLM_PROVIDER` | `ollama` | `ollama`, `local` (Docker Model Runner), `claude`, `claude-only`, `grok`, `openai`. |
 | `LLM_ENABLED` | `true` | Master switch for LLM calls (`true`/`false` only). |
 | `LLM_TIMEOUT` | `120` | Per-request timeout in seconds. |
 | `LLM_TOTAL_TIMEOUT_S` | `180` | **(new in 2.2.0)** Overall wall-clock budget for one gateway call across providers, retries and backoff; per-request timeouts shrink to what is left. `0` = unlimited. |
@@ -80,11 +80,14 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `XAI_API_KEY` | unset | xAI Grok API key. **Secret.** |
 | `XAI_MODEL` | `grok-4` | xAI model. |
 | `XAI_URL` | `https://api.x.ai/v1` | xAI OpenAI-compatible endpoint. |
-| `ALLOW_CLOUD_FALLBACK` | `false` | Whether a local provider may fall back to a cloud API (and claude and grok may fall back to each other). Takes precedence over `LLM_ALLOW_CLOUD_FALLBACK`. **Security (data egress):** leave `false` unless sanitized text may leave the site. |
+| `OPENAI_API_KEY` | unset | OpenAI API key. **Secret.** |
+| `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model. |
+| `OPENAI_URL` | `https://api.openai.com/v1` | OpenAI chat-completions endpoint (override for an OpenAI-compatible proxy). |
+| `ALLOW_CLOUD_FALLBACK` | `false` | Whether a local provider may fall back to a cloud API (and claude, grok and openai may fall back to each other, openai last). Takes precedence over `LLM_ALLOW_CLOUD_FALLBACK`. **Security (data egress):** leave `false` unless sanitized text may leave the site. |
 | `LLM_ALLOW_CLOUD_FALLBACK` | `false` | Same setting under the `LLM_` prefix; used when `ALLOW_CLOUD_FALLBACK` is unset. |
 | `LLM_TOKENIZE_HOSTNAMES` | `auto` | Hostname pseudonyms (`<HOST_n>`): `auto` (cloud providers only), `always`, `never`. |
-| `LLM_MAX_PROMPT_CHARS` | per provider | Global prompt budget in characters (`0` = unlimited). Built-in defaults: ollama/local 48000, claude 600000, grok 400000. |
-| `LLM_MAX_PROMPT_CHARS_<PROVIDER>` | falls back to `LLM_MAX_PROMPT_CHARS` | Per-provider override, e.g. `LLM_MAX_PROMPT_CHARS_OLLAMA`, `_LOCAL`, `_CLAUDE`, `_GROK`. |
+| `LLM_MAX_PROMPT_CHARS` | per provider | Global prompt budget in characters (`0` = unlimited). Built-in defaults: ollama/local 48000, claude 600000, grok 400000, openai 400000. |
+| `LLM_MAX_PROMPT_CHARS_<PROVIDER>` | falls back to `LLM_MAX_PROMPT_CHARS` | Per-provider override, e.g. `LLM_MAX_PROMPT_CHARS_OLLAMA`, `_LOCAL`, `_CLAUDE`, `_GROK`, `_OPENAI`. |
 | `LLM_MAX_RETRIES` | `2` | Retries on HTTP 408/429/5xx with exponential backoff. |
 | `LLM_BACKOFF_BASE` | `1.0` | Backoff base in seconds. |
 | `LLM_BACKOFF_MAX` | `20.0` | Backoff cap in seconds. |

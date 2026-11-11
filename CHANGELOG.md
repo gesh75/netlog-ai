@@ -16,6 +16,16 @@ loose semantic versioning.
   syslog — no parallel pipeline. `authPriv` traps are rejected explicitly and
   counted. See `docs/OPERATIONS.md` ("SNMP trap receiver").
 
+- **OpenAI LLM provider (v2.3.0 feature 3):** `LLM_PROVIDER=openai` with `OPENAI_API_KEY`
+  (default model `gpt-4o-mini`, override with `OPENAI_MODEL`; `OPENAI_URL` defaults to
+  `https://api.openai.com/v1`). Same OpenAI-compatible chat-completions wire shape as
+  Grok, reusing the shared response extractor — no new dependency. Select it at runtime
+  via `POST /api/llm/provider` (refuses without a key) or `LLM_PROVIDER=openai` at
+  startup; without a key the provider reports unavailable in `/api/llm/status` instead
+  of failing. Cloud provider like claude/grok: hostnames are tokenized, calls are
+  audited, and it is last in every other provider's cloud-fallback chain. See
+  `docs/ENVIRONMENT.md`.
+
 - **Semantic RAG (v2.3.0 feature 2):** hybrid search over the existing index —
   local embeddings via Ollama (`nomic-embed-text`, `POST /api/embed`, no new
   dependency) stored as float32 vectors in a new `rag_embeddings` table, blended
