@@ -107,6 +107,12 @@ tokenization) are shared across workers through the state DB, API keys never are
 | `AI_LOG_ANALYZER_RAG_DB` | the state DB | Retrieval (BM25) index database. |
 | `AI_LOG_ANALYZER_RAG` | enabled | Set to `0`, `false`, `off` or `no` to disable evidence retrieval. |
 | `AI_LOG_ANALYZER_RAG_REFRESH_SECONDS` | `30` | **(new in 2.2.0)** How often a search re-checks site config files for changes and re-indexes them. `0` = check on every search; negative = never. |
+| `AI_LOG_ANALYZER_EMBEDDINGS` | enabled (`auto`) | **(new in 2.3.0)** Semantic RAG: `0`/`off` disables document embeddings entirely (keyword-only BM25 search); anything else tries the Ollama embedding model and falls back to keyword-only when it is unreachable. |
+| `AI_LOG_ANALYZER_EMBEDDING_URL` | `OLLAMA_URL` or `http://localhost:11434` | **(new in 2.3.0)** Ollama base URL used for embeddings (separate from the LLM chat model so the two can point at different servers). |
+| `AI_LOG_ANALYZER_EMBEDDING_MODEL` | `nomic-embed-text` | **(new in 2.3.0)** Ollama embedding model; pull it with `ollama pull nomic-embed-text`. Changing the model re-embeds the index (old vectors are dropped). |
+| `AI_LOG_ANALYZER_EMBEDDING_TIMEOUT` | `30` | **(new in 2.3.0)** Seconds to wait for one Ollama `/api/embed` batch (first call also loads the model). |
+| `AI_LOG_ANALYZER_RAG_EMBED_BATCH` | `32` | **(new in 2.3.0)** Documents embedded per Ollama `/api/embed` call during indexing. |
+| `AI_LOG_ANALYZER_RAG_HYBRID_ALPHA` | `0.5` | **(new in 2.3.0)** Weight of the BM25 signal in hybrid search (0..1); `1.0` is keyword-only, `0.0` is vector-only. |
 | `AI_LOG_ANALYZER_GOLDEN_DIR` | unset | Golden configs for drift detection: `<site>/<host>.txt` or `<host>.txt`. |
 | `AI_LOG_ANALYZER_TEMPLATE_STORE` | unset | JSON file remembering mined log templates across runs, to flag never-seen patterns. Written owner-only. |
 | `AI_LOG_ANALYZER_CUSTOM_RULES` | unset | JSON list of custom classification rules loaded at startup; they override the built-in knowledge base. |
