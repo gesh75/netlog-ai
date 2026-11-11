@@ -61,7 +61,8 @@ def list_devices(timeout: float = 5.0) -> list[dict]:
             if isinstance(data, list):
                 return data
             if isinstance(data, dict):
-                return data.get("devices", data.get("data", []))
+                devices = data.get("devices", data.get("data", []))
+                return devices if isinstance(devices, list) else []
     except requests.RequestException:
         pass
     return []

@@ -109,7 +109,6 @@ files = ["src"]
 [[tool.mypy.overrides]]
 module = [
     "ai_log_analyzer.adapters.frr",
-    "ai_log_analyzer.adapters.network_tool",
     "ai_log_analyzer.analytics",
     "ai_log_analyzer.analyzer",
     "ai_log_analyzer.causal",
