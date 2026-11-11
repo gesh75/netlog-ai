@@ -5,6 +5,7 @@
   - "claude"      : Anthropic Claude direct API
   - "claude-only" : Claude only (never call local)
   - "grok"        : xAI Grok (OpenAI-compatible) — sanitize-first, first-class support
+  - "openai"      : OpenAI (chat completions) — sanitize-first, like grok
 
 Provider is selectable at runtime via set_provider() — used by /api/llm/provider.
 Always returns either a cleaned string or None (caller falls back to rule-based KB).
@@ -89,7 +90,7 @@ def _env_float(name: str, default: float) -> float:
 
 # ── Config (env-driven, mutable at runtime via set_provider) ──────────────────
 _state: dict[str, object] = {
-    # ollama | local | claude | claude-only | grok
+    # ollama | local | claude | claude-only | grok | openai
     "provider":           os.environ.get("LLM_PROVIDER", "ollama").lower(),
     "enabled":            os.environ.get("LLM_ENABLED", "true").lower() == "true",
     # Ollama (native API)
@@ -105,9 +106,13 @@ _state: dict[str, object] = {
     "xai_api_key":        os.environ.get("XAI_API_KEY", ""),
     "xai_model":          os.environ.get("XAI_MODEL", "grok-4"),
     "xai_url":            os.environ.get("XAI_URL", "https://api.x.ai/v1"),
+    # OpenAI (chat completions) — same wire shape as Grok
+    "openai_api_key":     os.environ.get("OPENAI_API_KEY", ""),
+    "openai_model":       os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+    "openai_url":         os.environ.get("OPENAI_URL", "https://api.openai.com/v1"),
     "timeout":            int(os.environ.get("LLM_TIMEOUT", "120")),
     # Data-egress policy: a local provider never falls back to a cloud API
-    # (Claude / Grok) unless explicitly allowed.
+    # (Claude / Grok / OpenAI) unless explicitly allowed.
     "allow_cloud_fallback": os.environ.get(
         "ALLOW_CLOUD_FALLBACK", os.environ.get("LLM_ALLOW_CLOUD_FALLBACK", "false"),
     ).strip().lower() in ("1", "true", "yes", "on"),
@@ -142,9 +147,9 @@ def _state_dict(key: str) -> dict[str, object]:
     value = _state.get(key)
     return dict(value) if isinstance(value, dict) else {}
 
-_VALID_PROVIDERS = {"ollama", "local", "claude", "claude-only", "grok"}
+_VALID_PROVIDERS = {"ollama", "local", "claude", "claude-only", "grok", "openai"}
 _LOCAL_PROVIDERS = frozenset({"ollama", "local"})
-_CLOUD_PROVIDERS = frozenset({"claude", "grok"})
+_CLOUD_PROVIDERS = frozenset({"claude", "grok", "openai"})
 
 # Prompt budget (characters of user prompt) per provider. ~4 chars ≈ 1 token.
 # Local defaults assume a 16k-token context; raise them together with
@@ -155,6 +160,7 @@ _DEFAULT_PROMPT_BUDGET: dict[str, int] = {
     "local":  48_000,
     "claude": 600_000,
     "grok":   400_000,
+    "openai": 400_000,
 }
 _RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504, 529})
 # Response-shape errors from a provider that answered with something unexpected.
@@ -234,6 +240,8 @@ def get_state() -> dict[str, object]:
         "anthropic_key_set":   bool(_state["anthropic_api_key"]),
         "xai_model":           _state["xai_model"],
         "xai_key_set":         bool(_state["xai_api_key"]),
+        "openai_model":        _state["openai_model"],
+        "openai_key_set":      bool(_state["openai_api_key"]),
         "allow_cloud_fallback": bool(_state.get("allow_cloud_fallback")),
         "tokenize_hostnames":  _state.get("tokenize_hostnames", "auto"),
         "providers_available": _list_available_providers(),
@@ -318,6 +326,8 @@ def set_provider(provider: str) -> tuple[bool, str]:
         return False, "ANTHROPIC_API_KEY not configured — cannot select claude provider"
     if p == "grok" and not _state["xai_api_key"]:
         return False, "XAI_API_KEY not configured — cannot select grok provider"
+    if p == "openai" and not _state["openai_api_key"]:
+        return False, "OPENAI_API_KEY not configured — cannot select openai provider"
     _state["provider"] = p
     _publish_shared("provider", p)
     return True, p
@@ -420,14 +430,16 @@ def provider_order(provider: str | None = None) -> list[str]:
     if p == "claude-only":
         return ["claude"]
     if p == "local":
-        order = ["local", "ollama", "claude", "grok"]
+        order = ["local", "ollama", "claude", "grok", "openai"]
     elif p == "claude":
-        order = ["claude", "ollama", "local", "grok"]
+        order = ["claude", "ollama", "local", "grok", "openai"]
     elif p == "grok":
-        order = ["grok", "ollama", "local", "claude"]
+        order = ["grok", "ollama", "local", "claude", "openai"]
+    elif p == "openai":
+        order = ["openai", "ollama", "local", "claude", "grok"]
     else:
         p = "ollama"
-        order = ["ollama", "local", "claude", "grok"]
+        order = ["ollama", "local", "claude", "grok", "openai"]
     if _state.get("allow_cloud_fallback"):
         return order
     # The explicitly selected provider always runs; fallback may move data to
@@ -558,10 +570,11 @@ def query(system_prompt: str, user_prompt: str, max_tokens: int = 800) -> str | 
 
     Fallback chain (cloud entries only when ALLOW_CLOUD_FALLBACK=true, or
     when that cloud provider is the explicitly selected one):
-      ollama   → docker-runner → [claude] → [grok]
-      local    → ollama        → [claude] → [grok]
-      claude   → ollama        → docker-runner → [grok]
-      grok     → ollama        → docker-runner → [claude]
+      ollama   → docker-runner → [claude] → [grok] → [openai]
+      local    → ollama        → [claude] → [grok] → [openai]
+      claude   → ollama        → docker-runner → [grok] → [openai]
+      grok     → ollama        → docker-runner → [claude] → [openai]
+      openai   → ollama        → docker-runner → [claude] → [grok]
       claude-only → claude only (no fallback)
     """
     total = _total_timeout()
@@ -846,6 +859,59 @@ def _query_grok(system_prompt: str, user_prompt: str, max_tokens: int) -> str | 
         return None
 
 
+# ── OpenAI (chat completions) ────────────────────────────────────────────────
+
+def _query_openai(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
+    """OpenAI via /v1/chat/completions — same wire shape as Grok, so the
+    shared ``_extract_openai_text()`` parses the reply. Sanitize-first is the
+    caller's job; without OPENAI_API_KEY the provider reports unavailable
+    (``None`` + last_error) and the chain moves on."""
+    api_key = str(_state["openai_api_key"])
+    if not api_key:
+        _record_error("openai", "OPENAI_API_KEY not configured")
+        return None
+    base = str(_state["openai_url"]).rstrip("/")
+    payload = {
+        "model": _state["openai_model"],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.2,
+        "stream": False,
+    }
+    try:
+        r = _post_with_retry(
+            "openai",
+            f"{base}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "content-type": "application/json",
+            },
+            json=payload,
+            timeout=_http_timeout(),
+        )
+        if r.status_code != 200:
+            _record_error("openai", f"HTTP {r.status_code}: {r.text[:200]}")
+            return None
+        text = _extract_openai_text(r.json())
+        if text:
+            _clear_error("openai")
+            return text
+        _record_error("openai", "Empty content in OpenAI response")
+        return None
+    except requests.Timeout:
+        _record_error("openai", f"Timeout after {_state['timeout']}s")
+        return None
+    except requests.RequestException as e:
+        _record_error("openai", f"Connection error: {e}")
+        return None
+    except _MALFORMED as e:
+        _record_error("openai", f"Malformed response from OpenAI: {type(e).__name__}")
+        return None
+
+
 # ── Docker Model Runner (TCP + Unix socket) ──────────────────────────────────
 
 def _query_docker_runner(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
@@ -996,6 +1062,8 @@ def _list_available_providers() -> list[dict]:
          "model": _state["anthropic_model"]},
         {"id": "grok", "available": bool(_state["xai_api_key"]),
          "model": _state["xai_model"]},
+        {"id": "openai", "available": bool(_state["openai_api_key"]),
+         "model": _state["openai_model"]},
     ]
 
 
@@ -1005,4 +1073,5 @@ _PROVIDERS: dict[str, Callable[[str, str, int], str | None]] = {
     "local":  _query_docker_runner,
     "claude": _query_claude,
     "grok":   _query_grok,
+    "openai": _query_openai,
 }
