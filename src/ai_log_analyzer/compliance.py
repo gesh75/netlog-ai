@@ -125,7 +125,7 @@ BUILTIN_RULES: list[dict[str, Any]] = [
 
 
 def check_device(config_text: str, platform: str, hostname: str,
-                  rules: list[dict[str, Any]] = None) -> list[ComplianceCheck]:
+                  rules: list[dict[str, Any]] | None = None) -> list[ComplianceCheck]:
     """Run all rules applicable to this platform against the config."""
     rules = rules or BUILTIN_RULES
     out: list[ComplianceCheck] = []
