@@ -116,7 +116,6 @@ module = [
     "ai_log_analyzer.llm",
     "ai_log_analyzer.mcp_server.server",
     "ai_log_analyzer.servicenow_sync",
-    "ai_log_analyzer.site_diagram",
     "ai_log_analyzer.sources.syslog",
     "ai_log_analyzer.stability",
     "ai_log_analyzer.topology_infer",

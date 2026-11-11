@@ -298,6 +298,9 @@ def extract_wan_ips(config_text: str, platform: str) -> list[WanIp]:
                 cur_desc = ""
         # ── Form B: Junos `set` style config (single-line):
         # `set interfaces reth0 unit 0 family inet address 89.116.175.X/26`
+        # `m` is also rebound by re.match() in the EOS/IOS branch below,
+        # which returns Match | None — declare it once here.
+        m: re.Match[str] | None = None
         for m in re.finditer(
             r"set\s+interfaces\s+(\S+)\s+unit\s+(\d+)\s+family\s+inet\s+address\s+"
             r"((?:\d{1,3}(?:\.\d{1,3}){3}|PUB-[0-9a-f]{6,16})(?:/\d{1,2})?)",
