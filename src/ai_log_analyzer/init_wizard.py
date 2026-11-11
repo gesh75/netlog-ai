@@ -75,6 +75,9 @@ def validate_host(raw: str) -> str:
         return host
     except ValueError:
         pass
+    if re.fullmatch(r"\d+(\.\d+)+", host):
+        # Looks like an IP address but is not a valid one (e.g. 256.0.0.1).
+        raise ValueError(f"{host!r} is not a valid IP address")
     if len(host) > 253 or not _HOST_RE.match(host):
         raise ValueError(f"{host!r} is not a valid hostname or IP address")
     return host
@@ -493,7 +496,11 @@ def _ask_secret(prompt: str, input_fn, print_fn) -> str:
         except (EOFError, KeyboardInterrupt):
             print_fn("(no input — skipped)")
             return ""
-    return input_fn(f"{prompt} (Enter to skip): ").strip()
+    try:
+        return input_fn(f"{prompt} (Enter to skip): ").strip()
+    except EOFError:
+        print_fn("(no input — skipped)")
+        return ""
 
 
 def prompt_config(cfg: InitConfig, input_fn=input, print_fn=print) -> InitConfig:
