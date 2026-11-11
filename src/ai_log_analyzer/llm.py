@@ -43,6 +43,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -121,6 +122,24 @@ _state: dict[str, object] = {
     # Metadata (never content) of the last gateway call, for /api/llm/status.
     "last_call":          {},
 }
+
+
+def _state_int(key: str, default: int) -> int:
+    """Integer config value out of the untyped _state dict."""
+    value = _state.get(key, default)
+    return int(value) if isinstance(value, (int, float, str)) else default
+
+
+def _state_float(key: str, default: float) -> float:
+    """Float config value out of the untyped _state dict."""
+    value = _state.get(key, default)
+    return float(value) if isinstance(value, (int, float, str)) else default
+
+
+def _state_dict(key: str) -> dict[str, object]:
+    """Dict config value out of the untyped _state dict (copied)."""
+    value = _state.get(key)
+    return dict(value) if isinstance(value, dict) else {}
 
 _VALID_PROVIDERS = {"ollama", "local", "claude", "claude-only", "grok"}
 _LOCAL_PROVIDERS = frozenset({"ollama", "local"})
@@ -217,8 +236,8 @@ def get_state() -> dict[str, object]:
         "allow_cloud_fallback": bool(_state.get("allow_cloud_fallback")),
         "tokenize_hostnames":  _state.get("tokenize_hostnames", "auto"),
         "providers_available": _list_available_providers(),
-        "last_errors":         dict(_state.get("last_errors", {})),
-        "last_call":           dict(_state.get("last_call", {})),
+        "last_errors":         _state_dict("last_errors"),
+        "last_call":           _state_dict("last_call"),
     }
 
 
@@ -273,7 +292,7 @@ def egress_policy() -> dict[str, object]:
         "order": order,
         "allow_cloud_fallback": bool(_state.get("allow_cloud_fallback")),
         "tokenize_hostnames": _state.get("tokenize_hostnames", "auto"),
-        "last_call": dict(_state.get("last_call", {})),
+        "last_call": _state_dict("last_call"),
     }
 
 
@@ -306,14 +325,14 @@ def set_provider(provider: str) -> tuple[bool, str]:
 def set_enabled(enabled: bool) -> bool:
     _state["enabled"] = bool(enabled)
     _publish_shared("enabled", _state["enabled"])
-    return _state["enabled"]
+    return bool(_state["enabled"])
 
 
 def set_allow_cloud_fallback(allowed: bool) -> bool:
     """Explicitly opt in (or out) of local → cloud provider fallback."""
     _state["allow_cloud_fallback"] = bool(allowed)
     _publish_shared("allow_cloud_fallback", _state["allow_cloud_fallback"])
-    return _state["allow_cloud_fallback"]
+    return bool(_state["allow_cloud_fallback"])
 
 
 def prepare_log_samples(messages: list[str]) -> str:
@@ -471,7 +490,7 @@ def _out_of_time() -> bool:
 
 def _http_timeout() -> int:
     """Per-request timeout: the configured one, capped by what is left of the query budget."""
-    base = int(_state["timeout"])
+    base = _state_int("timeout", 120)
     left = _remaining()
     return base if left is None else max(1, min(base, math.ceil(left)))
 
@@ -606,7 +625,9 @@ def _query(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
         except Exception as exc:  # auditing is best-effort here; never lose the answer
             logger.warning("LLM audit failed: %s", type(exc).__name__)
         if text:
-            _state["last_call"]["ok"] = True
+            last_call = _state.get("last_call")
+            if isinstance(last_call, dict):
+                last_call["ok"] = True
             return vault.detokenize(text)
     return None
 
@@ -633,7 +654,7 @@ _sleep: Callable[[float], None] = time.sleep  # seam for tests
 
 
 def _retry_delay(resp: object, attempt: int) -> float:
-    cap = float(_state.get("backoff_max", 20.0))
+    cap = _state_float("backoff_max", 20.0)
     headers = getattr(resp, "headers", None) or {}
     retry_after = headers.get("Retry-After") or headers.get("retry-after")
     if retry_after:
@@ -641,13 +662,13 @@ def _retry_delay(resp: object, attempt: int) -> float:
             return min(cap, max(0.0, float(retry_after)))
         except (TypeError, ValueError):
             pass
-    base = float(_state.get("backoff_base", 1.0)) * (2 ** attempt)
+    base = _state_float("backoff_base", 1.0) * (2 ** attempt)
     return min(cap, base + random.uniform(0, base * 0.25))
 
 
 def _post_with_retry(provider: str, url: str, **kwargs):
     """POST with bounded retries on 429/5xx. Network exceptions propagate."""
-    retries = int(_state.get("max_retries", 2))
+    retries = _state_int("max_retries", 2)
     attempt = 0
     while True:
         r = _SESSION.post(url, **kwargs)
@@ -667,13 +688,14 @@ def _post_with_retry(provider: str, url: str, **kwargs):
 def _query_ollama(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
     """Ollama native /api/chat — supports `think:false` for thinking models (qwen3 etc.)."""
     url = f"{str(_state['ollama_url']).rstrip('/')}/api/chat"
+    options: dict[str, object] = {"temperature": 0.2, "num_predict": max_tokens}
     payload = {
         "model": _state["ollama_model"],
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "options": {"temperature": 0.2, "num_predict": max_tokens},
+        "options": options,
         "stream": False,
         "think": False,
     }
@@ -681,7 +703,7 @@ def _query_ollama(system_prompt: str, user_prompt: str, max_tokens: int) -> str 
     # Set OLLAMA_NUM_CTX to match LLM_MAX_PROMPT_CHARS_OLLAMA (~4 chars/token).
     num_ctx = _env_int("OLLAMA_NUM_CTX", 0)
     if num_ctx:
-        payload["options"]["num_ctx"] = num_ctx
+        options["num_ctx"] = num_ctx
     try:
         r = _post_with_retry("ollama", url, json=payload, timeout=_http_timeout())
         if r.status_code != 200:
@@ -823,7 +845,7 @@ def _query_grok(system_prompt: str, user_prompt: str, max_tokens: int) -> str | 
 # ── Docker Model Runner (TCP + Unix socket) ──────────────────────────────────
 
 def _query_docker_runner(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
-    payload = {
+    payload: dict[str, Any] = {
         "model": _state["local_model"],
         "messages": [
             {"role": "system", "content": system_prompt},

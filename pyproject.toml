@@ -102,12 +102,3 @@ python_version = "3.10"
 ignore_missing_imports = true
 warn_unused_configs = true
 files = ["src"]
-
-# baseline: burn down. These modules fail `mypy src` today; each override should be
-# removed (and the module fixed) over time. Modules NOT listed here are fully checked,
-# so new modules start clean.
-[[tool.mypy.overrides]]
-module = [
-    "ai_log_analyzer.llm",
-]
-ignore_errors = true
