@@ -10,7 +10,8 @@ from ai_log_analyzer import _shutdown
 from ai_log_analyzer.sources import SourceConfig
 from ai_log_analyzer.sources.manager import SourceManager
 
-pytestmark = pytest.mark.unit
+# Integration: binds real UDP sockets (see test_durable_ingest.py).
+pytestmark = pytest.mark.integration
 
 
 def _free_port() -> int:

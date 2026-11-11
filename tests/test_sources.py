@@ -24,6 +24,12 @@ from ai_log_analyzer.sources.base import build_auth
 from ai_log_analyzer.sources.manager import SourceManager
 from tests._helpers import listen_on_free_port, wait_for
 
+# Integration: several tests here bind real UDP sockets (see
+# test_durable_ingest.py). The pure protocol/registry tests in this file
+# ride along so the file stays one mark — split them out if that ever
+# matters for local iteration speed.
+pytestmark = pytest.mark.integration
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Protocol + registry
 # ──────────────────────────────────────────────────────────────────────────────

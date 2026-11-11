@@ -164,15 +164,23 @@ def _infer_ha_peers(ha_events: list[Any], host_of: dict[int, str], secs: dict[in
     for e in ha_events:
         by_vendor.setdefault(e.vendor, []).append(e)
     for evs in by_vendor.values():
-        timed = sorted((e for e in evs if secs[id(e)] is not None), key=lambda e: secs[id(e)])
+        # (seconds, event) pairs: the walrus keeps only timed events and
+        # narrows the stamp to float, so the sort key and the subtraction
+        # below can never see None. Sorting is stable, so ties keep the
+        # original order, exactly as the old key-only sort did.
+        timed_pairs = [(s, e) for e in evs if (s := secs[id(e)]) is not None]
+        timed = [e for _, e in sorted(timed_pairs, key=lambda p: p[0])]
         for seq in (timed, timed[::-1]):
             last: Any = None
             other_last: Any = None
             for e in seq:
                 h = host_of[id(e)]
                 cand = last if last is not None and host_of[id(last)] != h else other_last
-                if cand is not None and abs(secs[id(e)] - secs[id(cand)]) <= 60.0:
-                    peer.setdefault(id(e), host_of[id(cand)])
+                if cand is not None:
+                    se = secs[id(e)]
+                    sc = secs[id(cand)]
+                    if se is not None and sc is not None and abs(se - sc) <= 60.0:
+                        peer.setdefault(id(e), host_of[id(cand)])
                 if last is None or host_of[id(last)] != h:
                     other_last = last
                 last = e
@@ -248,9 +256,12 @@ def suppress_alerts(
         for lyr in {layer[id(e)] for e in evs}:
             host_layers.setdefault(h, set()).add(lyr)
             lyr_evs = [e for e in evs if layer[id(e)] == lyr]
-            timed = sorted((e for e in lyr_evs if secs[id(e)] is not None),
-                           key=lambda e: (secs[id(e)], order[id(e)]))
-            host_timed[(h, lyr)] = ([secs[id(e)] for e in timed], timed)
+            # Same walrus trick as in _infer_ha_peers: keep (stamp, event)
+            # pairs so the stamp list is provably list[float] and the sort
+            # key (stamp, original order) matches the old behaviour.
+            timed_pairs = [(s, e) for e in lyr_evs if (s := secs[id(e)]) is not None]
+            timed_pairs.sort(key=lambda p: (p[0], order[id(p[1])]))
+            host_timed[(h, lyr)] = ([s for s, _ in timed_pairs], [e for _, e in timed_pairs])
             host_untimed[(h, lyr)] = [e for e in lyr_evs if secs[id(e)] is None]
 
     def host_window(h: str, t0: datetime | None, before: float, after: float, min_layer: int = 0) -> list[Any]:
@@ -312,9 +323,9 @@ def suppress_alerts(
                                "reporters": sorted(reporters), "inferred": not own_events})
     # Declared-topology parents with their own failure.
     for parent in topo.children:
-        own = host_events.get(parent, [])
-        if own and parent not in lost_to:
-            first = min(own, key=lambda e: (times[id(e)] is None, times[id(e)] or datetime.min))
+        parent_events = host_events.get(parent, [])
+        if parent_events and parent not in lost_to:
+            first = min(parent_events, key=lambda e: (times[id(e)] is None, times[id(e)] or datetime.min))
             candidates.append({"kind": "device_unreachable", "event": first, "hosts": {parent},
                                "t0": times[id(first)], "label": f"{parent} failure (upstream of "
                                f"{len(topo.children[parent])} device(s))", "inferred": False})

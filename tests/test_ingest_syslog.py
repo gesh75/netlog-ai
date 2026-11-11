@@ -15,7 +15,8 @@ from ai_log_analyzer.sources.base import SourceError
 from ai_log_analyzer.sources.syslog import SyslogListenerSource
 from ai_log_analyzer.state_store import StateDB
 
-pytestmark = pytest.mark.unit
+# Integration: binds real UDP/TCP sockets (see test_durable_ingest.py).
+pytestmark = pytest.mark.integration
 
 
 def _free_port(kind: int = socket.SOCK_DGRAM) -> int:

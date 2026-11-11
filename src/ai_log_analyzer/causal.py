@@ -139,8 +139,12 @@ def _now() -> datetime:
     return datetime.now()
 
 
-def _reference_dt(events: Iterable[ClassifiedEvent]) -> datetime:
+def _reference_dt(events: Iterable[Any]) -> datetime:
     """Anchor for RFC3164 year inference.
+
+    Accepts anything with a ``.timestamp`` attribute (``ClassifiedEvent``
+    or the ``SimpleNamespace`` stand-ins built by ``evpn_causal``) — only
+    that one attribute is read.
 
     Prefer the first dated sibling. With only yearless stamps, pin the
     first RFC3164 stamp to ``now()`` and use that instant so the rest of

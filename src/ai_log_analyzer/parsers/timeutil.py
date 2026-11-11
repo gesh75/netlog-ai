@@ -106,10 +106,12 @@ def _normalize_cached(stamp: str, tz: str | None, now: datetime) -> tuple[str, b
             if not month:
                 return "", False
             day, hh, mi, ss = (int(x) for x in m.groups()[1:])
-            dt = _yearless(month, day, hh, mi, ss, _offset(tz) or timezone.utc, now)
-            if dt is None:
+            # Own name: dt was already bound to a plain datetime in the ISO
+            # branch above, and _yearless() returns datetime | None.
+            dt_bsd = _yearless(month, day, hh, mi, ss, _offset(tz) or timezone.utc, now)
+            if dt_bsd is None:
                 return "", False
-            return _fmt(dt), _offset(tz) is None
+            return _fmt(dt_bsd), _offset(tz) is None
         if _EPOCH_RE.match(text):
             n = int(text)
             for scale in (1, 1_000, 1_000_000, 1_000_000_000):

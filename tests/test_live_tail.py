@@ -11,7 +11,8 @@ from ai_log_analyzer.sources import SourceConfig
 from ai_log_analyzer.sources.syslog import SyslogListenerSource
 from tests._helpers import listen_on_free_port, wait_for
 
-pytestmark = pytest.mark.unit
+# Integration: binds real UDP sockets (see test_durable_ingest.py).
+pytestmark = pytest.mark.integration
 
 
 def _mk_source(port: int, source_id: str = "tail-test") -> SyslogListenerSource:

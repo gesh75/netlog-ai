@@ -49,21 +49,65 @@ jobs:
         run: pip install -e ".[dev,all]"
       - name: Lint
         run: ruff check src/ tests/
-      # Non-blocking until the baseline overrides in pyproject.toml are burned down.
-      - name: Type check (mypy, non-blocking)
-        continue-on-error: true
+      # Blocking: the 9 baseline mypy errors were fixed on branch
+      # plan/p0-ci-gates (suppression / evpn_causal / timeutil), so a new
+      # type error must fail the PR here, not slip through.
+      - name: Type check (mypy)
         run: mypy src
-      # Coverage is reported, not gated: there is no measured baseline to gate on yet.
+      # Coverage is gated at the measured baseline (83% on 2026-11-11) minus
+      # 2 points: the floor stops silent erosion, it does not demand growth.
       - name: Test
-        run: pytest -p no:warnings --tb=short --cov=ai_log_analyzer --cov-report=term-missing:skip-covered
-      # Advisory: known-vulnerable dependencies. Non-blocking so an upstream advisory
-      # does not turn unrelated PRs red; dependabot/security alerts drive the fix.
-      - name: Dependency audit (pip-audit, non-blocking)
+        run: pytest -p no:warnings --tb=short --cov=ai_log_analyzer --cov-report=term-missing:skip-covered --cov-fail-under=81
+      # Blocking: pip-audit --strict fails on any known vulnerability.
+      # pip itself is upgraded first so the runner's own pip version
+      # (12 findings on pip 24.0, none in project deps) cannot turn
+      # unrelated PRs red. A genuinely vulnerable dependency must be fixed
+      # or explicitly accepted with --ignore-vuln + a comment saying why.
+      - name: Dependency audit (pip-audit)
         if: matrix.python-version == '3.12'
-        continue-on-error: true
         run: |
+          pip install --upgrade pip
           pip install pip-audit
-          pip-audit --skip-editable
+          pip-audit --skip-editable --strict
+
+  a11y:
+    # WCAG-AA audit of the dashboard (scripts/audit-a11y.cjs): boots the
+    # real web UI, walks 5 UI states, fails on critical/serious axe
+    # violations. ADVISORY (continue-on-error) for now: a local run on
+    # 2026-11-11 found 6 AA blockers (1 critical + 5 serious, incl.
+    # label-content-name-mismatch on the side tabs) — the dashboard does
+    # not pass yet. Once those are fixed, remove continue-on-error so the
+    # gate blocks. See the work plan (P0.5).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install (base + dev + all extras)
+        run: pip install -e ".[dev,all]"
+      - name: Install a11y tooling
+        run: |
+          mkdir -p /tmp/a11y && cd /tmp/a11y && npm init -y >/dev/null
+          npm install playwright @axe-core/playwright
+          ./node_modules/.bin/playwright install chromium --with-deps
+      - name: Start the web UI
+        run: |
+          nohup netlog-ai serve > /tmp/netlog-ai-serve.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:6060/ >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:6060/ >/dev/null
+      - name: Accessibility audit (WCAG-AA, advisory)
+        continue-on-error: true
+        run: NODE_PATH=/tmp/a11y/node_modules node scripts/audit-a11y.cjs
 
   build:
     # PR-time proof that the sdist+wheel build, pass metadata checks and actually ship

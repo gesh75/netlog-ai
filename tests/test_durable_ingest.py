@@ -29,7 +29,11 @@ from tests._helpers import free_port as _free_port
 from tests._helpers import listen_on_free_port
 from tests._helpers import wait_for as _wait_for
 
-pytestmark = pytest.mark.unit
+# Integration: these tests bind real UDP/TCP sockets and spawn worker
+# processes. Sandboxes (and locked-down dev machines) block that, so the
+# suite looks red for environmental reasons. CI runs them; local runs skip
+# them with `-m "not integration"`.
+pytestmark = pytest.mark.integration
 
 _CTX = multiprocessing.get_context("fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn")
 
