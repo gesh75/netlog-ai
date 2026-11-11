@@ -181,3 +181,23 @@ def test_inetd_does_not_shadow_higher_pattern():
     # BGP pattern (high/routing) must win over the later inetd pattern (low/system)
     assert out[0].severity == "high"
     assert out[0].category == "routing"
+
+
+# ── FortiOS pattern tests ──────────────────────────────────────────────────
+
+@pytest.mark.unit
+@pytest.mark.parametrize("msg,expected_sev,expected_cat", [
+    ("fortios-wireless: 4-way handshake failed for client", "medium", "wireless"),
+    ("fortios-switch: port 3 link down detected", "high", "switch"),
+    ("fortios-ssl: certificate info is mismatched", "low", "security"),
+    ("fortios-traffic: Connection Failed action=ip-conn", "low", "traffic"),
+    ("fortios-system: admin-lockout triggered for user admin", "high", "security"),
+])
+def test_fortios_classifier_patterns(msg: str, expected_sev: str, expected_cat: str) -> None:
+    ev = LogEvent("", "fgt-01", "syslog", "notice", msg)
+    out, sev_counts, cat_counts = classify_events([ev])
+    assert out[0].severity == expected_sev
+    assert out[0].category == expected_cat
+    assert sev_counts[expected_sev] == 1
+    assert cat_counts[expected_cat] == 1
+
