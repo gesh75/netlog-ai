@@ -258,10 +258,10 @@ def _build_server():
     def tool(*, read_only: bool = True, idempotent: bool = True, open_world: bool = False):
         """``@mcp.tool`` with safety annotations, error containment and auditing."""
         annotations = ToolAnnotations(
-            readOnlyHint=read_only,
-            destructiveHint=None if read_only else False,
-            idempotentHint=idempotent,
-            openWorldHint=open_world,
+            read_only_hint=read_only,
+            destructive_hint=None if read_only else False,
+            idempotent_hint=idempotent,
+            open_world_hint=open_world,
         )
 
         def register(fn):
@@ -862,7 +862,7 @@ def _build_server():
             project = os.environ.get("JIRA_PROJECT_KEY", "NET")
             if not (base_url and email and token):
                 return {"ok": False, "error": "Missing Jira credentials in environment (JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN)"}
-            client = JiraITSMClient(base_url, email, token, project_key=project)
+            client: JiraITSMClient | ServiceNowITSMClient = JiraITSMClient(base_url, email, token, project_key=project)
             res = client.enrich_incident(payload)
             return {"ok": True, "dry_run": False, "system": "jira", "result": res}
         instance_url = os.environ.get("SERVICENOW_URL") or os.environ.get("SNOW_URL", "")
