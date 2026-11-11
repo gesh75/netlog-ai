@@ -32,7 +32,6 @@ from flask_cors import CORS
 
 from ai_log_analyzer import (
     audit,
-    copilot,
     llm,
     postmortem,
     rbac,
@@ -559,32 +558,6 @@ def create_app() -> Flask:
             response.headers["Cache-Control"] = "no-cache"
         return response
 
-    @app.route("/api/llm/status", methods=["GET"])
-    def llm_status():
-        state = llm.get_state()
-        # last_errors carries upstream HTTP error bodies — useful in the UI,
-        # but on a token-protected deployment don't hand it to anonymous
-        # callers. Dev mode (no token) keeps full output for the dashboard.
-        if rbac.auth_enabled(API_TOKEN) and current_principal() is None:
-            state = {k: v for k, v in state.items() if k != "last_errors"}
-        return jsonify(state)
-
-    @app.route("/api/llm/provider", methods=["POST"])
-    @require_role("admin", "llm.provider.set", _body_fields("provider"))
-    def llm_set_provider():
-        body = request.get_json(silent=True) or {}
-        ok, msg = llm.set_provider(body.get("provider", ""))
-        if not ok:
-            return jsonify({"ok": False, "error": msg}), 400
-        return jsonify({"ok": True, "provider": msg})
-
-    @app.route("/api/llm/toggle", methods=["POST"])
-    @require_role("admin", "llm.toggle", _body_fields("enabled"))
-    def llm_toggle():
-        body = request.get_json(silent=True) or {}
-        enabled = bool(body.get("enabled", True))
-        return jsonify({"ok": True, "enabled": llm.set_enabled(enabled)})
-
     # ── Classification rules ──────────────────────────────────────────────
     @app.route("/api/rules", methods=["GET"])
     @require_role("viewer")
@@ -617,28 +590,6 @@ def create_app() -> Flask:
         status = 200 if added else 400
         return jsonify({"added": added, "errors": errors,
                         "custom_total": len(_clf.custom_rules())}), status
-
-    @app.route("/api/sanitize-diff", methods=["POST"])
-    @require_role("operator")
-    def api_sanitize_diff():
-        """Preview the sanitize-before-LLM gate on pasted text.
-
-        Body: {"text": "..."}. Returns original, sanitized, total, by_rule.
-        """
-        from ai_log_analyzer.sanitize import sanitize_report
-        body = request.get_json(silent=True) or {}
-        text = body.get("text")
-        if not isinstance(text, str):
-            return jsonify({"error": "body must be {\"text\": \"...\"}"}), 400
-        # Bound the preview so a huge paste can't pin a worker.
-        text = text[:200_000]
-        report = sanitize_report(text, mask_pii=True)
-        return jsonify({
-            "original": text,
-            "sanitized": report["sanitized"],
-            "total": report["total"],
-            "by_rule": report["by_rule"],
-        })
 
     # ── Inventory ─────────────────────────────────────────────────────────
     @app.route("/api/lab/containers", methods=["GET"])
@@ -853,31 +804,6 @@ def create_app() -> Flask:
         host = body.get("hostname", "")
         plat = body.get("platform", "junos")
         return jsonify(diff_mod.explain_diff(before, after, hostname=host, platform=plat))
-
-    # ── AI Copilot ────────────────────────────────────────────────────────
-    @app.route("/api/copilot", methods=["POST"])
-    @require_role("operator")
-    def api_copilot():
-        body = request.get_json(silent=True) or {}
-        question = (body.get("question") or "").strip()
-        if not question:
-            return jsonify({"error": "question required"}), 400
-        # Source: site bundle OR single hostname OR raw config
-        site_id = (body.get("site_id") or "").strip()
-        hostname = (body.get("hostname") or "").strip()
-        raw_cfg = body.get("config_text")
-        context_blocks: list[dict] = []
-        if site_id:
-            safe = "".join(c for c in site_id if c.isalnum() or c in "-_").lower()
-            devs, _ = _load_site_devices(safe)
-            if devs:
-                context_blocks = devs
-        elif raw_cfg:
-            context_blocks = [{"hostname": hostname or "device", "platform": body.get("platform", "junos"),
-                               "config_text": raw_cfg}]
-        if not context_blocks:
-            return jsonify({"error": "no context — supply site_id or config_text"}), 400
-        return jsonify(copilot.ask(question, context_blocks))
 
     # ── Runbook generator ─────────────────────────────────────────────────
     @app.route("/api/runbook", methods=["POST"])
@@ -1741,82 +1667,6 @@ def create_app() -> Flask:
             return jsonify({"error": f"unknown incident {incident_id}"}), 404
         return jsonify({"ok": True, "incident": rec})
 
-    # ── Retrieval index (configs, drift, topology, runbooks, incidents) ───
-    def _rag_or_400():
-        from ai_log_analyzer import rag
-        index = rag.get_index()
-        if index is None:
-            abort(make_response(jsonify({"error": "retrieval index not configured "
-                                                  "(set AI_LOG_ANALYZER_RAG_DB or AI_LOG_ANALYZER_STATE_DB)"}), 400))
-        return index
-
-    @app.route("/api/rag/search", methods=["GET"])
-    @require_role("viewer")
-    def api_rag_search():
-        from ai_log_analyzer import rag
-        q = (request.args.get("q") or "").strip()
-        if not q:
-            return jsonify({"error": "q is required"}), 400
-        hosts = [h for h in (request.args.get("hosts") or "").split(",") if h.strip()]
-        kinds = [k for k in (request.args.get("kinds") or "").split(",") if k.strip()] or None
-        try:
-            k = min(int(request.args.get("k") or 8), 50)
-        except ValueError:
-            return jsonify({"error": "k must be an integer"}), 400
-        hits = _rag_or_400().search(q, k=k, kinds=kinds, hosts=hosts)
-        return jsonify({"query": q, "hits": rag.public_evidence(
-            [{**h, "id": f"S{i}"} for i, h in enumerate(hits, 1)])})
-
-    @app.route("/api/rag/stats", methods=["GET"])
-    @require_role("viewer")
-    def api_rag_stats():
-        return jsonify(_rag_or_400().stats())
-
-    @app.route("/api/rag/reindex", methods=["POST"])
-    @require_role("admin", "rag.reindex", _body_fields("netbox"))
-    def api_rag_reindex():
-        from ai_log_analyzer import rag
-        body = request.get_json(silent=True) or {}
-        golden = os.environ.get("AI_LOG_ANALYZER_GOLDEN_DIR", "").strip() or None
-        report = rag.build_default_index(_rag_or_400(), sites_dir=SITES_DIR, golden_dir=golden,
-                                         netbox=_parse_bool(body.get("netbox"), default=False))
-        return jsonify({"ok": True, **report})
-
-    @app.route("/api/rag/drift", methods=["POST"])
-    @require_role("operator")
-    def api_rag_drift():
-        """Running vs golden config drift. Body: {running, golden} or {site, hostname} with
-        AI_LOG_ANALYZER_GOLDEN_DIR / <site>/golden/ holding the golden file."""
-        from ai_log_analyzer import rag
-        body = request.get_json(silent=True) or {}
-        running, golden = body.get("running"), body.get("golden")
-        if not (isinstance(running, str) and isinstance(golden, str)):
-            site, host = str(body.get("site") or ""), str(body.get("hostname") or "")
-            safe_site = Path(site).name
-            devices, manifest = _load_site_devices(safe_site) if safe_site else (None, None)
-            dev = next((d for d in devices or [] if d.get("hostname") == host), None)
-            file_of = {d.get("hostname"): d.get("file") for d in (manifest or {}).get("devices", [])}
-            if dev is None:
-                return jsonify({"error": "give running+golden text, or a known site + hostname"}), 400
-            gdir = os.environ.get("AI_LOG_ANALYZER_GOLDEN_DIR", "").strip()
-            candidates = [SITES_DIR / safe_site / "golden"] + ([Path(gdir) / safe_site, Path(gdir)] if gdir else [])
-            golden = None
-            for d in candidates:
-                for name in (file_of.get(host) or "", f"{host}.txt", f"{host}.cfg"):
-                    if name and (d / Path(name).name).is_file():
-                        golden = (d / Path(name).name).read_text(encoding="utf-8", errors="replace")
-                        break
-                if golden is not None:
-                    break
-            if golden is None:
-                return jsonify({"error": f"no golden config found for {host}"}), 404
-            running = dev.get("config_text") or ""
-        drift = rag.config_drift(running, golden)
-        for h in drift["hunks"]:   # never echo secrets that differ between the two files
-            h["added"] = [sanitize_line(x) for x in h["added"]]
-            h["removed"] = [sanitize_line(x) for x in h["removed"]]
-        return jsonify(drift)
-
     # ── Streaming triage worker ───────────────────────────────────────────
     def _worker_or_400():
         from ai_log_analyzer.triage_worker import get_worker
@@ -1860,15 +1710,19 @@ def create_app() -> Flask:
         """Run one triage tick now (useful for cron-style deployments)."""
         return jsonify(_worker_or_400().run_once())
 
+
     # ── Blueprints ────────────────────────────────────────────────────────
     # Route handlers live in ai_log_analyzer.web.blueprints (one module
     # per area). Imported here, inside the factory, so the blueprint
     # modules can import the shared helpers from this module without a
     # circular import at package import time.
-    from ai_log_analyzer.web.blueprints import admin, auth, core
+    from ai_log_analyzer.web.blueprints import admin, auth, core, rag
+    from ai_log_analyzer.web.blueprints import llm as llm_bp
     app.register_blueprint(admin.bp)
     app.register_blueprint(auth.bp)
     app.register_blueprint(core.bp)
+    app.register_blueprint(llm_bp.bp)
+    app.register_blueprint(rag.bp)
 
     if _parse_bool(os.environ.get("AI_LOG_ANALYZER_TRIAGE_WORKER"), default=False):
         from ai_log_analyzer.triage_worker import get_worker
