@@ -555,7 +555,7 @@ def correlate_entities(
 
     ref = _reference_dt(pool)
     times = [event_time(e, ref) for e in pool]
-    layers = [_layer(e)[0] for e in pool]
+    layers = [lay[0] for e in pool if (lay := _layer(e)) is not None]
     content = [_content_key(e) for e in pool]
     parent = list(range(len(pool)))
     eparent = list(range(len(pool)))   # entity-based edges only (no same-device timing)
@@ -594,9 +594,9 @@ def correlate_entities(
     by_key: dict[str, list[int]] = {}
     evidence_of: dict[str, str] = {}
     for i, ev in enumerate(pool):
-        for evidence, key in _join_keys(ev, local_asns):
+        for ev_kind, key in _join_keys(ev, local_asns):
             by_key.setdefault(key, []).append(i)
-            evidence_of[key] = evidence
+            evidence_of[key] = ev_kind
     for key, members in by_key.items():
         if len(members) < 2:
             continue
@@ -636,7 +636,13 @@ def correlate_entities(
         root = min(members, key=lambda i: root_sort_key(layers[i], times[i], content[i]))
         evidence = sorted({e for i in members for e in edges.get(i, ())})
         kinds = {e[0] for e in evidence}
-        root_first = all(times[root] is None or times[i] is None or times[root] <= times[i] for i in members)
+        root_time = times[root]
+        root_first = True
+        for i in members:
+            member_time = times[i]
+            if root_time is not None and member_time is not None and root_time > member_time:
+                root_first = False
+                break
         # Parts that share no entity and are held together only by same-device
         # timing. Parts over the same devices (a tunnel and the BGP session riding
         # it) or nested ones are one story; parts with devices of their own (tunnel
