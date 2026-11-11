@@ -224,6 +224,33 @@ ai-log-analyzer rag drift running.cfg golden.cfg
 
 * **Storage:** SQLite tables `rag_docs` / `rag_postings` in `AI_LOG_ANALYZER_RAG_DB`
   or the state DB. Ranking is BM25 computed locally; nothing leaves the host.
+* **Semantic (hybrid) search (new in 2.3.0):** when Ollama serves an embedding
+  model, reindexing also stores one vector per document (SQLite table
+  `rag_embeddings`, float32 blobs, local only) and a search blends the BM25
+  score with cosine similarity — min-max normalised per signal, weight
+  `AI_LOG_ANALYZER_RAG_HYBRID_ALPHA` (default `0.5`; `1.0` is keyword-only).
+  This is what lets a natural-language question ("why does BGP drop after an
+  upgrade?") retrieve a stanza that shares no words with the query. Setup:
+  ```bash
+  ollama pull nomic-embed-text          # one-time, ~274 MB
+  ai-log-analyzer rag index             # (re)builds the index and embeds it
+  ai-log-analyzer rag search "why does bgp drop after an upgrade" --json
+  ```
+  `/api/rag/search` reports `"mode": "hybrid" | "keyword"` and an `embeddings`
+  block; `/api/rag/stats` reports `embedded_docs` vs `documents`. Vectors are
+  (re)embedded on reindex and on `ai-log-analyzer rag embed` (e.g. after Ollama
+  was started later); changing `AI_LOG_ANALYZER_EMBEDDING_MODEL` drops the old
+  vectors and re-embeds. **Without Ollama the ranking is exactly the BM25
+  ranking as before** — the embedding call is best-effort and a missing,
+  unreachable or model-less Ollama only ever means keyword-only search, never
+  an error. Env vars: `AI_LOG_ANALYZER_EMBEDDINGS` (`auto` default, `0`/`off`
+  disables vectors), `AI_LOG_ANALYZER_EMBEDDING_URL` (defaults to `OLLAMA_URL`,
+  else `http://localhost:11434`), `AI_LOG_ANALYZER_EMBEDDING_MODEL` (default
+  `nomic-embed-text`), `AI_LOG_ANALYZER_EMBEDDING_TIMEOUT` (default `30` s),
+  `AI_LOG_ANALYZER_RAG_EMBED_BATCH` (default `32`), `AI_LOG_ANALYZER_RAG_HYBRID_ALPHA`.
+  Note the vector scan is a full pass over the stored vectors per search —
+  fine for a config/KB corpus of a few thousand documents, not designed for a
+  million-document index.
 * **Golden configs:** `<golden_dir>/<site>/<host>.txt`, `<golden_dir>/<host>.txt`, or
   a `golden/` folder inside a site bundle. Banner lines that change on every
   commit (last-change stamps, "Building configuration") are ignored.

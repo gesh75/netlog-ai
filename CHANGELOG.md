@@ -16,6 +16,16 @@ loose semantic versioning.
   syslog — no parallel pipeline. `authPriv` traps are rejected explicitly and
   counted. See `docs/OPERATIONS.md` ("SNMP trap receiver").
 
+- **Semantic RAG (v2.3.0 feature 2):** hybrid search over the existing index —
+  local embeddings via Ollama (`nomic-embed-text`, `POST /api/embed`, no new
+  dependency) stored as float32 vectors in a new `rag_embeddings` table, blended
+  with the BM25 score (min-max normalised, `AI_LOG_ANALYZER_RAG_HYBRID_ALPHA`,
+  default `0.5`). `/api/rag/search` reports `"mode": "hybrid" | "keyword"` and
+  per-hit `bm25_score` / `vector_score`; `/api/rag/stats` reports embedding
+  coverage; `rag index` / `rag embed` (re)embed. A missing or unreachable Ollama
+  degrades to exactly the previous BM25 ranking — never an error. See
+  `docs/OPERATIONS.md` ("Retrieval index (RAG)") and `docs/ENVIRONMENT.md`.
+
 ### Security
 
 - **Web:** the SSE live tail no longer accepts the API token in the URL (`?token=`), where request-line
