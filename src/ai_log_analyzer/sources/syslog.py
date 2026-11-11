@@ -34,7 +34,9 @@ An asyncio event loop on one background thread serves:
   ``reader_retry`` seconds, taking over when the listener worker exits. Any
   other bind error (bad address, EACCES) raises instead of idling silently.
   UDP no longer sets ``SO_REUSEADDR``, which on Linux let two workers bind
-  the same port and split datagrams between them.
+  the same port and split datagrams between them. The spool writer itself
+  lives in ``sources/spool_sink.py`` and is shared with the SNMP trap
+  receiver, so both listeners feed the same spool table.
 
 Without a spool, lines live in an in-memory ring buffer exactly as before.
 
@@ -64,6 +66,7 @@ from ai_log_analyzer.classifier import LogEvent
 from ai_log_analyzer.ingest import decode_bytes, sanitize_raw_line
 from ai_log_analyzer.parsers import registry as parser_registry
 from ai_log_analyzer.sources.base import SourceConfig, SourceError, registry
+from ai_log_analyzer.sources.spool_sink import SpoolSink
 
 log = logging.getLogger(__name__)
 
@@ -79,10 +82,7 @@ _DEFAULT_IDLE_TIMEOUT = 300.0
 _DEFAULT_QUEUE_MAX = 200_000   # lines waiting for the spool writer before new ones are dropped (counted)
 _DEFAULT_READER_RETRY = 5.0
 _FLUSH_INTERVAL_S = 0.05
-_FLUSH_BATCH = 512
-_WRITE_BATCH = 5_000           # lines coalesced into one SQLite transaction
 _MAX_LEN_DIGITS = 10
-_HEARTBEAT_EVERY_S = 5.0
 _HEARTBEAT_STALE_S = 30.0
 _HEARTBEAT_NS = "syslog-listener"
 _SO_RXQ_OVFL = 40              # Linux: ancillary message with the socket's cumulative drop count
@@ -166,17 +166,14 @@ class SyslogListenerSource:
         self._stats: Counter[str] = Counter()
         self._active_conns = 0
         self._conns_by_ip: Counter[str] = Counter()
-        self._pending: list[tuple[float, str, str]] = []
         self._db = self._open_spool(extra)
 
-        # Spool writer: batches wait here (bounded) so SQLite never runs on the event loop.
-        self._wq: deque[list[tuple[float, str, str]]] = deque()
-        self._wq_rows = 0          # lines queued, including a batch the writer is retrying
-        self._enq_rows = 0         # lines ever accepted into the queue
-        self._done_rows = 0        # lines written or abandoned
-        self._wcv = threading.Condition()
-        self._writer: threading.Thread | None = None
-        self._writer_stop = False
+        # Durable spool: the shared SpoolSink owns the writer thread and the
+        # drop counters (shared Counter, so stats()/backpressure see them).
+        self._sink = (SpoolSink(self.name, self._db, capacity=self.capacity,
+                                queue_max=self.queue_max, stats=self._stats,
+                                on_heartbeat=self._heartbeat)
+                      if self._db is not None else None)
 
         self._sock: socket.socket | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -199,12 +196,14 @@ class SyslogListenerSource:
             # take the port over if that worker goes away.
             self.role = "reader"
             log.info("syslog source %s: port %s busy (%s) — reading shared spool", self.name, self.port, exc)
-            self._start_writer()
+            if self._sink is not None:
+                self._sink.start()
             self._retry_thread = threading.Thread(target=self._reader_retry_loop, name=f"syslog-retry-{self.name}",
                                                   daemon=True)
             self._retry_thread.start()
             return
-        self._start_writer()
+        if self._sink is not None:
+            self._sink.start()
         self._start_loop()
 
     @classmethod
@@ -529,128 +528,22 @@ class SyslogListenerSource:
             self._buffer.append((line, sender))
             self._total_ingested += 1
             self._stats["received"] += 1
-            if self._db is not None:
-                self._pending.append((time.time(), sender, line))
-                flush_now = len(self._pending) >= _FLUSH_BATCH
-            else:
-                flush_now = False
-        if flush_now:
-            self._flush()
+        sink = getattr(self, "_sink", None)
+        if sink is not None:
+            sink.append(time.time(), sender, line)
 
     def _flush(self) -> None:
         """Hand pending lines to the spool writer (cheap; never touches SQLite)."""
-        if self._db is None:
-            return
-        with self._lock:
-            rows, self._pending = self._pending, []
-        if not rows:
-            return
-        with self._wcv:
-            room = max(0, self.queue_max - self._wq_rows)
-            if len(rows) > room:   # the writer cannot keep up: drop the newest, loudly counted
-                over = len(rows) - room
-                if not self._stats["queue_overflow"]:
-                    log.error("syslog %s: spool queue is full (%d lines); dropping new lines", self.name,
-                              self.queue_max)
-                self._stats["queue_overflow"] += over
-                self._stats["spool_lines_lost"] += over
-                self._enq_rows += over
-                self._done_rows += over
-                rows = rows[:room]
-            if rows:
-                self._wq.append(rows)
-                self._wq_rows += len(rows)
-                self._enq_rows += len(rows)
-            self._wcv.notify_all()
+        sink = getattr(self, "_sink", None)
+        if sink is not None:
+            sink.flush()
 
     def _flush_sync(self, timeout: float = 5.0) -> bool:
         """Enqueue pending lines and wait until the writer has settled them (fetch / close)."""
-        self._flush()
-        if self._db is None:
+        sink = getattr(self, "_sink", None)
+        if sink is None:
             return True
-        deadline = time.monotonic() + timeout
-        with self._wcv:
-            target = self._enq_rows
-            while self._done_rows < target:
-                if self._writer is None or not self._writer.is_alive():
-                    break
-                left = deadline - time.monotonic()
-                if left <= 0:
-                    return False
-                self._wcv.wait(min(left, 0.2))
-            return self._done_rows >= target
-
-    def _start_writer(self) -> None:
-        if self._db is None:
-            return
-        self._writer = threading.Thread(target=self._writer_loop, name=f"syslog-spool-{self.name}", daemon=True)
-        self._writer.start()
-
-    def _writer_loop(self) -> None:
-        last_beat = 0.0
-        delay = 0.25
-        failing_since = 0.0
-        while True:
-            with self._wcv:
-                while not self._wq and not self._writer_stop:
-                    self._wcv.wait(0.5)
-                    if time.monotonic() - last_beat >= _HEARTBEAT_EVERY_S:
-                        break
-                stopping = self._writer_stop
-                batch: list[tuple[float, str, str]] = []
-                taken = 0
-                while self._wq and len(batch) < _WRITE_BATCH:
-                    part = self._wq.popleft()
-                    batch.extend(part)
-                    taken += 1
-            if time.monotonic() - last_beat >= _HEARTBEAT_EVERY_S:
-                last_beat = time.monotonic()
-                self._heartbeat()
-            if not batch:
-                if stopping:
-                    return
-                continue
-            try:
-                self._db.spool_append(self.name, batch, cap=self.capacity)   # type: ignore[union-attr]
-            except Exception as exc:
-                self._stats["spool_errors"] += 1
-                now = time.monotonic()
-                if not failing_since or now - failing_since > 30:
-                    failing_since = failing_since or now
-                    log.error("syslog %s: spool write failed (%d lines kept for retry): %s", self.name,
-                              len(batch), exc)
-                with self._wcv:
-                    self._wq.appendleft(batch)   # re-queue: the rows stay counted in _wq_rows
-                    if stopping:                 # last chance failed: these lines are gone
-                        lost = sum(len(b) for b in self._wq)
-                        self._abandon(lost)
-                        return
-                self._writer_wait(delay)
-                delay = min(delay * 2, 5.0)
-                continue
-            if failing_since:
-                log.info("syslog %s: spool writes recovered", self.name)
-                failing_since = 0.0
-            delay = 0.25
-            with self._wcv:
-                self._wq_rows -= len(batch)
-                self._done_rows += len(batch)
-                self._stats["spooled"] += len(batch)
-                self._wcv.notify_all()
-
-    def _writer_wait(self, seconds: float) -> None:
-        with self._wcv:
-            if not self._writer_stop:
-                self._wcv.wait(seconds)
-
-    def _abandon(self, lost: int) -> None:
-        """Count lines that could not be written before shutdown (caller holds ``_wcv``)."""
-        self._wq.clear()
-        self._wq_rows = 0
-        self._done_rows += lost
-        self._stats["spool_lines_lost"] += lost
-        log.error("syslog %s: %d line(s) could not be written to the spool and were lost", self.name, lost)
-        self._wcv.notify_all()
+        return sink.flush_sync(timeout)
 
     def _heartbeat(self) -> None:
         """Listener liveness for reader workers' healthcheck."""
@@ -695,9 +588,11 @@ class SyslogListenerSource:
         return self._sock is not None and self._thread is not None and self._thread.is_alive()
 
     def stats(self) -> dict[str, Any]:
+        sink = getattr(self, "_sink", None)
         out: dict[str, Any] = {"role": self.role, "proto": self.proto, "port": self.port,
                                "active_connections": self._active_conns, "spool": bool(self._db),
-                               "rcvbuf_requested": self.rcvbuf, "writer_queue_rows": self._wq_rows,
+                               "rcvbuf_requested": self.rcvbuf,
+                               "writer_queue_rows": sink.writer_queue_rows() if sink else 0,
                                **dict(self._stats)}
         now = _system_udp_rcvbuf_errors()
         if self.proto == "udp" and now is not None and self._snmp_base is not None:
@@ -775,17 +670,10 @@ class SyslogListenerSource:
             except OSError:
                 pass
             self._sock = None
-        self._flush()
-        if self._writer is not None:
-            with self._wcv:
-                self._writer_stop = True
-                self._wcv.notify_all()
-            self._writer.join(timeout=10.0)
-            with self._wcv:   # the writer is stuck or gone: whatever is still queued will not be written
-                lost = sum(len(b) for b in self._wq)
-                if lost:
-                    self._abandon(lost)
-            self._writer = None
+        sink = getattr(self, "_sink", None)
+        if sink is not None:
+            sink.close()
+            self._sink = None
 
 
 registry.register("syslog", SyslogListenerSource.from_config)
