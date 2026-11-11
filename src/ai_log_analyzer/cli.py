@@ -518,6 +518,42 @@ def cmd_restore(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_init(args: argparse.Namespace) -> int:
+    """Interactive setup wizard: ask the essentials, write a working .env file."""
+    from ai_log_analyzer import init_wizard
+
+    overrides = {
+        "state_db": getattr(args, "state_db", None),
+        "host": getattr(args, "host", None),
+        "port": getattr(args, "port", None),
+        "syslog_enabled": getattr(args, "syslog", None),
+        "syslog_bind": getattr(args, "syslog_bind", None),
+        "syslog_port": getattr(args, "syslog_port", None),
+        "syslog_allow": getattr(args, "syslog_allow", None),
+        "snmp_enabled": getattr(args, "snmp", None),
+        "snmp_bind": getattr(args, "snmp_bind", None),
+        "snmp_port": getattr(args, "snmp_port", None),
+        "snmp_community": getattr(args, "snmp_community", None),
+        "llm_provider": getattr(args, "llm_provider", None),
+        "ollama_url": getattr(args, "ollama_url", None),
+        "ollama_model": getattr(args, "ollama_model", None),
+        "cloud_api_key": getattr(args, "cloud_api_key", None),
+        "allow_cloud_fallback": getattr(args, "allow_cloud_fallback", None),
+        "embeddings_enabled": getattr(args, "embeddings", None),
+        "embedding_model": getattr(args, "embedding_model", None),
+        "hybrid_alpha": getattr(args, "hybrid_alpha", None),
+        "triage_enabled": getattr(args, "triage", None),
+        "backup_keep": getattr(args, "backup_keep", None),
+        "api_token": getattr(args, "api_token", None),
+    }
+    return init_wizard.run_init(
+        output=getattr(args, "output", ".env"),
+        non_interactive=bool(getattr(args, "non_interactive", False)),
+        force=bool(getattr(args, "force", False)),
+        overrides=overrides,
+    )
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Local self-check (Python, packages, writable stores, environment); no network calls."""
     from ai_log_analyzer import doctor
@@ -694,6 +730,43 @@ def main() -> None:
                        help="Export as CLI card (markdown, default), JSON, an Ansible playbook, or a Nornir/NAPALM "
                             "script (not combinable with --json)")
     rem_p.set_defaults(func=cmd_remediation)
+
+    ip = sub.add_parser("init", help="Interactive setup wizard: answer a few questions, write a working .env")
+    ip.add_argument("--output", default=".env", help="Config file to write (default: ./.env)")
+    ip.add_argument("--non-interactive", action="store_true",
+                    help="Skip prompts; take every value from flags or the environment")
+    ip.add_argument("--force", action="store_true",
+                    help="Overwrite an existing config file without asking")
+    ip.add_argument("--state-db", help="State database path (default: ~/.local/share/netlog-ai/state.db)")
+    ip.add_argument("--host", help="Server bind address (default: 127.0.0.1)")
+    ip.add_argument("--port", type=int, help="Server port (default: 6060)")
+    ip.add_argument("--llm-provider", choices=["ollama", "local", "claude", "grok", "openai"],
+                    help="LLM provider (default: ollama)")
+    ip.add_argument("--ollama-url", help="Ollama base URL (default: http://localhost:11434)")
+    ip.add_argument("--ollama-model", help="Ollama chat model (default: qwen2.5-coder:latest)")
+    ip.add_argument("--cloud-api-key", help="API key for a cloud provider (claude/grok/openai)")
+    ip.add_argument("--allow-cloud-fallback", action=argparse.BooleanOptionalAction, default=None,
+                    help="Allow a local provider to fall back to a cloud API (default: off)")
+    ip.add_argument("--syslog", action=argparse.BooleanOptionalAction, default=None,
+                    help="Enable the syslog listener (default: on)")
+    ip.add_argument("--syslog-bind", help="Syslog bind address (default: 127.0.0.1)")
+    ip.add_argument("--syslog-port", type=int, help="Syslog UDP port (default: 5514)")
+    ip.add_argument("--syslog-allow", help="Syslog sender allow-list, IPs/CIDRs comma-separated")
+    ip.add_argument("--snmp", action=argparse.BooleanOptionalAction, default=None,
+                    help="Enable the SNMP trap receiver (default: off)")
+    ip.add_argument("--snmp-bind", help="SNMP bind address (default: 0.0.0.0)")
+    ip.add_argument("--snmp-port", type=int, help="SNMP UDP port (default: 162)")
+    ip.add_argument("--snmp-community", help="SNMPv2c community (default: public)")
+    ip.add_argument("--embeddings", action=argparse.BooleanOptionalAction, default=None,
+                    help="Enable semantic (hybrid) RAG search (default: on)")
+    ip.add_argument("--embedding-model", help="Ollama embedding model (default: nomic-embed-text)")
+    ip.add_argument("--hybrid-alpha", type=float,
+                    help="Hybrid weight for BM25, 0.0-1.0 (default: 0.5)")
+    ip.add_argument("--triage", action=argparse.BooleanOptionalAction, default=None,
+                    help="Start the streaming triage worker with the web app (default: off)")
+    ip.add_argument("--backup-keep", type=int, help="Backups kept by the nightly cron (default: 7)")
+    ip.add_argument("--api-token", help="Admin API token (at least 16 characters)")
+    ip.set_defaults(func=cmd_init)
 
     dr = sub.add_parser("doctor", help="Local self-check: Python, packages, writable stores, environment (no network)")
     dr.add_argument("--json", action="store_true", help="Machine-readable output")

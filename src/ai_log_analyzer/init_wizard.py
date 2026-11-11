@@ -380,42 +380,51 @@ def next_steps(cfg: InitConfig, path: str | Path) -> str:
     steps = [
         "",
         f"Wrote {path}",
-        "",
-        "Next steps:",
-        "  1. Start the server (from this directory):",
+    ]
+    if out_dir not in (".", ""):
+        steps.append(f"     (config directory: {out_dir})")
+    steps.append("")
+    steps.append("Next steps:")
+    n = 0
+
+    def step(text: str) -> str:
+        nonlocal n
+        n += 1
+        return f"  {n}. {text}"
+
+    steps += [
+        step("Start the server (from this directory):"),
         "       netlog-ai serve",
         "     (Installed via pip rather than run from the checkout? Load the",
         f"      file first: set -a; source {path}; set +a)",
-        "  2. Check it answers:",
+        step("Check it answers:"),
         f"       curl {base}/api/health",
         "     (expect HTTP 200 with {\"status\": \"ok\", ...})",
-        "  3. Verify the whole setup:",
+        step("Verify the whole setup:"),
         "       netlog-ai doctor",
     ]
     if cfg.syslog_enabled:
-        steps.append(
-            f"  4. Point a device's syslog destination at {cfg.syslog_bind}:{cfg.syslog_port} "
-            "(UDP), then watch Live Tail in the Logs tab.")
+        steps.append(step(
+            f"Point a device's syslog destination at {cfg.syslog_bind}:{cfg.syslog_port} "
+            "(UDP), then watch Live Tail in the Logs tab."))
     if cfg.snmp_enabled:
-        steps.append(
-            f"  5. Send traps to {cfg.snmp_bind}:{cfg.snmp_port} "
-            f"(community {cfg.snmp_community!r}); see docs/OPERATIONS.md for a snmptrap test.")
+        steps.append(step(
+            f"Send traps to {cfg.snmp_bind}:{cfg.snmp_port} "
+            f"(community {cfg.snmp_community!r}); see docs/OPERATIONS.md for a snmptrap test."))
     if cfg.llm_provider == "ollama" and cfg.embeddings_enabled:
-        steps.append(
-            "  6. For semantic search, pull the embedding model once:"
-            f" ollama pull {cfg.embedding_model}, then: netlog-ai rag index")
+        steps.append(step(
+            "For semantic search, pull the embedding model once:"
+            f" ollama pull {cfg.embedding_model}, then: netlog-ai rag index"))
     steps += [
-        "  7. Nightly backup (cron):",
+        step("Nightly backup (cron):"),
         f"       0 3 * * * netlog-ai backup --keep {cfg.backup_keep}",
         "     (snapshots AI_LOG_ANALYZER_STATE_DB; restore with netlog-ai restore --force)",
-        "  8. Prometheus scrape of the tool itself:",
+        step("Prometheus scrape of the tool itself:"),
         "       metrics_path: /api/metrics",
         f"       targets: ['{cfg.host}:{cfg.port}']   # job_name: netlog-ai; add a",
         "       # viewer Bearer token under authorization: when RBAC is on",
         "       # (Grafana dashboard: grafana/netlog-ai.json)",
     ]
-    if out_dir not in (".", ""):
-        steps.insert(2, f"     (config directory: {out_dir})")
     return "\n".join(steps)
 
 
