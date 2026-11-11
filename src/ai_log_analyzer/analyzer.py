@@ -583,7 +583,7 @@ def _finalize_action_items(seen: dict, llm_top_n: int = 3,
         # Only when every event of the group is a dependent alert: a sample cut
         # at _MAX_GROUP_ENTITIES, or events without an entity, cannot be judged.
         if ents and None not in ids and not b.get("plain") and not b.get("capped"):
-            roots[k] = sorted(ids)[0]
+            roots[k] = sorted(e for e in ids if e is not None)[0]
     sorted_keys = sorted(
         seen.keys(),
         key=lambda k: (SEV_ORDER.get(k[0], 5), 1 if k in roots else 0,
