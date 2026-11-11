@@ -26,6 +26,37 @@ The database holds:
   lines nor drop each other's records. The lock is POSIX only; on Windows the
   JSONL writes stay unlocked.
 
+## Backup & restore
+
+The state database is the whole incident history — back it up nightly:
+
+```bash
+# Daily snapshot, keep the newest 7 copies (default destination: <db dir>/backups)
+0 3 * * * netlog-ai backup --keep 7
+# Explicit destination (or AI_LOG_ANALYZER_BACKUP_DIR):
+0 3 * * * netlog-ai backup --dest /var/backups/netlog-ai --keep 14
+```
+
+`netlog-ai backup` takes a consistent snapshot with the SQLite online
+backup API, so it runs while the workers are alive, verifies the copy
+with `PRAGMA integrity_check`, and rotates old copies. A backup is a
+plain SQLite file named `<db>-YYYYMMDD-HHMMSS.db`.
+
+Restore replaces the database — **stop the web workers and the triage
+worker first**, or a live writer keeps writing to the replaced file:
+
+```bash
+systemctl stop netlog-ai        # or however the workers run
+netlog-ai restore /var/lib/netlog-ai/backups/state-20261110-030000.db --force
+systemctl start netlog-ai
+```
+
+`--force` is required when a database already exists at the target; the
+replaced database is checkpointed first and kept as a
+`.pre-restore-<timestamp>` safety copy next to it. Without `--force`,
+restore refuses to overwrite and exits 1. Verify after a restore with
+`netlog-ai doctor` and by opening the dashboard.
+
 ## Syslog listener
 
 | `extra` key / env | Default | Meaning |

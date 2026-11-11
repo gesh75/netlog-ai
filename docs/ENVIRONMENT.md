@@ -97,6 +97,7 @@ tokenization) are shared across workers through the state DB, API keys never are
 | Variable | Default | Purpose / notes |
 | --- | --- | --- |
 | `AI_LOG_ANALYZER_STATE_DB` | unset | Shared SQLite (WAL) file for the syslog spool, incident memory, audit log, retrieval index and runtime toggles. Required for multi-worker deployments and the streaming triage worker. |
+| `AI_LOG_ANALYZER_BACKUP_DIR` | `<db dir>/backups` | Destination directory for `netlog-ai backup` snapshots (see `docs/OPERATIONS.md`, Backup & restore). |
 | `AI_LOG_ANALYZER_SQLITE_SYNC` | SQLite default | **(new in 2.2.0)** SQLite `synchronous` level (`OFF`, `NORMAL`, `FULL`) for the state DB; trade durability against write speed. |
 | `AI_LOG_ANALYZER_SYSLOG_SPOOL` | the state DB | Separate syslog spool DB. |
 | `AI_LOG_ANALYZER_INCIDENT_STORE` | unset | Incident journal: a `*.jsonl` path, or a `*.db`/`*.sqlite` path. Falls back to the state DB. Local only, bounded. |

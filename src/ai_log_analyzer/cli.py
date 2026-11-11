@@ -475,6 +475,45 @@ def cmd_remediation(args: argparse.Namespace) -> int:
     return 0
 
 
+def _state_db_path(args: argparse.Namespace) -> str | None:
+    """``--db`` or ``AI_LOG_ANALYZER_STATE_DB``; None when neither is set."""
+    return getattr(args, "db", None) or os.environ.get("AI_LOG_ANALYZER_STATE_DB", "").strip() or None
+
+
+def cmd_backup(args: argparse.Namespace) -> int:
+    """Snapshot the state database (SQLite backup API) and rotate old copies."""
+    from ai_log_analyzer.backup import backup_database
+
+    db_path = _state_db_path(args)
+    if not db_path:
+        print("error: no state database — pass --db or set AI_LOG_ANALYZER_STATE_DB", file=sys.stderr)
+        return 2
+    try:
+        dest = backup_database(db_path, dest_dir=getattr(args, "dest", None), keep=args.keep)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"backup written: {dest}")
+    return 0
+
+
+def cmd_restore(args: argparse.Namespace) -> int:
+    """Replace the state database with a verified backup (workers must be stopped)."""
+    from ai_log_analyzer.backup import restore_database
+
+    db_path = _state_db_path(args)
+    if not db_path:
+        print("error: no state database — pass --db or set AI_LOG_ANALYZER_STATE_DB", file=sys.stderr)
+        return 2
+    try:
+        target = restore_database(args.backup, db_path, force=args.force)
+    except (FileNotFoundError, ValueError, FileExistsError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"restored: {target} (from {args.backup})")
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Local self-check (Python, packages, writable stores, environment); no network calls."""
     from ai_log_analyzer import doctor
@@ -654,6 +693,19 @@ def main() -> None:
     dr.add_argument("--json", action="store_true", help="Machine-readable output")
     dr.add_argument("-v", "--verbose", action="store_true", help="Also list optional features that are not configured")
     dr.set_defaults(func=cmd_doctor)
+
+    bk = sub.add_parser("backup", help="Snapshot the state database (SQLite backup API) and rotate old copies")
+    bk.add_argument("--db", help="State database (default: AI_LOG_ANALYZER_STATE_DB)")
+    bk.add_argument("--dest", help="Backup directory (default: AI_LOG_ANALYZER_BACKUP_DIR or <db dir>/backups)")
+    bk.add_argument("--keep", type=int, default=7, help="Newest copies to keep (default 7)")
+    bk.set_defaults(func=cmd_backup)
+
+    rs = sub.add_parser("restore", help="Replace the state database with a verified backup (stop the workers first)")
+    rs.add_argument("backup", help="Backup file to restore from")
+    rs.add_argument("--db", help="State database (default: AI_LOG_ANALYZER_STATE_DB)")
+    rs.add_argument("--force", action="store_true",
+                    help="Replace an existing database (keeps a .pre-restore-<timestamp> safety copy)")
+    rs.set_defaults(func=cmd_restore)
 
     mp = sub.add_parser("mcp", help="Run as an MCP server (for Claude Code / Cursor / Continue)")
     mp.add_argument("--transport", default="stdio", choices=["stdio", "streamable-http", "sse"],
