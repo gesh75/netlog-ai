@@ -78,10 +78,17 @@ def api_status_overview():
             triage["tickets"] = db.triage_count()
         except Exception:
             pass
+    backpressure: dict = {"enabled": False, "sources": [], "total_drops": 0, "warning": False}
+    if db is not None:
+        try:
+            backpressure = db.backpressure_status()
+        except Exception:
+            pass
     actor = audit.current_actor()
     return jsonify({
         "generated_at": now,
         "spool": spool,
+        "backpressure": backpressure,
         "triage": triage,
         "llm": llm.egress_policy(),
         "identity": {"name": actor.name, "role": actor.role,

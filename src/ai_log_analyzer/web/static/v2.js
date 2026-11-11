@@ -140,6 +140,7 @@ const NV2 = (() => {
       return;
     }
     paintSpool(s.spool || {});
+    paintBackpressure(s.backpressure || {});
     paintTriage(s.triage || {});
     paintEgress(s.llm || {});
     paintVault((s.llm || {}).last_call || {});
@@ -166,6 +167,18 @@ const NV2 = (() => {
       ...sources.map((x) => `${x.source}: ${x.rows} rows, newest ${ago(x.age_s)}`),
       ...listeners, sp.error ? `error: ${sp.error}` : ""].filter(Boolean).join("\n");
     chipState("spool-badge", sp.error ? "crit" : newest != null && newest < 300 && !lossy ? "ok" : "warn", title);
+  }
+
+  // Persisted drop counters (P3): unlike the live listener stats above, these
+  // survive a listener restart and are visible from every worker. When any
+  // lines were lost, the spool chip turns critical — the loss is the warning.
+  function paintBackpressure(bp) {
+    if (!bp || !bp.warning) return;
+    const lines = (bp.sources || []).filter((x) => x.total > 0).map((x) => `${x.source}: ${x.message || ""}`);
+    chipText("spool-badge", `Spool: dropping! ${human(bp.total_drops || 0)} lost`);
+    chipState("spool-badge", "crit",
+      ["Syslog backpressure — the kernel or the spool queue dropped lines; raise net.core.rmem_max / SO_RCVBUF or slow the senders",
+        ...lines].join("\n"));
   }
 
   function paintTriage(t) {

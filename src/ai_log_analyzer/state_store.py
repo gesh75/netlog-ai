@@ -537,6 +537,34 @@ class StateDB:
         row = self.conn().execute("SELECT MAX(id) FROM syslog_spool WHERE source=?", (source,)).fetchone()
         return int(row[0] or 0)
 
+    # ── syslog backpressure (P3 item 13) ──────────────────────────────────
+    BACKPRESSURE_NS = "syslog-backpressure"
+
+    def backpressure_report(self, source: str, counters: dict[str, int]) -> None:
+        """Persist one listener's drop counters (kv, namespace ``syslog-backpressure``)."""
+        from ai_log_analyzer.backpressure import DROP_KEYS
+
+        record: dict[str, Any] = {key: max(0, int(counters.get(key, 0) or 0)) for key in DROP_KEYS}
+        system = counters.get("udp_rcvbuf_errors_system")
+        if system is not None:
+            record["udp_rcvbuf_errors_system"] = max(0, int(system))
+        record["at"] = time.time()
+        self.kv_set(self.BACKPRESSURE_NS, f"source:{source}", record)
+
+    def backpressure_status(self) -> dict[str, Any]:
+        """Per-source drop summaries for the dashboard, with an aggregate warning."""
+        from ai_log_analyzer.backpressure import summarize
+
+        out: dict[str, Any] = {"enabled": True, "sources": [], "total_drops": 0, "warning": False}
+        for key, value in self.kv_get_all(self.BACKPRESSURE_NS).items():
+            if not key.startswith("source:") or not isinstance(value, dict):
+                continue
+            summary = summarize(value)
+            out["sources"].append({"source": key[len("source:"):], **summary, "at": value.get("at")})
+            out["total_drops"] += summary["total"]
+        out["warning"] = out["total_drops"] > 0
+        return out
+
 
     # ── audit log (append-only, hash-chained) ───────────────────────────────
     _AUDIT_FIELDS = ("ts", "actor", "role", "action", "target", "outcome", "remote", "detail")

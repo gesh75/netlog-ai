@@ -87,6 +87,15 @@ def backup_database(db_path: str | Path, dest_dir: str | Path | None = None,
             dst_conn.close()
     finally:
         src_conn.close()
+    # A backup is a single self-contained file: drop WAL mode (inherited
+    # from the source header) so no -wal/-shm sidecars linger beside it.
+    plain = sqlite3.connect(str(dest))
+    try:
+        plain.execute("PRAGMA journal_mode=DELETE").fetchall()
+    finally:
+        plain.close()
+    for suffix in ("-wal", "-shm"):
+        Path(str(dest) + suffix).unlink(missing_ok=True)
     if not _integrity_ok(dest):
         dest.unlink(missing_ok=True)
         raise ValueError(f"backup failed integrity check: {dest}")

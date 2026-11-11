@@ -6,7 +6,10 @@ An asyncio event loop on one background thread serves:
   the kernel instead of dropped. The effective buffer is logged when the
   kernel clamps it (``net.core.rmem_max``) and kernel drops are counted
   (``udp_drops`` from ``SO_RXQ_OVFL`` on Linux; ``udp_rcvbuf_errors_system``
-  is the host-wide ``RcvbufErrors`` delta from ``/proc/net/snmp``).
+  is the host-wide ``RcvbufErrors`` delta from ``/proc/net/snmp``). Drop
+  counters are published to the shared state DB on every heartbeat
+  (``backpressure``) and audited when they first appear and at each further
+  +1,000, so the dashboard and the audit log show the loss.
 * **TCP / TLS** with any number of concurrent, non-blocking connections. A
   slow or idle sender never blocks the others. Per message, both RFC 6587
   framings are accepted: octet-counting (``<len> <msg>``, only when the body
@@ -657,6 +660,24 @@ class SyslogListenerSource:
             self._db.kv_set(_HEARTBEAT_NS, self.name, {"at": time.time(), "pid": os.getpid()})
         except Exception:
             log.debug("syslog %s: heartbeat write failed", self.name, exc_info=True)
+        self._publish_backpressure()
+
+    def _publish_backpressure(self) -> None:
+        """Persist drop counters + audit threshold crossings (P3 item 13).
+
+        Runs on the listener's heartbeat (every ~5 s); readers never publish,
+        so the counters always describe the worker that owns the socket.
+        """
+        if self._db is None or self.role != "listener":
+            return
+        from ai_log_analyzer.backpressure import DROP_KEYS, publish
+
+        counters = {key: int(self._stats.get(key, 0)) for key in DROP_KEYS}
+        if self.proto == "udp":
+            system = _system_udp_rcvbuf_errors()
+            if system is not None and self._snmp_base is not None:
+                counters["udp_rcvbuf_errors_system"] = max(0, system - self._snmp_base)
+        publish(self._db, self.name, counters)
 
     # ── LogSource interface ─────────────────────────────────────────────────
     def healthcheck(self) -> bool:
