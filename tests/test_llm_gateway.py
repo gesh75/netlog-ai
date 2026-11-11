@@ -32,6 +32,7 @@ def _isolated_llm_state(monkeypatch):
         "provider": "ollama",
         "anthropic_api_key": "sk-test-never-real",
         "xai_api_key": "xai-test-never-real",
+        "openai_api_key": "sk-test-never-real",
         "allow_cloud_fallback": False,
         "tokenize_hostnames": "auto",
         "last_errors": {},
@@ -50,7 +51,7 @@ class _Recorder:
 
     def __init__(self, monkeypatch, answers: dict[str, str | None]):
         self.calls: list[tuple[str, str, str]] = []
-        for name in ("ollama", "local", "claude", "grok"):
+        for name in ("ollama", "local", "claude", "grok", "openai"):
             monkeypatch.setitem(llm._PROVIDERS, name, self._fake(name, answers.get(name)))
         monkeypatch.setattr(llm, "_query_claude", self._fake("claude", answers.get("claude")))
 

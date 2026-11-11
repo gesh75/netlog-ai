@@ -29,7 +29,8 @@ def _isolated(monkeypatch):
     snap = copy.deepcopy(llm._state)
     llm._state.update({
         "enabled": True, "provider": "ollama", "anthropic_api_key": "sk-test-never-real",
-        "xai_api_key": "xai-test-never-real", "allow_cloud_fallback": False,
+        "xai_api_key": "xai-test-never-real", "openai_api_key": "sk-test-never-real",
+        "allow_cloud_fallback": False,
         "tokenize_hostnames": "auto", "last_errors": {}, "timeout": 120, "max_retries": 2,
     })
     monkeypatch.setattr(llm, "_sync_shared_state", lambda force=False: None)
@@ -88,13 +89,14 @@ MALFORMED = [
 
 
 @pytest.mark.parametrize("body", MALFORMED)
-@pytest.mark.parametrize("provider", ["ollama", "claude", "grok", "local"])
+@pytest.mark.parametrize("provider", ["ollama", "claude", "grok", "openai", "local"])
 def test_provider_returns_none_on_malformed_body(monkeypatch, provider, body):
     sess = _Session(_Resp(body))
     monkeypatch.setattr(llm, "_SESSION", sess)
     monkeypatch.setattr(llm, "_DOCKER_SOCKETS", [])
     fn = {"ollama": llm._query_ollama, "claude": llm._query_claude,
-          "grok": llm._query_grok, "local": llm._query_docker_runner}[provider]
+          "grok": llm._query_grok, "openai": llm._query_openai,
+          "local": llm._query_docker_runner}[provider]
     assert fn("sys", "user", 50) is None
 
 

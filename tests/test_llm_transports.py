@@ -33,6 +33,7 @@ def _isolated_llm_state(monkeypatch):
     snap = copy.deepcopy(llm._state)
     llm._state["anthropic_api_key"] = "sk-test-never-real"
     llm._state["xai_api_key"] = ""
+    llm._state["openai_api_key"] = ""
     monkeypatch.setattr(llm, "_SESSION", _NetworkTripwire())
     yield
     llm._state.clear()
@@ -250,9 +251,70 @@ def test_query_claude_only_never_falls_back(monkeypatch):
 def test_query_all_providers_fail_returns_none(monkeypatch):
     llm._state["enabled"] = True
     llm._state["provider"] = "ollama"
-    for name in ("ollama", "local", "claude", "grok"):
+    for name in ("ollama", "local", "claude", "grok", "openai"):
         monkeypatch.setitem(llm._PROVIDERS, name, lambda *a: None)
     assert llm.query("sys", "user") is None
+
+
+@pytest.mark.unit
+def test_query_falls_back_through_openai_last(monkeypatch):
+    # With cloud fallback allowed, openai is the last cloud provider tried.
+    llm._state["enabled"] = True
+    llm._state["provider"] = "ollama"
+    llm._state["allow_cloud_fallback"] = True
+    called: list[str] = []
+    for name in ("ollama", "local", "claude", "grok", "openai"):
+        monkeypatch.setitem(llm._PROVIDERS, name,
+                            lambda *a, _n=name: called.append(_n))
+    assert llm.query("sys", "user") is None
+    assert called == ["ollama", "local", "claude", "grok", "openai"]
+
+
+# ── openai transport ─────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_openai_without_key_never_posts(monkeypatch):
+    llm._state["openai_api_key"] = ""
+    sess = _Session()
+    monkeypatch.setattr(llm, "_SESSION", sess)
+    assert llm._query_openai("sys", "user", 100) is None
+    assert not sess.calls
+    assert "not configured" in llm._state["last_errors"]["openai"]
+
+
+@pytest.mark.unit
+def test_openai_success_uses_openai_compat(monkeypatch):
+    llm._state["openai_api_key"] = "sk-test"
+    sess = _Session(_Resp(200, {"choices": [{"message": {"content": "playbook"}}]}))
+    monkeypatch.setattr(llm, "_SESSION", sess)
+    assert llm._query_openai("sys", "user", 200) == "playbook"
+    call = sess.calls[0]
+    assert call["url"] == "https://api.openai.com/v1/chat/completions"
+    assert call["headers"]["Authorization"] == "Bearer sk-test"
+    assert call["json"]["model"] == llm._state["openai_model"]
+    assert "openai" not in llm._state["last_errors"]
+
+
+@pytest.mark.unit
+def test_openai_http_error_recorded(monkeypatch):
+    llm._state["openai_api_key"] = "sk-test"
+    monkeypatch.setattr(llm, "_SESSION", _Session(_Resp(401, text="invalid api key")))
+    assert llm._query_openai("sys", "user", 100) is None
+    assert "HTTP 401" in llm._state["last_errors"]["openai"]
+
+
+@pytest.mark.unit
+def test_query_openai_provider_tries_openai_first(monkeypatch):
+    llm._state["enabled"] = True
+    llm._state["provider"] = "openai"
+    llm._state["openai_api_key"] = "sk-test"
+    called: list[str] = []
+    monkeypatch.setitem(llm._PROVIDERS, "openai",
+                        lambda *a: called.append("openai") or "openai says hi")
+    monkeypatch.setitem(llm._PROVIDERS, "ollama",
+                        lambda *a: pytest.fail("fallback ran despite success"))
+    assert llm.query("sys", "user") == "openai says hi"
+    assert called == ["openai"]
 
 
 # ── OpenAI-shape extraction (docker model runner) ────────────────────────────

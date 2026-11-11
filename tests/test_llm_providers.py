@@ -14,11 +14,12 @@ def restore_state():
 
 
 @pytest.mark.unit
-def test_default_state_has_three_providers():
+def test_default_state_lists_all_providers():
     state = llm.get_state()
     ids = [p["id"] for p in state["providers_available"]]
     assert "ollama" in ids and "local" in ids and "claude" in ids
     assert "grok" in ids
+    assert "openai" in ids
 
 
 @pytest.mark.unit
@@ -72,6 +73,20 @@ def test_set_provider_grok_succeeds_with_key():
     llm._state["xai_api_key"] = "xai-test"
     ok, msg = llm.set_provider("grok")
     assert ok and msg == "grok"
+
+
+@pytest.mark.unit
+def test_set_provider_openai_requires_api_key():
+    llm._state["openai_api_key"] = ""
+    ok, msg = llm.set_provider("openai")
+    assert not ok and "OPENAI_API_KEY" in msg
+
+
+@pytest.mark.unit
+def test_set_provider_openai_succeeds_with_key():
+    llm._state["openai_api_key"] = "sk-test"
+    ok, msg = llm.set_provider("openai")
+    assert ok and msg == "openai"
 
 
 @pytest.mark.unit

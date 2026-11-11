@@ -33,7 +33,7 @@ def test_provider_never_sees_the_secret(monkeypatch, fid, text, secret):
         seen.append(user)
         return "ok"
 
-    for name in ("ollama", "local", "claude", "grok"):
+    for name in ("ollama", "local", "claude", "grok", "openai"):
         monkeypatch.setitem(llm._PROVIDERS, name, provider)
     prompt = f"Analyze this device config:\n{text}\nrouter-id 10.0.0.1\n"
     assert llm.query("sys", prompt) == "ok"
