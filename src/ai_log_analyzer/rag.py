@@ -596,7 +596,7 @@ class RagIndex:
                     f"SELECT id, kind, host, length FROM rag_docs WHERE id IN ({','.join('?' * len(part))})",
                     part):
                 meta_rows[row[0]] = row
-        scores: Counter = Counter()
+        scores: dict[int, float] = {}
         for term, doc_id, tf in postings:
             row = meta_rows.get(doc_id)
             if row is None:
@@ -607,12 +607,13 @@ class RagIndex:
             if kind in host_only and host_set and host not in host_set:
                 continue
             idf = math.log(1 + (n_docs - df[term] + 0.5) / (df[term] + 0.5))
-            scores[doc_id] += idf * tf * (_K1 + 1) / (tf + _K1 * (1 - _B + _B * length / avgdl))
+            scores[doc_id] = scores.get(doc_id, 0.0) + idf * tf * (_K1 + 1) / (tf + _K1 * (1 - _B + _B * length / avgdl))
         if host_set:
             for doc_id in scores:
                 if meta_rows[doc_id][2] in host_set:
                     scores[doc_id] *= 1 + host_boost
-        top = scores.most_common(k)
+        # Same order as Counter.most_common: score desc, ties in insertion order.
+        top = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:k]
         if not top:
             return []
         rows = {r[0]: r for r in conn.execute(
