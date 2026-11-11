@@ -152,7 +152,7 @@ def _infer_topology(rows: list[Any]) -> dict[str, Any]:
         for other in hosts:
             if not device or other == device or other not in message:
                 continue
-            pair = tuple(sorted((device, other)))
+            pair = (device, other) if device < other else (other, device)
             if pair not in seen:
                 seen.add(pair)
                 edges.append((device, other))
