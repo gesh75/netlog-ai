@@ -214,8 +214,12 @@ def _restamp_yearless(parsed: datetime, ref: datetime) -> datetime:
     return best
 
 
-def event_time(event: ClassifiedEvent, year: datetime | int | None = None) -> datetime | None:
+def event_time(event: Any, year: datetime | int | None = None) -> datetime | None:
     """Best-effort naive datetime for ``event``, or None if the stamp is unknown.
+
+    ``event`` is duck-typed: only its ``.timestamp`` attribute is read, so
+    callers may pass a ``SimpleNamespace(timestamp=...)`` anchor instead of
+    a full ``ClassifiedEvent`` (as ``analytics`` and ``entity_state`` do).
 
     A datetime ``year`` is a restamp anchor: wrap only at a Nov/Dec–Jan/Feb
     boundary so year-end rollovers stay chronological without inverting

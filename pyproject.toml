@@ -115,7 +115,6 @@ module = [
     "ai_log_analyzer.cli",
     "ai_log_analyzer.compliance",
     "ai_log_analyzer.correlate",
-    "ai_log_analyzer.entity_state",
     "ai_log_analyzer.judge",
     "ai_log_analyzer.llm",
     "ai_log_analyzer.mcp_server.server",
