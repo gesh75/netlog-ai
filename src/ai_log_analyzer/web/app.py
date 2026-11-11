@@ -27,11 +27,10 @@ import threading
 from collections.abc import Callable
 from functools import wraps
 
-from flask import Flask, abort, jsonify, make_response, request, send_from_directory
+from flask import Flask, abort, jsonify, make_response, request
 from flask_cors import CORS
 
 from ai_log_analyzer import (
-    __version__,
     audit,
     copilot,
     llm,
@@ -559,22 +558,6 @@ def create_app() -> Flask:
                 or path.endswith(".json")):
             response.headers["Cache-Control"] = "no-cache"
         return response
-
-    # ── UI ────────────────────────────────────────────────────────────────
-    @app.route("/")
-    def index():
-        return send_from_directory(str(STATIC_DIR), "index.html")
-
-    # ── Health + LLM control ──────────────────────────────────────────────
-    @app.route("/api/health", methods=["GET"])
-    def health():
-        return jsonify({
-            "ok": True,
-            "version": __version__,
-            "network_tool_available": network_tool.is_available(),
-            "auth": "rbac" if rbac.auth_enabled(API_TOKEN) else "dev",
-            "audit": audit.is_enabled(),
-        })
 
     @app.route("/api/llm/status", methods=["GET"])
     def llm_status():
@@ -1242,6 +1225,7 @@ def create_app() -> Flask:
         return jsonify({"query": q, "journal_size": len(store),
                         "matches": store.find_similar(q, top_n=top)})
 
+
     # ── Live tail (SSE) ────────────────────────────────────────────────────
     sse_lock = threading.Lock()
     sse_active = [0]
@@ -1740,91 +1724,6 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": str(exc)}), 400
         return jsonify(result.to_dict())
 
-    # Auto-load env-configured sources on app boot (idempotent).
-    # ── Dashboard status bar ──────────────────────────────────────────────
-    @app.route("/api/status/overview", methods=["GET"])
-    @require_role("viewer")
-    def api_status_overview():
-        """One cheap poll for the header: spool depth, triage worker, LLM egress
-        policy and vault stats, and who the caller is. No provider probing."""
-        import time as _time
-
-        from ai_log_analyzer.state_store import get_state_db
-        from ai_log_analyzer.triage_worker import get_worker
-
-        now = _time.time()
-        db = get_state_db()
-        spool: dict = {"enabled": db is not None, "sources": []}
-        if db is not None:
-            try:
-                for row in db.spool_stats():
-                    row["age_s"] = round(now - row["last_received_at"], 1) if row["last_received_at"] else None
-                    spool["sources"].append(row)
-                spool["rows"] = sum(r["rows"] for r in spool["sources"])
-            except Exception as exc:   # sqlite3.Error — the bar must still render
-                spool["error"] = str(exc)[:200]
-        for sid in source_manager.list_ids():
-            src = source_manager.get(sid)
-            if hasattr(src, "stats"):
-                try:
-                    spool.setdefault("listeners", []).append({"id": sid, **src.stats()})
-                except Exception:
-                    pass
-        worker = get_worker(create=False)
-        triage: dict = {"configured": db is not None, "running": False}
-        if worker is not None:
-            st = worker.status()
-            triage.update(running=st["running"], role=st["role"], sinks=st["sinks"],
-                          window_events=st["window_events"], totals=st["totals"],
-                          last_tick_at=(st.get("last_tick") or {}).get("at"),
-                          spool_gap_rows=st.get("spool_gap_rows", {}),
-                          pending_deliveries=st.get("pending_deliveries", 0),
-                          sink_state=st.get("sink_state", {}))
-        if db is not None:
-            try:
-                triage["tickets"] = db.triage_count()
-            except Exception:
-                pass
-        actor = audit.current_actor()
-        return jsonify({
-            "generated_at": now,
-            "spool": spool,
-            "triage": triage,
-            "llm": llm.egress_policy(),
-            "identity": {"name": actor.name, "role": actor.role,
-                         "auth": "rbac" if rbac.auth_enabled(API_TOKEN) else "dev"},
-            "audit": audit.is_enabled(),
-        })
-
-    # ── Identity + audit trail ────────────────────────────────────────────
-    @app.route("/api/whoami", methods=["GET"])
-    @require_role("viewer")
-    def api_whoami():
-        actor = audit.current_actor()
-        return jsonify({"name": actor.name, "role": actor.role,
-                        "auth": "rbac" if rbac.auth_enabled(API_TOKEN) else "dev"})
-
-    @app.route("/api/audit", methods=["GET"])
-    @require_role("admin")
-    def api_audit():
-        """Newest-first audit rows. Filters: ?actor=, ?action= (``*`` wildcard), ?since=, ?limit=."""
-        if not audit.is_enabled():
-            return jsonify({"enabled": False, "entries": [],
-                            "hint": "set AI_LOG_ANALYZER_STATE_DB or AI_LOG_ANALYZER_AUDIT_DB"})
-        try:
-            since = float(request.args.get("since") or 0)
-            limit = int(request.args.get("limit") or 100)
-        except ValueError:
-            return jsonify({"error": "since and limit must be numbers"}), 400
-        return jsonify({"enabled": True, "entries": audit.query(
-            limit=limit, actor=request.args.get("actor", ""), action=request.args.get("action", ""),
-            since=since)})
-
-    @app.route("/api/audit/verify", methods=["GET"])
-    @require_role("admin")
-    def api_audit_verify():
-        return jsonify(audit.verify())
-
     # ── Incident resolution (feeds retrieval precedents) ──────────────────
     @app.route("/api/incidents/<incident_id>/resolve", methods=["POST"])
     @require_role("operator", "incident.resolve", _body_fields("resolution"))
@@ -1960,6 +1859,16 @@ def create_app() -> Flask:
     def api_triage_stream_tick():
         """Run one triage tick now (useful for cron-style deployments)."""
         return jsonify(_worker_or_400().run_once())
+
+    # ── Blueprints ────────────────────────────────────────────────────────
+    # Route handlers live in ai_log_analyzer.web.blueprints (one module
+    # per area). Imported here, inside the factory, so the blueprint
+    # modules can import the shared helpers from this module without a
+    # circular import at package import time.
+    from ai_log_analyzer.web.blueprints import admin, auth, core
+    app.register_blueprint(admin.bp)
+    app.register_blueprint(auth.bp)
+    app.register_blueprint(core.bp)
 
     if _parse_bool(os.environ.get("AI_LOG_ANALYZER_TRIAGE_WORKER"), default=False):
         from ai_log_analyzer.triage_worker import get_worker
