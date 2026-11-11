@@ -26,6 +26,61 @@ The database holds:
   lines nor drop each other's records. The lock is POSIX only; on Windows the
   JSONL writes stay unlocked.
 
+## Setup wizard (`netlog-ai init`)
+
+A fresh install needs a handful of settings, not the ~90 variables in
+`docs/ENVIRONMENT.md`. The wizard asks for the essentials — state DB
+location, server bind, syslog source(s), LLM provider, RAG embeddings,
+backup retention — and writes a working `.env` file:
+
+```bash
+netlog-ai init                 # interactive, Enter keeps the default
+netlog-ai init --non-interactive --port 6060 --llm-provider openai --cloud-api-key "$OPENAI_API_KEY"
+```
+
+* **Interactive:** every question shows its default in brackets; Enter
+  keeps it, so the wizard is skippable question by question. Bad input
+  (a port out of range, a malformed URL, an invalid CIDR) is rejected
+  with a message and re-prompted. Cloud API keys and the API token are
+  read hidden (never echoed) and are optional — without a key the
+  provider simply reports unavailable in `/api/llm/status` and the
+  server still starts.
+* **Non-interactive / scripted:** `--non-interactive` takes every value
+  from flags (`--state-db`, `--host`, `--port`, `--llm-provider`,
+  `--ollama-url`, `--ollama-model`, `--cloud-api-key`,
+  `--allow-cloud-fallback`, `--syslog/--no-syslog`, `--syslog-bind`,
+  `--syslog-port`, `--syslog-allow`, `--snmp/--no-snmp`,
+  `--snmp-bind`, `--snmp-port`, `--snmp-community`,
+  `--embeddings/--no-embeddings`, `--embedding-model`,
+  `--hybrid-alpha`, `--triage/--no-triage`, `--backup-keep`,
+  `--api-token`) or from the environment when a flag is absent, so an
+  existing `.env` can be replayed. Invalid values exit 2 and write
+  nothing.
+* **Non-destructive:** an existing file is never overwritten silently —
+  interactive mode asks, `--non-interactive` refuses unless `--force`
+  is given. A file holding a secret (cloud key, API token) is chmodded
+  `0600`.
+* **What it writes:** only variables the app already reads (see
+  `docs/ENVIRONMENT.md`) — `ANALYZER_HOST`/`ANALYZER_PORT`,
+  `AI_LOG_ANALYZER_STATE_DB`, a `NETLOG_SOURCE_syslog_*` block (and a
+  `NETLOG_SOURCE_traps_*` block when SNMP is enabled), `LLM_PROVIDER`
+  (+ `OLLAMA_URL`/`OLLAMA_MODEL` or the provider's key variable),
+  `AI_LOG_ANALYZER_EMBEDDINGS`/`AI_LOG_ANALYZER_EMBEDDING_MODEL`/
+  `AI_LOG_ANALYZER_RAG_HYBRID_ALPHA`, `AI_LOG_ANALYZER_TRIAGE_WORKER`
+  when enabled, `AI_LOG_ANALYZER_API_TOKEN` when set.
+* **Next steps:** the wizard prints the exact commands to start the
+  server and check it — `netlog-ai serve`, then
+  `curl http://<host>:<port>/api/health` (expect HTTP 200) — plus
+  `netlog-ai doctor`, the nightly backup cron line
+  (`0 3 * * * netlog-ai backup --keep N`), the Prometheus scrape for
+  `/api/metrics`, and (for Ollama + embeddings) `ollama pull
+  nomic-embed-text` + `netlog-ai rag index`.
+* **Where the file is read from:** the server auto-loads `<project>/.env`
+  (the repo checkout root) and `~/.env`. The default output is `./.env`,
+  so run the wizard and the server from the same directory in a
+  checkout; with a pip install, load the file explicitly first:
+  `set -a; source /path/to/.env; set +a`.
+
 ## Backup & restore
 
 The state database is the whole incident history — back it up nightly:

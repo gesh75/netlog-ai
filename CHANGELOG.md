@@ -8,6 +8,17 @@ loose semantic versioning.
 
 ### Added
 
+- **Interactive setup wizard (v2.3.0, "if time"):** `netlog-ai init` asks for
+  the essentials (state DB, server bind, syslog/SNMP sources, LLM provider
+  incl. OpenAI, RAG embeddings, backup retention) and writes a working
+  `.env` — prompts with defaults, every question skippable, validated
+  answers, never overwrites an existing file without asking (`--force`).
+  `--non-interactive` takes values from flags or the environment for
+  scripted use; secrets are read hidden and land in a `0600` file. Prints
+  the exact next commands (`netlog-ai serve`, `curl …/api/health`,
+  backup cron, `/api/metrics` scrape). See `docs/OPERATIONS.md`
+  ("Setup wizard"). 62 tests in `tests/test_init_wizard.py` (validators,
+  rendered config, mocked-input prompt flow, CLI).
 - **SNMP trap receiver (v2.3.0 feature 1):** UDP listener (default `0.0.0.0:162`,
   kinds `snmp`) for SNMPv1/v2c/v3 traps — stdlib-only BER parser, v2c community
   check, v3/USM `noAuthNoPriv` and `authNoPriv` (RFC 3414 key localisation,
