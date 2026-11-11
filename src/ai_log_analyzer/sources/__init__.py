@@ -9,6 +9,7 @@ Built-in connectors (each registers itself on import):
   - splunk                  Splunk REST oneshot search
   - loki                    Grafana Loki query_range API
   - syslog                  UDP/TCP syslog listener with ring buffer
+  - snmp                    SNMP trap receiver (UDP 162, v1/v2c/v3) with ring buffer
   - librenms                LibreNMS REST API eventlog
   - servicenow              ServiceNow Table API (em_alert, incident, syslog)
   - solarwinds              SolarWinds Orion SWIS (parameterized SWQL) + Observability SaaS logs/alerts
@@ -24,6 +25,7 @@ from ai_log_analyzer.sources import (  # noqa: F401,E402
     librenms,
     loki,
     servicenow,
+    snmp,
     solarwinds,
     splunk,
     syslog,

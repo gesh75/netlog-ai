@@ -53,9 +53,12 @@ def next_audit_watermark(total: int, watermark: int) -> int | None:
     return candidate if candidate > watermark else None
 
 
-def publish(db: Any, source: str, counters: Mapping[str, int]) -> dict[str, Any] | None:
+def publish(db: Any, source: str, counters: Mapping[str, int],
+            *, action: str = "syslog_backpressure") -> dict[str, Any] | None:
     """Persist ``counters`` for ``source`` and audit threshold crossings.
 
+    ``action`` is the audit-log action (``syslog_backpressure`` for the
+    syslog listener, ``snmp_backpressure`` for the trap receiver).
     Returns the summary when anything changed since the last publish, else
     None. Never raises: a failed publish must not disturb the listener.
     """
@@ -72,7 +75,7 @@ def publish(db: Any, source: str, counters: Mapping[str, int]) -> dict[str, Any]
         if new_mark is not None:
             from ai_log_analyzer import audit
 
-            audit.record("syslog_backpressure", target=source, outcome="warning",
+            audit.record(action, target=source, outcome="warning",
                          detail={"total_drops": total,
                                  **{key: summary[key] for key in DROP_KEYS}})
             db.kv_set(BACKPRESSURE_NS, f"audited_up_to:{source}", new_mark)

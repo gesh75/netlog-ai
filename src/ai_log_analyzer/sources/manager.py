@@ -36,6 +36,7 @@ def _register_builtin_sources() -> None:
         librenms,
         loki,
         servicenow,
+        snmp,
         solarwinds,
         splunk,
         syslog,
