@@ -54,7 +54,7 @@ import sys
 import threading
 import time
 from collections import Counter, deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from ai_log_analyzer.classifier import LogEvent
@@ -326,15 +326,17 @@ class SyslogListenerSource:
             sock = self._sock
             try:
                 loop.add_reader(sock.fileno(), self._udp_readable)
-                closer = lambda: loop.remove_reader(sock.fileno())  # noqa: E731
+                # remove_reader() returns bool; the closer's return is discarded.
+                closer: Callable[[], object] = lambda: loop.remove_reader(sock.fileno())  # noqa: E731
             except NotImplementedError:   # Windows proactor loop: no drop counters on this path
                 transport, _ = await loop.create_datagram_endpoint(lambda: _UdpProtocol(self), sock=sock)
                 closer = transport.close
         else:
+            ssl_kwargs: dict[str, Any] = {"ssl_handshake_timeout": 10.0} if self._ssl else {}
             server = await asyncio.start_server(
                 self._handle_conn, sock=self._sock, ssl=self._ssl,
                 limit=self.max_frame + 64,
-                **({"ssl_handshake_timeout": 10.0} if self._ssl else {}),
+                **ssl_kwargs,
             )
             closer = server.close
         self._ready.set()
