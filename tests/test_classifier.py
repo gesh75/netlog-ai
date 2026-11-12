@@ -188,7 +188,7 @@ def test_inetd_does_not_shadow_higher_pattern():
 @pytest.mark.unit
 @pytest.mark.parametrize("msg,expected_sev,expected_cat", [
     ("fortios-wireless: 4-way handshake failed for client", "medium", "wireless"),
-    ("fortios-switch: port 3 link down detected", "high", "switch"),
+    ("fortios-switch: port 3 link down detected", "high", "switching"),
     ("fortios-ssl: certificate info is mismatched", "low", "security"),
     ("fortios-traffic: Connection Failed action=ip-conn", "low", "traffic"),
     ("fortios-system: admin-lockout triggered for user admin", "high", "security"),

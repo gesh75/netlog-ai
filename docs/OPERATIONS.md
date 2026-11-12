@@ -192,6 +192,8 @@ feed the same backpressure feed (audit action `snmp_backpressure`).
   ```
   then check the spool (`/api/status/overview` shows the `traps` source
   depth; Live Tail in the Logs tab lists `snmp` sources alongside `syslog`).
+  Inspect a single source — redacted config, healthcheck and recent buffered
+  events — with `GET /api/sources/<source_id>` (404 for an unknown id).
 * **Health:** `SnmpTrapSource.stats()` reports `received`, `traps`,
   `rejected_auth`, `parse_errors`, `dropped_unsupported`, `udp_drops` and
   the spool counters; `/api/metrics` exposes them as

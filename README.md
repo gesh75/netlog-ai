@@ -17,7 +17,7 @@
 
 > **Network logs in. Ranked actions out.** A local, dark-themed dashboard that classifies syslog from data-center, security and SD-WAN gear (Cisco IOS-XE / NX-OS / Catalyst SD-WAN, Juniper Junos, Arista EOS, Fortinet FortiOS, Palo Alto PAN-OS, plus FRR, SR Linux, SONiC, Cumulus), correlates it across vendors into root-cause incidents, and writes evidence-cited playbooks with guarded CLI and Ansible fixes.
 
-[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-2100%2B%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb) [![Try it on Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97_Try_it_on-Hugging%20Face-ffd21e)](https://huggingface.co/spaces/gesh75/netlog-ai)
+[![CI](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gesh75/netlog-ai/actions/workflows/ci.yml) ![Tests](https://img.shields.io/badge/tests-2352%20passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20vanilla%20JS-1f6feb) [![Try it on Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97_Try_it_on-Hugging%20Face-ffd21e)](https://huggingface.co/spaces/gesh75/netlog-ai)
 
 > 📓 Release **v2.3.0** — wire-level SNMP trap receiver (v1/v2c/v3 with USM key localization), hybrid semantic RAG with local embeddings (Ollama / nomic-embed-text), pluggable OpenAI provider (`gpt-4o-mini`) with automatic fallback, Prometheus `/api/metrics` and Grafana dashboard (`grafana/netlog-ai.json`), plus an interactive setup wizard (`netlog-ai init`). Details in [`CHANGELOG.md`](CHANGELOG.md); upgrade notes in [What's new in v2.0.0](#whats-new-in-v200). Every environment variable is listed in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md); report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
 
@@ -573,7 +573,7 @@ src/ai_log_analyzer/
 
 ## Tested & accessible
 
-- **2,100+ unit + integration tests** (pytest)
+- **2,352 unit + integration tests** (pytest)
 - Frontend audited across 8 review rounds:
   - WCAG-AA: `:focus-visible` rings, `aria-live` regions, `role=tablist/tab/tabpanel`, skip-to-main link, `prefers-reduced-motion` fallback
   - Responsive ≤ 1100px, PWA-ready (`theme-color`, `mobile-web-app-capable`, SVG favicon)

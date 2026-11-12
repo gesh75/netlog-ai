@@ -59,6 +59,38 @@ loose semantic versioning.
   degrades to exactly the previous BM25 ranking — never an error. See
   `docs/OPERATIONS.md` ("Retrieval index (RAG)") and `docs/ENVIRONMENT.md`.
 
+- **FortiOS classifier patterns:** Wi-Fi 4-way handshake failure / PSK
+  mismatch, FortiSwitch port link down or PoE fault, TLS SNI/certificate
+  mismatch, TCP/UDP connection timeout (`ip-conn`) and admin lockout, each
+  with a matching KB playbook entry (FortiSwitch patterns map to the
+  `switching` category). 24 tests in `tests/test_classifier.py`, 38 in
+  `tests/test_kb_playbook_mapping.py`.
+- **Source inspection route:** `GET /api/sources/<source_id>` returns one
+  source's redacted config, healthcheck and recent buffered events
+  (`recent_events_count`, `events`); unknown ids return 404
+  `{"ok": false, "error": "unknown source: <id>"}`. See
+  `docs/CONNECTORS.md` ("HTTP API"). Covered by
+  `tests/test_web_rbac_get_routes.py`.
+
+### Hardening
+
+- **P0 — CI gates:** mypy is now blocking in CI, `pip-audit` runs blocking,
+  coverage floor `--cov-fail-under=81`, socket tests marked `integration`,
+  accessibility audit advisory (made blocking in P1). All 9 pre-existing
+  mypy errors fixed with no `type: ignore`.
+- **P1 — accessibility & mypy debt:** all 6 AA blockers fixed, the a11y job
+  is now blocking, and all 22 modules cleared from mypy `ignore_errors`.
+- **P2 — web split:** `web/app.py` went from 2,003 to 632 lines; all 53
+  routes moved into 11 Flask Blueprint modules, URL map unchanged.
+- **P3 — durability:** backup/restore CLI (`netlog-ai backup` /
+  `restore`, SQLite online backup + integrity check, rotation, `--force`
+  safety copy), WAL discipline (64 MiB journal limit, passive checkpoint)
+  and backpressure signalling (drop counters on heartbeat, dashboard chip).
+- **P4 — observability:** `GET /api/metrics` in Prometheus format
+  (spool rows, dropped/ingested datagrams, LLM calls/latency, analysis
+  runs, uptime, build info), documented with a scrape example in
+  `docs/OPERATIONS.md`.
+
 ### Security
 
 - **Web:** the SSE live tail no longer accepts the API token in the URL (`?token=`), where request-line

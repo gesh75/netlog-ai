@@ -114,6 +114,7 @@ ai-log-analyzer analyze --source solarwinds --no-llm
 | Method | Path                                  | Description |
 |--------|---------------------------------------|-------------|
 | GET    | `/api/sources`                        | List registered sources + known connector kinds |
+| GET    | `/api/sources/<id>`                   | Inspect one source — redacted config, healthcheck, recent buffered events |
 | POST   | `/api/sources`                        | Register a new source (auth-required) |
 | DELETE | `/api/sources/<id>`                   | Remove a source (auth-required) |
 | POST   | `/api/sources/<id>/test`              | Healthcheck a source |

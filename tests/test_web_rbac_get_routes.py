@@ -81,7 +81,35 @@ def test_samples_do_not_expose_server_paths(client):
     assert str(web_app.SITES_DIR) not in sites and "sites_dir" not in sites
 
 
-# ── /api/sitedoc: llm=1 spends money, so it is operator-only ────────────────
+# ── /api/sources/<id> inspection ───────────────────────────────────────────
+
+def test_sources_get_returns_200_for_a_known_source(client, monkeypatch):
+    # Same registration pattern as the redaction test above (offline guard).
+    import socket
+    monkeypatch.setattr(socket, "getaddrinfo",
+                        lambda host, port, *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 0))])
+    source_manager.add(SourceConfig(
+        id="w3-get", type="loki", url="https://loki.example.test:3100/x",
+        api_token="tok-abc", auth_methods=("api_token",)))
+    try:
+        # healthcheck would reach the network; the route only needs its verdict.
+        monkeypatch.setattr(source_manager.get("w3-get"), "healthcheck", lambda: True)
+        r = client.get("/api/sources/w3-get", headers=_h(VIEW))
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["ok"] is True
+        assert body["source"]["id"] == "w3-get"
+        assert body["health"] == {"ok": True}
+        assert body["recent_events_count"] == 0
+        assert body["events"] == []
+    finally:
+        source_manager.remove("w3-get")
+
+
+def test_sources_get_returns_404_for_an_unknown_source(client):
+    r = client.get("/api/sources/no-such-source", headers=_h(VIEW))
+    assert r.status_code == 404
+    assert r.get_json() == {"ok": False, "error": "unknown source: no-such-source"}
 
 @pytest.fixture
 def llm_calls(monkeypatch):
