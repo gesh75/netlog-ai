@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import requests
 
 NETWORK_TOOL_URL = os.environ.get("NETWORK_TOOL_URL", "http://localhost:5757")
+NETWORK_TOOL_API_KEY = os.environ.get("NETWORK_TOOL_API_KEY", "")
 # Off by default: the docker-exec fallback runs commands inside lab containers via the host's Docker
 # socket, so it is opt-in (DOCKER_EXEC_FALLBACK=true).
 DOCKER_EXEC_FALLBACK = os.environ.get("DOCKER_EXEC_FALLBACK", "false").lower() == "true"
@@ -74,9 +75,11 @@ def run_command(hostname: str, command: str, timeout: float = 30.0) -> CommandRe
         return CommandResult(ok=False, hostname=hostname, command=command,
                              output="", error="Empty command")
     try:
+        headers = {"X-API-Key": NETWORK_TOOL_API_KEY} if NETWORK_TOOL_API_KEY else {}
         r = requests.post(
             f"{NETWORK_TOOL_URL.rstrip('/')}/api/run",
             json={"hostname": hostname, "raw": command},
+            headers=headers,
             timeout=timeout,
         )
     except requests.Timeout:
@@ -97,7 +100,7 @@ def run_command(hostname: str, command: str, timeout: float = 30.0) -> CommandRe
 
     output = data.get("output", data.get("stdout", ""))
     error = data.get("error", data.get("stderr", ""))
-    ok = bool(data.get("ok", not error))
+    ok = bool(data.get("ok", data.get("success", not error)))
 
     return CommandResult(
         ok=ok,
@@ -116,9 +119,13 @@ def fetch_running_config(hostname: str, platform: str = "frr", timeout: float = 
       2. If platform is FRR and (1) fails, fall back to `docker exec <container> vtysh ...`
     """
     cmd_map = {
-        "frr":   "vtysh -c 'show running-config'",
-        "junos": "show configuration | display set | no-more",
-        "eos":   "show running-config",
+        "frr":              "vtysh -c 'show running-config'",
+        "junos":            "show configuration | display set | no-more",
+        "eos":              "show running-config",
+        "srl":              "info",
+        "fortios":          "show",
+        "fortinet":         "show",
+        "fortinet_fortios": "show",
     }
     cmd = cmd_map.get(platform.lower(), cmd_map["frr"])
 

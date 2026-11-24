@@ -110,6 +110,10 @@ _state: dict[str, object] = {
     "openai_api_key":     os.environ.get("OPENAI_API_KEY", ""),
     "openai_model":       os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
     "openai_url":         os.environ.get("OPENAI_URL", "https://api.openai.com/v1"),
+    # Google Gemini (native generateContent REST API)
+    "gemini_api_key":     os.environ.get("GEMINI_API_KEY", ""),
+    "gemini_model":       os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+    "gemini_url":         os.environ.get("GEMINI_URL", "https://generativelanguage.googleapis.com/v1beta"),
     "timeout":            int(os.environ.get("LLM_TIMEOUT", "120")),
     # Data-egress policy: a local provider never falls back to a cloud API
     # (Claude / Grok / OpenAI) unless explicitly allowed.
@@ -147,9 +151,9 @@ def _state_dict(key: str) -> dict[str, object]:
     value = _state.get(key)
     return dict(value) if isinstance(value, dict) else {}
 
-_VALID_PROVIDERS = {"ollama", "local", "claude", "claude-only", "grok", "openai"}
+_VALID_PROVIDERS = {"ollama", "local", "claude", "claude-only", "grok", "openai", "gemini"}
 _LOCAL_PROVIDERS = frozenset({"ollama", "local"})
-_CLOUD_PROVIDERS = frozenset({"claude", "grok", "openai"})
+_CLOUD_PROVIDERS = frozenset({"claude", "grok", "openai", "gemini"})
 
 # Prompt budget (characters of user prompt) per provider. ~4 chars ≈ 1 token.
 # Local defaults assume a 16k-token context; raise them together with
@@ -161,6 +165,7 @@ _DEFAULT_PROMPT_BUDGET: dict[str, int] = {
     "claude": 600_000,
     "grok":   400_000,
     "openai": 400_000,
+    "gemini": 800_000,
 }
 _RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504, 529})
 # Response-shape errors from a provider that answered with something unexpected.
@@ -242,6 +247,8 @@ def get_state() -> dict[str, object]:
         "xai_key_set":         bool(_state["xai_api_key"]),
         "openai_model":        _state["openai_model"],
         "openai_key_set":      bool(_state["openai_api_key"]),
+        "gemini_model":        _state["gemini_model"],
+        "gemini_key_set":      bool(_state["gemini_api_key"]),
         "allow_cloud_fallback": bool(_state.get("allow_cloud_fallback")),
         "tokenize_hostnames":  _state.get("tokenize_hostnames", "auto"),
         "providers_available": _list_available_providers(),
@@ -328,6 +335,8 @@ def set_provider(provider: str) -> tuple[bool, str]:
         return False, "XAI_API_KEY not configured — cannot select grok provider"
     if p == "openai" and not _state["openai_api_key"]:
         return False, "OPENAI_API_KEY not configured — cannot select openai provider"
+    if p == "gemini" and not _state["gemini_api_key"]:
+        return False, "GEMINI_API_KEY not configured — cannot select gemini provider"
     _state["provider"] = p
     _publish_shared("provider", p)
     return True, p
@@ -436,7 +445,9 @@ def provider_order(provider: str | None = None) -> list[str]:
     elif p == "grok":
         order = ["grok", "ollama", "local", "claude", "openai"]
     elif p == "openai":
-        order = ["openai", "ollama", "local", "claude", "grok"]
+        order = ["openai", "ollama", "local", "claude", "grok", "gemini"]
+    elif p == "gemini":
+        order = ["gemini", "ollama", "local", "claude", "openai", "grok"]
     else:
         p = "ollama"
         order = ["ollama", "local", "claude", "grok", "openai"]
@@ -912,6 +923,52 @@ def _query_openai(system_prompt: str, user_prompt: str, max_tokens: int) -> str 
         return None
 
 
+def _query_gemini(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
+    """Google Gemini via native v1beta generateContent REST API."""
+    api_key = str(_state["gemini_api_key"])
+    if not api_key:
+        _record_error("gemini", "GEMINI_API_KEY not configured")
+        return None
+    base = str(_state["gemini_url"]).rstrip("/")
+    model = str(_state["gemini_model"])
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": 0.2,
+        },
+    }
+    try:
+        r = _post_with_retry(
+            "gemini",
+            f"{base}/models/{model}:generateContent?key={api_key}",
+            headers={"content-type": "application/json"},
+            json=payload,
+            timeout=_http_timeout(),
+        )
+        if r.status_code != 200:
+            _record_error("gemini", f"HTTP {r.status_code}: {r.text[:200]}")
+            return None
+        data = r.json()
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        text = "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict) and p.get("text")).strip()
+        if text:
+            _clear_error("gemini")
+            return text
+        _record_error("gemini", "Empty content in Gemini response")
+        return None
+    except requests.Timeout:
+        _record_error("gemini", f"Timeout after {_state['timeout']}s")
+        return None
+    except requests.RequestException as e:
+        _record_error("gemini", f"Connection error: {e}")
+        return None
+    except _MALFORMED as e:
+        _record_error("gemini", f"Malformed response from Gemini: {type(e).__name__}")
+        return None
+
+
 # ── Docker Model Runner (TCP + Unix socket) ──────────────────────────────────
 
 def _query_docker_runner(system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
@@ -1064,6 +1121,8 @@ def _list_available_providers() -> list[dict]:
          "model": _state["xai_model"]},
         {"id": "openai", "available": bool(_state["openai_api_key"]),
          "model": _state["openai_model"]},
+        {"id": "gemini", "available": bool(_state["gemini_api_key"]),
+         "model": _state["gemini_model"]},
     ]
 
 
@@ -1074,4 +1133,5 @@ _PROVIDERS: dict[str, Callable[[str, str, int], str | None]] = {
     "claude": _query_claude,
     "grok":   _query_grok,
     "openai": _query_openai,
+    "gemini": _query_gemini,
 }

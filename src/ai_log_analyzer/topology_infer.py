@@ -268,6 +268,13 @@ def extract_facts(hostname: str, platform: str, config_text: str) -> DeviceFacts
         ips.extend(m.group("ip") for m in _JUNOS_IF_HIER.finditer(config_text))
     elif plat in ("eos", "arista", "frr", "ios"):
         ips.extend(m.group("ip") for m in _EOS_IF_ADDR.finditer(config_text))
+    elif plat in ("fortios", "fortinet", "fortinet_fortios"):
+        for m in re.finditer(r'set\s+ip\s+(\d{1,3}(?:\.\d{1,3}){3})\s+(\d{1,3}(?:\.\d{1,3}){3})', config_text):
+            try:
+                net = ipaddress.IPv4Network(f"0.0.0.0/{m.group(2)}")
+                ips.append(f"{m.group(1)}/{net.prefixlen}")
+            except ValueError:
+                pass
     else:
         # Try both
         ips.extend(m.group("ip") for m in _JUNOS_IF_ADDR.finditer(config_text))
@@ -401,6 +408,24 @@ def extract_facts(hostname: str, platform: str, config_text: str) -> DeviceFacts
         nt_m = _OSPF_IF_NETWORK.search(body)
         if nt_m:
             info.ospf_network_type = nt_m.group("nt")
+
+    if plat in ("fortios", "fortinet", "fortinet_fortios"):
+        # Parse FortiOS `config system interface` -> `edit "<name>" ... next`
+        for blk in re.finditer(r'^\s*edit\s+"([^"]+)"\s*\n([\s\S]*?)^\s*next\b', config_text, re.MULTILINE):
+            iname, body = blk.group(1), blk.group(2)
+            m_ip = re.search(r'set\s+ip\s+(\d{1,3}(?:\.\d{1,3}){3})\s+(\d{1,3}(?:\.\d{1,3}){3})', body)
+            m_desc = re.search(r'set\s+description\s+"([^"]+)"', body)
+            if m_ip or m_desc:
+                info = interfaces.setdefault(iname, IfaceInfo(name=iname))
+                if m_ip:
+                    try:
+                        net = ipaddress.IPv4Network(f"0.0.0.0/{m_ip.group(2)}")
+                        info.ip = f"{m_ip.group(1)}/{net.prefixlen}"
+                    except ValueError:
+                        pass
+                if m_desc:
+                    info.description = m_desc.group(1).strip()
+                    descs.append(info.description)
 
     # Speed inference from interface name — only when no explicit speed was set.
     # Skipped for vendor-agnostic names (Ethernet1, eth1, ethernet-1/X) since

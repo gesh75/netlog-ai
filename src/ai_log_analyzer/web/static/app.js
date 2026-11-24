@@ -1202,7 +1202,8 @@ function renderAction(action, devices) {
   const platforms = Object.keys(cliDict);
 
   // Platform selector (only show if multiple)
-  let activePlatform = pickDefaultPlatform(platforms);
+  const devList = action.devices || [];
+  let activePlatform = pickDefaultPlatform(platforms, devList);
   const codeEl = el("code");
   const setCode = (txt) => { clear(codeEl); codeEl.appendChild(highlightCli(txt || "(no command for platform)")); };
   setCode(cliDict[activePlatform]);
@@ -1304,12 +1305,15 @@ function renderAction(action, devices) {
   return card;
 }
 
-function pickDefaultPlatform(platforms) {
-  // Prefer FRR for lab demo, then junos, then eos, then anything
-  for (const p of ["frr", "junos", "eos", "any"]) {
+function pickDefaultPlatform(platforms, devices = []) {
+  const isForti = (devices || []).some((d) => /forti|fgt/i.test(String(d || "")));
+  const order = isForti
+    ? ["fortios", "fortinet", "fortinet_fortios", "any", "frr", "junos", "eos"]
+    : ["frr", "junos", "eos", "fortios", "any"];
+  for (const p of order) {
     if (platforms.includes(p)) return p;
   }
-  return platforms[0] || "frr";
+  return platforms[0] || (isForti ? "fortios" : "frr");
 }
 
 function pickDefaultHost(devices) {

@@ -1323,6 +1323,7 @@
             <option value="claude-only" title="Anthropic Claude only — no fallback">Claude Only</option>
             <option value="grok"        title="xAI Grok — sanitize-first, OpenAI-compatible">Grok (xAI)</option>
             <option value="openai"      title="OpenAI — gpt-4o-mini, sanitize-first">OpenAI</option>
+            <option value="gemini"      title="Google Gemini — gemini-3.5-flash-lite, sanitize-first">Gemini (Google)</option>
           </select>
           <label style="display:flex;align-items:center;gap:8px;text-transform:none;">
             <input id="use-llm" type="checkbox" checked style="width:auto;margin:0;">
@@ -1463,6 +1464,7 @@
                  autocomplete="off" spellcheck="false" autocapitalize="off">
           <label for="opt-platform">Platform</label>
           <select id="opt-platform" aria-label="Device platform">
+            <option value="fortios">FortiGate (FortiOS)</option>
             <option value="frr">FRR</option>
             <option value="junos">Junos</option>
             <option value="eos">Arista EOS</option>
